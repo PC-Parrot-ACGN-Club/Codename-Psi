@@ -6,6 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 description = "Deterministic rules, match state, config models, input, and replay for Codename Psi"
 
+# Crate name `core` shadows `::core` in rustdoc; unit tests cover this crate.
+[lib]
+doctest = false
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

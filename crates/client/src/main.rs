@@ -1,4 +1,7 @@
-//! Bevy application entry point for Codename Psi.
+//! Bevy application entry point
+//!
+//! Owns windowing, rendering, and asset paths. Rules logic stays in `core`;
+//! networking stays behind the optional `net` feature.
 
 use bevy::prelude::*;
 
@@ -16,5 +19,6 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
+    // Minimal smoke startup: a 2D camera proves the Bevy app links and boots.
     commands.spawn(Camera2d);
 }

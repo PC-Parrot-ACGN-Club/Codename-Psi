@@ -96,10 +96,10 @@ GGRS 是 R2 的首选同步方案。最终依赖版本与 `bevy_ggrs` 集成方�
 
 - 每次推送与拉取请求执行 `cargo fmt --check`、`cargo test` 和 workspace 构建。
 - 本地开发与 CI 均通过 `rust-toolchain.toml` 使用 Rust `1.97.1`，工具链升级作为独立变更并运行完整 CI 矩阵。
-- 构建矩阵默认为 `x86_64-unknown-linux-gnu` 与 `x86_64-pc-windows-gnullvm`（与本地已装工具链对齐）。若后续出现只能用 MSVC 满足的依赖，再评估改切或增补 `x86_64-pc-windows-msvc`。`x86_64-apple-darwin` 待 macOS 目标启用后再加入。
+- 构建矩阵默认为 `x86_64-unknown-linux-gnu` 与 `x86_64-pc-windows-gnullvm`。若后续出现只能用 MSVC 满足的依赖，再评估改切或增补 `x86_64-pc-windows-msvc`。`x86_64-apple-darwin` 待 macOS 目标启用后再加入。
 - Bevy 图形窗口只纳入构建与最小启动冒烟测试；规则与同步测试保持无窗口运行，确保 CI 稳定。
-- CI 为首期上述两个 x86_64 目标分别打包免安装可执行文件并上传为构建产物。每个产物包含运行游戏所需的 `assets/` 目录与启动说明；产物名称含目标平台、架构和 Git 提交短 SHA。
-- 发布标签触发正式产物构建；常规分支构建产物用于测试与验收。
+- **当前 CI 实现：** `ubuntu-latest` 运行 `fmt`、`test` 与 `x86_64-unknown-linux-gnu` 构建（安装 Bevy 所需系统库）；`windows-latest` 运行 `x86_64-pc-windows-gnullvm` 构建。常规流水线验证编译与测试，免安装产物打包与上传延后到发布候选阶段。
+- 计划中的产物策略：为首期上述两个 x86_64 目标分别打包免安装可执行文件并上传为构建产物。每个产物包含运行游戏所需的 `assets/` 目录与启动说明；产物名称含目标平台、架构和 Git 提交短 SHA。发布标签触发正式产物构建；常规分支构建产物用于测试与验收。
 
 ## 8. 待后续决策
 
