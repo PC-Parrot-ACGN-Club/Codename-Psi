@@ -1,0 +1,30 @@
+[package]
+name = "client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bevy client: rendering, native UI, input, audio, and AI orchestration"
+
+[[bin]]
+name = "psi"
+path = "src/main.rs"
+
+[features]
+default = ["net"]
+# Enable LAN P2P support (R2). Keep optional so headless/CI builds can omit it.
+net = ["dep:net"]
+
+[dependencies]
+core = { workspace = true }
+net = { workspace = true, optional = true }
+
+bevy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ron = { workspace = true }
+anyhow = { workspace = true }
+directories = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,17 @@
+[package]
+name = "net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "GGRS session, UDP transport, handshake, and disconnect handling"
+
+[dependencies]
+core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+ggrs = { workspace = true }
+local-ip-address = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

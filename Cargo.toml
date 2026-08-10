@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/client",
+    "crates/net",
+]
+default-members = ["crates/client"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.97.1"
+
+[workspace.dependencies]
+# Internal crates
+core = { path = "crates/core" }
+net = { path = "crates/net" }
+
+# Engine / app — R1 needs 2D + native UI + audio; drop default `3d` to cut compile time.
+# Trim or extend these profiles as features are actually used.
+bevy = { version = "0.19", default-features = false, features = [
+    "2d",
+    "ui",
+    "audio",
+] }
+
+# Serialization (RON rules/characters/settings; JSON i18n)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ron = "0.12"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Deterministic RNG for match seeds, garbage columns, Fever boards
+rand = "0.10"
+rand_chacha = "0.10"
+
+# Platform config directory for persisted settings
+directories = "6"
+
+# R2 networking (exact bevy_ggrs integration locked after compatibility prototype)
+ggrs = { version = "0.13", features = ["sync-send"] }
+local-ip-address = "0.6"
+
+# Enable a small amount of optimization in the dev profile.
+[profile.dev]
+opt-level = 1
+debug = 0
+strip = "debuginfo"
+
+# Enable a large amount of optimization in the dev profile for dependencies.
+[profile.dev.package."*"]
+opt-level = 3
+debug = 0
+
+# Optimize release profile for minimal binary size
+[profile.release]
+opt-level = "z"       # Optimize for size
+lto = true            # Enable Link Time Optimization (LTO)
+codegen-units = 1     # Maximize size reduction (at the cost of slower compiles)
+panic = "abort"       # Remove panic unwinding code
+strip = true          # Strip all symbols from the binary
