@@ -1,6 +1,6 @@
 # 统一游戏动作与 Tick 输入 Spec
 
-**状态：** v1  
+**状态：** Confirmed  
 **主分类：** Component  
 **相关模块：** `core::input`  
 **关联文档：** [UI 交互动作 Spec](ui-action-input.md)、[TDD §3–§4](../../TDD.md)、[PRD §5.2](../../PRD.md)

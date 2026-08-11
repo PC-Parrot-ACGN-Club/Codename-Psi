@@ -1,6 +1,6 @@
 # 本地输入采样器 Spec
 
-**状态：** v1  
+**状态：** Confirmed  
 **主分类：** Component  
 **相关模块：** `client::input`  
 **关联文档：** [统一游戏动作与 Tick 输入 Spec](game-action-input.md)、[本地输入采样 Contract](../contract/local-input-sampling.md)、[TDD §3–§4](../../TDD.md)

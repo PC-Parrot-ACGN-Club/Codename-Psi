@@ -1,6 +1,6 @@
 # 应用状态机协作 Contract
 
-**状态：** v1  
+**状态：** Confirmed  
 **主分类：** Component Integration  
 **相关模块：** `client::app_state`、状态迁移请求方  
 **关联文档：** [应用状态机 Spec](../component/application-state-machine.md)、[游戏基础设施运行架构](../system/game-infrastructure-architecture.md)

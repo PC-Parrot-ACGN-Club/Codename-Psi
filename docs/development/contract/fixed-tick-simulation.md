@@ -1,6 +1,6 @@
 # 固定频率规则调度 Contract
 
-**状态：** v1  
+**状态：** Confirmed  
 **主分类：** Component Integration  
 **相关模块：** Bevy Schedule、`client::input`、`client::simulation`、后续 `core::MatchState`  
 **关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[应用状态机 Spec](../component/application-state-machine.md)、[游戏基础设施运行架构](../system/game-infrastructure-architecture.md)、[TDD §3–§4](../../TDD.md)

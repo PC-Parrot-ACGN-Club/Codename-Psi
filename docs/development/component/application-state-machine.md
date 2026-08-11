@@ -1,6 +1,6 @@
 # 应用状态机 Spec
 
-**状态：** v1 
+**状态：** Confirmed 
 **主分类：** Component  
 **相关模块：** `client::app_state`  
 **关联文档：** [游戏基础设施运行架构](../system/game-infrastructure-architecture.md)、[应用状态机协作 Contract](../contract/application-state-machine.md)、[TDD](../../TDD.md)、[PRD](../../PRD.md)

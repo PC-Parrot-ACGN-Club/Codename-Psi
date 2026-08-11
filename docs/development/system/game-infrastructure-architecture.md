@@ -1,6 +1,6 @@
 # 游戏基础设施运行架构
 
-**状态：** v1
+**状态：** Confirmed
 **主分类：** System  
 **相关模块：** `core`、`client`、`net`、Bevy 应用运行时  
 **关联文档：** [PRD](../../PRD.md)、[TDD](../../TDD.md)、[应用状态机 Spec](../component/application-state-machine.md)、[应用状态机协作 Contract](../contract/application-state-machine.md)、[固定频率规则调度 Contract](../contract/fixed-tick-simulation.md)

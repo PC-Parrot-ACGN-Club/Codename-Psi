@@ -1,6 +1,6 @@
 # 本地输入采样 Contract
 
-**状态：** v1
+**状态：** Confirmed
 **主分类：** Component Integration  
 **相关模块：** `client::input::LocalInputSampler`、`core::input`  
 **关联文档：** [本地输入采样器 Spec](../component/local-input-sampler.md)、[统一游戏动作与 Tick 输入 Spec](../component/game-action-input.md)、[TDD §3–§4](../../TDD.md)

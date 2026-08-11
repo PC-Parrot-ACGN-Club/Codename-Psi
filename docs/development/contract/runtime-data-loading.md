@@ -1,6 +1,6 @@
 # 版本化运行数据加载 Contract
 
-**状态：** v1  
+**状态：** Confirmed  
 **主分类：** Component Integration  
 **相关模块：** `client::data`、Bevy Asset、`core::config`、`assets/data`、`assets/i18n`  
 **关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[TDD §5](../../TDD.md)、[assets/README.md](../../../assets/README.md)

@@ -1,6 +1,6 @@
 # 本地化运行时 Spec
 
-**状态：** v1  
+**状态：** Confirmed  
 **主分类：** Component  
 **相关模块：** `client::i18n`  
 **关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[版本化运行数据加载 Contract](../contract/runtime-data-loading.md)、[TDD §5](../../TDD.md)、[PRD §5.3、§7](../../PRD.md)

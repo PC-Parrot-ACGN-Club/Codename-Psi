@@ -1,6 +1,6 @@
 # 本机用户设置 Spec
 
-**状态：** v1  
+**状态：** Confirmed  
 **主分类：** Component  
 **相关模块：** `client::settings`  
 **关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[PRD §5.2、§7](../../PRD.md)、[TDD §4–§5](../../TDD.md)
