@@ -34,6 +34,10 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
+      # game_core must stay buildable and testable without any platform runtime.
+      - name: cargo test -p game_core (crate isolation)
+        run: cargo test -p game_core
+
       - name: cargo test
         run: cargo test --workspace
 
