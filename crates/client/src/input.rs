@@ -6,7 +6,10 @@ use bevy::prelude::*;
 use game_core::input::{GameAction, PlayerActions};
 use serde::{Deserialize, Serialize};
 
-use crate::app_state::{AppState, AppTransitionCause, AppTransitionRequest};
+use crate::app_state::{
+    AppState, AppTransitionCause, AppTransitionRequest, AppTransitionRequests,
+    arbitrate_transitions,
+};
 use crate::settings::PlayerInputBindings;
 
 #[derive(Debug, Default)]
@@ -14,7 +17,28 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LocalInputSampler>();
+        app.init_resource::<LocalInputSampler>()
+            .add_systems(Update, submit_pause_request.before(arbitrate_transitions));
+    }
+}
+
+/// The fixed gamepad button that proposes a pause.
+///
+/// `Pause` is not a `UIAction` and not a `GameAction`: `client::input` proposes
+/// the state transition directly.
+#[must_use]
+pub fn fixed_pause_button() -> PhysicalInput {
+    PhysicalInput::gamepad("Start")
+}
+
+/// Forward a pending pause press edge straight to the state machine.
+pub fn submit_pause_request(
+    state: Res<State<AppState>>,
+    mut sampler: ResMut<LocalInputSampler>,
+    mut requests: ResMut<AppTransitionRequests>,
+) {
+    if let Some(request) = sampler.take_pause_request(*state.get()) {
+        requests.submit(request.target, request.cause);
     }
 }
 
@@ -145,8 +169,11 @@ impl LocalInputSampler {
             .remove(&(player, source.clone(), direction));
     }
 
-    pub fn press_pause(&mut self) {
-        self.pause_pending = true;
+    /// Record a press edge of the fixed pause button; other inputs are ignored.
+    pub fn press_pause(&mut self, source: &PhysicalInput) {
+        if *source == fixed_pause_button() {
+            self.pause_pending = true;
+        }
     }
 
     #[must_use]
