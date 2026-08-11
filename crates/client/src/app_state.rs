@@ -10,8 +10,28 @@ impl Plugin for AppStatePlugin {
         app.init_state::<AppState>()
             .init_resource::<AppTransitionRequests>()
             .init_resource::<AppTransitionDiagnostics>()
-            .add_systems(Update, arbitrate_transitions);
+            .configure_sets(
+                Update,
+                (AppTransitionSet::Request, AppTransitionSet::Arbitrate).chain(),
+            )
+            .add_systems(
+                Update,
+                arbitrate_transitions.in_set(AppTransitionSet::Arbitrate),
+            );
     }
+}
+
+/// Ordering contract for the single transition entry point.
+///
+/// Requesters join [`AppTransitionSet::Request`] instead of ordering
+/// themselves against the arbiter by name, so a new requester cannot forget
+/// the `.before(..)` and silently miss its submission cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub enum AppTransitionSet {
+    /// Where components submit an [`AppTransitionRequest`].
+    Request,
+    /// Where the arbiter validates, merges and commits exactly one target.
+    Arbitrate,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
@@ -78,6 +98,24 @@ pub const fn is_valid_transition(from: AppState, to: AppState) -> bool {
     )
 }
 
+/// Declared precedence between causes that can conflict in one cycle.
+///
+/// Each entry reads "the first cause wins over the second". Conflicts outside
+/// this table are rejected rather than resolved by declaration order, so a new
+/// state edge cannot silently inherit an arbitrary winner: adding an edge that
+/// can conflict means adding its rule here.
+const CAUSE_PRECEDENCE: [(AppTransitionCause, AppTransitionCause); 1] = [(
+    AppTransitionCause::MatchCompleted,
+    AppTransitionCause::PauseRequested,
+)];
+
+/// Whether `winner` is declared to take precedence over `loser`.
+fn takes_precedence(winner: AppTransitionCause, loser: AppTransitionCause) -> bool {
+    CAUSE_PRECEDENCE
+        .iter()
+        .any(|(high, low)| *high == winner && *low == loser)
+}
+
 pub fn arbitrate_transitions(
     state: Res<State<AppState>>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -85,46 +123,51 @@ pub fn arbitrate_transitions(
     mut diagnostics: ResMut<AppTransitionDiagnostics>,
 ) {
     let current = *state.get();
-    let mut valid = Vec::new();
+    let mut valid: Vec<AppTransitionRequest> = Vec::new();
 
     for request in requests.pending.drain(..) {
+        // A same-state request ends here: it is a no-op, not an invalid edge.
         if request.target == current {
             continue;
         }
-        if is_valid_transition(current, request.target) {
-            if !valid.contains(&request) {
-                valid.push(request);
-            }
-        } else {
-            diagnostics.0.push(AppTransitionDiagnostic::InvalidEdge {
+        if !is_valid_transition(current, request.target) {
+            let diagnostic = AppTransitionDiagnostic::InvalidEdge {
                 from: current,
                 to: request.target,
-            });
+            };
+            warn!("rejected transition request: {diagnostic:?}");
+            diagnostics.0.push(diagnostic);
+            continue;
+        }
+        // Requests for the same target merge into one transition.
+        if !valid.iter().any(|kept| kept.target == request.target) {
+            valid.push(request);
         }
     }
 
-    let selected = valid.iter().copied().find(|request| {
-        request.cause == AppTransitionCause::MatchCompleted && request.target == AppState::Result
-    });
-    let unique_targets: Vec<_> = valid.iter().map(|request| request.target).collect();
-    let selected = selected.or_else(|| {
-        unique_targets
-            .first()
-            .copied()
-            .filter(|target| unique_targets.iter().all(|other| other == target))
-            .and_then(|target| {
-                valid
-                    .iter()
-                    .copied()
-                    .find(|request| request.target == target)
-            })
+    let [first, ..] = valid.as_slice() else {
+        return;
+    };
+    if valid.len() == 1 {
+        next_state.set(first.target);
+        return;
+    }
+
+    // Distinct targets: commit only when exactly one cause outranks every other.
+    let mut winners = valid.iter().filter(|candidate| {
+        valid.iter().all(|other| {
+            other.target == candidate.target || takes_precedence(candidate.cause, other.cause)
+        })
     });
 
-    if let Some(request) = selected {
-        next_state.set(request.target);
-    } else if unique_targets.len() > 1 {
-        diagnostics
-            .0
-            .push(AppTransitionDiagnostic::ConflictingTargets(unique_targets));
+    match (winners.next(), winners.next()) {
+        (Some(winner), None) => next_state.set(winner.target),
+        _ => {
+            let diagnostic = AppTransitionDiagnostic::ConflictingTargets(
+                valid.iter().map(|request| request.target).collect(),
+            );
+            warn!("rejected conflicting transition requests: {diagnostic:?}");
+            diagnostics.0.push(diagnostic);
+        }
     }
 }

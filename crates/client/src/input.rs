@@ -7,8 +7,7 @@ use game_core::input::{GameAction, PlayerActions};
 use serde::{Deserialize, Serialize};
 
 use crate::app_state::{
-    AppState, AppTransitionCause, AppTransitionRequest, AppTransitionRequests,
-    arbitrate_transitions,
+    AppState, AppTransitionCause, AppTransitionRequest, AppTransitionRequests, AppTransitionSet,
 };
 use crate::settings::PlayerInputBindings;
 
@@ -17,8 +16,10 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LocalInputSampler>()
-            .add_systems(Update, submit_pause_request.before(arbitrate_transitions));
+        app.init_resource::<LocalInputSampler>().add_systems(
+            Update,
+            submit_pause_request.in_set(AppTransitionSet::Request),
+        );
     }
 }
 

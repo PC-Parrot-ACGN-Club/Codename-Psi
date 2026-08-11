@@ -7,9 +7,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 
-use crate::app_state::{
-    AppState, AppTransitionCause, AppTransitionRequests, arbitrate_transitions,
-};
+use crate::app_state::{AppState, AppTransitionCause, AppTransitionRequests, AppTransitionSet};
 use crate::data::{DataCategory, DataErrorCause, DataLoadError, DataResolution, resolve_text};
 use crate::i18n::{
     DEFAULT_LOCALE, Localization, SUPPORTED_LOCALES, builtin_english_catalog, parse_catalog,
@@ -75,7 +73,7 @@ impl Plugin for BootstrapPlugin {
             .add_systems(
                 Update,
                 request_main_menu
-                    .before(arbitrate_transitions)
+                    .in_set(AppTransitionSet::Request)
                     .run_if(in_state(AppState::Boot)),
             );
     }
