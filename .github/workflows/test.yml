@@ -8,6 +8,8 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+# Runs docs/test/game-infrastructure.md TC-001~TC-048, TC-051~TC-059 on both
+# platforms; TC-056 (Linux) and TC-057 (Windows) are the startup smoke rows.
 jobs:
   test-linux:
     name: fmt + test (linux)
