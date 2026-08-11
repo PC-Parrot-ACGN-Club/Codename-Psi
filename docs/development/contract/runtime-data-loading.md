@@ -1,8 +1,8 @@
 # 版本化运行数据加载 Contract
 
-**状态：** Confirmed  
-**主分类：** Component Integration  
-**相关模块：** `client::data`、Bevy Asset、`core::config`、`assets/data`、`assets/i18n`  
+**状态：** Confirmed
+**主分类：** Component Integration
+**相关模块：** `client::data`、Bevy Asset、`game_core::config`、`assets/data`、`assets/i18n`
 **关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[TDD §5](../../TDD.md)、[assets/README.md](../../../assets/README.md)
 
 ## 目的
@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | `client::data` | 资源路径、加载生命周期、错误上下文、fallback 和运行时注册 | Bevy Asset、对应解析器 |
 | Bevy Asset | 资源读取和生命周期基础设施 | `assets/` 路径 |
-| `core::config` | 从内存文本/字节解析 core typed model、schema/version 校验 | `serde`、RON/JSON |
+| `game_core::config` | 从内存文本/字节解析 game_core typed model、schema/version 校验 | `serde`、RON/JSON |
 | client 专用解析器 | 解析本地化等 client 数据 | 对应 source text/bytes |
 | 功能消费者 | 使用已解析或 fallback 的 typed data | 数据已经 resolved |
 
@@ -48,7 +48,7 @@ enum DataResolution<T> {
 
 1. `client::data` 请求目标资源。
 2. Bevy Asset 从项目 `assets/` 路径读取 source text/bytes。
-3. source 交给 `core::config` 或对应 client parser。
+3. source 交给 `game_core::config` 或对应 client parser。
 4. parser 反序列化并检查 `schema_version` 与已定义语义约束。
 5. 成功时生成 `Loaded(typed_data)`。
 6. 失败时生成 typed `DataLoadError`，并由 `client::data` 选择该数据类别的内置默认值，形成 `Fallback { value, error }`。
@@ -64,7 +64,7 @@ enum DataResolution<T> {
 - `UnsupportedSchema`：schema 版本不受支持；
 - `InvalidData`：结构可解析但违反已确认语义约束。
 
-`core::config` 返回领域解析错误；`client::data` 增加：
+`game_core::config` 返回领域解析错误；`client::data` 增加：
 
 - resource path；
 - data category；
@@ -95,7 +95,7 @@ failure
 
 - `client::data`：拥有 asset 路径、加载状态、fallback 和错误上下文。
 - Bevy Asset：提供客户端运行时资源读取能力。
-- `core::config`：只处理调用方传入的内存内容，不访问文件系统或 Bevy。
+- `game_core::config`：只处理调用方传入的内存内容，不访问文件系统或 Bevy。
 - 数据模型方：版本化数据包含明确 schema 版本。
 - 消费者：只使用 resolved typed data。
 - fallback：始终使用内置默认值，并保留原始错误。
@@ -127,13 +127,13 @@ Issue #11 只固定：
 - `Io`、`Parse`、`UnsupportedSchema`、`InvalidData` 均可得到带资源上下文的 `DataLoadError`。
 - 任一加载失败可以使用对应内置默认值形成 `Fallback`。
 - fallback 后消费者仍能取得 typed data，同时诊断可以读取原始错误。
-- `core` 解析器可以完全基于内存输入测试。
+- `game_core` 解析器可以完全基于内存输入测试。
 - 规则、角色和 Fever 的完整 schema 可以在后续任务中沿用同一加载边界。
 
 ## Test Basis
 
 - [Confirmed] Issue #11：要求规则、角色、本地化数据加载路径、版本检查和可理解加载错误。
-- [Confirmed] TDD §2：`core` 不依赖文件系统，`client` 负责客户端运行时。
+- [Confirmed] TDD §2：`game_core` 不依赖文件系统，`client` 负责客户端运行时。
 - [Confirmed] TDD §5：定义 RON/JSON 路径、schema、本地化、设置和加载错误方向。
 - [Confirmed] assets/README.md：每个版本化数据文件包含 `schema_version`，loader 拒绝未知/不支持版本；stub 仅作解析 fixture。
 - [Confirmed] 当前审核结论：使用 Bevy Asset；`DataLoadError` 增加资源上下文；加载失败统一使用内置默认值 fallback；完整玩法 schema 延后定义。

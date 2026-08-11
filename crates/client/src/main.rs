@@ -1,9 +1,10 @@
 //! Bevy application entry point
 //!
-//! Owns windowing, rendering, and asset paths. Rules logic stays in `core`;
+//! Owns windowing, rendering, and asset paths. Rules logic stays in `game_core`;
 //! networking stays behind the optional `net` feature.
 
 use bevy::prelude::*;
+use client::GameInfrastructurePlugin;
 
 fn main() {
     App::new()
@@ -14,6 +15,7 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(GameInfrastructurePlugin)
         .add_systems(Startup, setup)
         .run();
 }

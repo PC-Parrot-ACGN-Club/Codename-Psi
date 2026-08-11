@@ -1,8 +1,8 @@
 # 游戏基础设施运行架构
 
 **状态：** Confirmed
-**主分类：** System  
-**相关模块：** `core`、`client`、`net`、Bevy 应用运行时  
+**主分类：** System
+**相关模块：** `game_core`、`client`、`net`、Bevy 应用运行时
 **关联文档：** [PRD](../../PRD.md)、[TDD](../../TDD.md)、[应用状态机 Spec](../component/application-state-machine.md)、[应用状态机协作 Contract](../contract/application-state-machine.md)、[固定频率规则调度 Contract](../contract/fixed-tick-simulation.md)
 
 ## 目标与范围
@@ -13,10 +13,10 @@
 
 | 模块 | 职责 | 依赖方向 | 对外提供 |
 | --- | --- | --- | --- |
-| `core` | 保存纯规则领域类型、配置模型、统一游戏动作与后续确定性验证能力 | 无 Bevy、文件系统、窗口或网络依赖 | 规则数据模型、游戏动作、后续 `MatchState` |
+| `game_core` | 保存纯规则领域类型、配置模型、统一游戏动作与后续确定性验证能力 | 无 Bevy、文件系统、窗口或网络依赖 | 规则数据模型、游戏动作、后续 `MatchState` |
 | `client::app_state` | 保存顶层应用状态与合法迁移语义 | 依赖 Bevy `States` | `AppState`、状态迁移入口、当前状态 |
-| `client` | 组织 Bevy 应用、输入、资源加载、本地化、设置、表现和本地功能 | `client → core`；需要时接入 `net` | Bevy App、运行时资源和调度 |
-| `net` | 后续承载局域网会话、输入同步、状态校验和断线处理 | `net → core` | R2 网络会话能力 |
+| `client` | 组织 Bevy 应用、输入、资源加载、本地化、设置、表现和本地功能 | `client → game_core`；需要时接入 `net` | Bevy App、运行时资源和调度 |
+| `net` | 后续承载局域网会话、输入同步、状态校验和断线处理 | `net → game_core` | R2 网络会话能力 |
 | Bevy | 提供窗口、主循环、调度、States、设备输入、资源、渲染、UI 和音频 | 由 `client` 组合 | 应用运行时能力 |
 
 ## 主流程
@@ -87,11 +87,11 @@ settings == Resolved
 - `main.rs` 保持薄入口，由项目根插件组合基础设施能力。
 - `client::app_state` 是顶层应用阶段的单一状态所有者。
 - 其它 client 侧组件通过状态迁移入口提出请求，不直接维护平行的顶层阶段字段。
-- `core` 可在无窗口、无渲染、无网络、无文件系统环境中独立运行。
+- `game_core` 可在无窗口、无渲染、无网络、无文件系统环境中独立运行。
 - `client` 负责设备输入、文件/资源路径、Bevy ECS 和本机设置。
-- `net` 通过 `core` 的规则状态和游戏输入语义接入后续同步。
+- `net` 通过 `game_core` 的规则状态和游戏输入语义接入后续同步。
 - 规则推进使用 60Hz 固定调度；普通更新与渲染帧率不直接决定规则 tick。
-- 用户设置、渲染实体、音频、动画和网络 socket 不进入 `core` 的可回滚规则状态。
+- 用户设置、渲染实体、音频、动画和网络 socket 不进入 `game_core` 的可回滚规则状态。
 - 顶层 `AppState` 表达客户端宏观运行阶段；对局内部规则状态与网络连接生命周期使用各自的状态模型。
 
 ## 自动化启动验收
@@ -141,12 +141,12 @@ Linux 与 Windows 均运行复用项目根插件、无真实窗口依赖的最�
 - 顶层阶段由单一应用状态机管理，并可完成基础主路径状态切换。
 - 对局规则入口挂接到 60Hz 固定调度；普通 `Update` 频率不会改变 fixed tick 计数。
 - 进入 `Paused` 后对局 simulation 停止；恢复 `Match` 后从暂停前已有的规则状态继续推进。
-- `client` 可以使用 `core`，`net` 可以使用 `core`，`core` 不获得 Bevy、窗口、文件系统或网络依赖。
+- `client` 可以使用 `game_core`，`net` 可以使用 `game_core`，`game_core` 不获得 Bevy、窗口、文件系统或网络依赖。
 
 ## Test Basis
 
-- [Confirmed] Issue #11：要求 Bevy 0.19.x 运行时、明确应用状态、60Hz 固定更新、输入/资源/设置能力和 `core` / `client` / `net` 边界。
-- [Confirmed] TDD §2：定义 workspace 职责和 `client → core`、`net → core` 依赖方向。
+- [Confirmed] Issue #11：要求 Bevy 0.19.x 运行时、明确应用状态、60Hz 固定更新、输入/资源/设置能力和 `game_core` / `client` / `net` 边界。
+- [Confirmed] TDD §2：定义 workspace 职责和 `client → game_core`、`net → game_core` 依赖方向。
 - [Confirmed] TDD §3–§5：定义固定 tick、Bevy States、配置、本地化和安全默认值。
 - [Confirmed] [固定频率规则调度 Contract](../contract/fixed-tick-simulation.md)：`FixedGameSet::Input` / `FixedGameSet::Rules` 只在 `AppState::Match` 中执行，`Paused` 停止对局模拟。
 - [Confirmed] 当前审核结论：`Boot` 作为设置与本地化的启动同步屏障；`main.rs` 保持薄入口；应用状态机为独立 Component；生产客户端与自动化 startup smoke 复用同一项目根插件（方案 A）；Production build 与 Automated startup smoke 的跨平台验收职责分开定义。

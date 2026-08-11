@@ -16,7 +16,7 @@ default = ["net"]
 net = ["dep:net"]
 
 [dependencies]
-core = { workspace = true }
+game_core = { workspace = true }
 net = { workspace = true, optional = true }
 
 bevy = { workspace = true }
@@ -24,6 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 ron = { workspace = true }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 directories = { workspace = true }
 
 [lints.rust]

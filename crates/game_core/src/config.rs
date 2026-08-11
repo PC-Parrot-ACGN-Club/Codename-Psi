@@ -31,6 +31,8 @@ pub enum ConfigError {
     Json(String),
     #[error("unsupported schema_version {found} (supported: {supported})")]
     UnsupportedSchema { found: u32, supported: u32 },
+    #[error("invalid data: {0}")]
+    InvalidData(String),
 }
 
 /// Parse a rules stub from a RON document string.

@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod input;
 
 /// Placeholder until the deterministic match state machine lands.
 #[derive(Debug, Clone, Default)]

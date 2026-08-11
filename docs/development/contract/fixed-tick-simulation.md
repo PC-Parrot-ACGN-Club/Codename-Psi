@@ -1,8 +1,8 @@
 # 固定频率规则调度 Contract
 
-**状态：** Confirmed  
-**主分类：** Component Integration  
-**相关模块：** Bevy Schedule、`client::input`、`client::simulation`、后续 `core::MatchState`  
+**状态：** Confirmed
+**主分类：** Component Integration
+**相关模块：** Bevy Schedule、`client::input`、`client::simulation`、后续 `game_core::MatchState`
 **关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[应用状态机 Spec](../component/application-state-machine.md)、[游戏基础设施运行架构](../system/game-infrastructure-architecture.md)、[TDD §3–§4](../../TDD.md)
 
 ## 目的
@@ -17,15 +17,15 @@
 | --- | --- | --- |
 | Bevy fixed schedule | 60Hz 固定执行机会 | Bevy 时间与调度 |
 | `client::input` | 当前 fixed tick 的 `TickInputs` | 本地采样、AI 或后续网络输入 |
-| `client::simulation` | fixed schedule 中的阶段组织与规则调用桥 | `core::input`、后续规则状态 |
-| `core::MatchState`（后续） | 确定性规则状态推进 | 当前规则状态、当前 tick 输入 |
+| `client::simulation` | fixed schedule 中的阶段组织与规则调用桥 | `game_core::input`、后续规则状态 |
+| `game_core::MatchState`（后续） | 确定性规则状态推进 | 当前规则状态、当前 tick 输入 |
 
 ## 数据契约
 
 | 数据 | 生产方 | 消费方 | 语义与约束 |
 | --- | --- | --- | --- |
 | `TickInputs` | 输入阶段 | 规则阶段 | 当前 fixed tick 的全部参与者逻辑输入 |
-| rule state | `core` | simulation / 后续消费者 | 只由 fixed 规则路径修改的对局状态 |
+| rule state | `game_core` | simulation / 后续消费者 | 只由 fixed 规则路径修改的对局状态 |
 
 ## 协作时序
 

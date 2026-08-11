@@ -1,8 +1,8 @@
 # 本机用户设置 Spec
 
-**状态：** Confirmed  
-**主分类：** Component  
-**相关模块：** `client::settings`  
+**状态：** Confirmed
+**主分类：** Component
+**相关模块：** `client::settings`
 **关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[PRD §5.2、§7](../../PRD.md)、[TDD §4–§5](../../TDD.md)、[UI 交互动作 Spec](ui-action-input.md)、[统一游戏动作与 Tick 输入 Spec](game-action-input.md)
 
 ## 目标
@@ -78,7 +78,7 @@
 
 固定绑定的动作不进入本行为的冲突检测范围。
 
-运行时采样中的逻辑动作冲突由 `core::input` 处理，与这里的绑定编辑冲突无关。
+运行时采样中的逻辑动作冲突由 `game_core::input` 处理，与这里的绑定编辑冲突无关。
 
 ## 平台目录
 

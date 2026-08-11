@@ -3,12 +3,12 @@
 **状态：** 通过
 **关联设计：** [游戏基础设施运行架构](../development/system/game-infrastructure-architecture.md)、[Component Specs](../development/component/)、[Component Integration Contracts](../development/contract/)
 
-**关联实现：** `../../crates/core`、`../../crates/client`、`../../crates/net`、`../../assets/data`、`../../assets/i18n`
+**关联实现：** `../../crates/game_core`、`../../crates/client`、`../../crates/net`、`../../assets/data`、`../../assets/i18n`
 
 ## 需求理解摘要
 
-**功能：** 建立 Bevy 客户端的应用状态、统一输入、60Hz 规则调度、版本化数据、本地化、用户设置与 workspace 职责边界。  
-**测试性质：** 新功能（含既有设计的补充变更）   
+**功能：** 建立 Bevy 客户端的应用状态、统一输入、60Hz 规则调度、版本化数据、本地化、用户设置与 workspace 职责边界。
+**测试性质：** 新功能（含既有设计的补充变更）
 **Test Basis：**
 
 - [Confirmed] [游戏基础设施运行架构](../development/system/game-infrastructure-architecture.md)：启动屏障、顶层主流程、60Hz 规则路径、crate 边界、`Paused` 对局 simulation 生命周期、Production build 与 Automated startup smoke 的验收拆分。
@@ -18,7 +18,7 @@
 - [Confirmed] [版本化运行数据加载 Contract](../development/contract/runtime-data-loading.md)、[本地化运行时 Spec](../development/component/localization-runtime.md)与[本机用户设置 Spec](../development/component/user-settings.md)：解析、版本、错误上下文、fallback、查询和持久化语义，以及 `PlayerInputBindings` 只保存可配置绑定、固定绑定动作不进入绑定冲突检测范围的约束。
 - [Confirmed] [PRD](../PRD.md)、[TDD](../TDD.md)与[assets/README.md](../../assets/README.md)：产品操作、workspace 职责、数据路径与版本头要求。
 
-**设计基线：** 使用内存内 Component 测试覆盖纯行为，使用最小 Bevy `App` 或临时配置目录覆盖 Component Integration，仅以完整客户端装配覆盖启动、构建和主状态路径。  
+**设计基线：** 使用内存内 Component 测试覆盖纯行为，使用最小 Bevy `App` 或临时配置目录覆盖 Component Integration，仅以完整客户端装配覆盖启动、构建和主状态路径。
 **关键假设：**
 
 - 参数化用例的一行代表一个逻辑用例，实施时每组测试数据都作为独立 case 执行并报告。
@@ -66,7 +66,7 @@
 
 ### Component Integration — Input
 
-- sampler 输出经过 core 归一化后形成 canonical `PlayerActions`（TC-027B）。
+- sampler 输出经过 game_core 归一化后形成 canonical `PlayerActions`（TC-027B）。
 - fixed tick 的 60Hz 配置、`Input → Rules` 排序、单次消费及 fixed 结果等价性（TC-042～TC-045；仅 TC-045 Concern: Determinism）。
 
 ### Component Integration — Client
@@ -82,7 +82,7 @@
 - 从 `Boot` 到 `Result` 再回主菜单的基础状态主路径（TC-048；Concern: Smoke）。
 - Linux、Windows production client 构建与链接（TC-049～TC-050；Concern: Smoke）。
 - Linux、Windows 复用项目根插件的自动化 startup smoke（TC-056～TC-057；Concern: Smoke）。
-- workspace 依赖方向与 `core` 平台隔离（TC-051）。
+- workspace 依赖方向与 `game_core` 平台隔离（TC-051）。
 
 ## 设计方法与覆盖模型
 
@@ -127,9 +127,9 @@
 | TC-025 | 多个固定物理来源产生同一动作时合并为一个逻辑动作 | P1 | Component | — | Input；Client | 键盘与手柄的固定方向输入均可产生 Left | 两来源同时处于 pressed 并采样 | Keyboard Left source + Gamepad Left direction | raw actions 仅含一个 Left 位，无冲突或重复 | [Confirmed] [本地输入采样器 Spec：合并多个物理输入源](../development/component/local-input-sampler.md#合并多个物理输入源)；[UI 动作输入 Spec：物理绑定关系](../development/component/ui-action-input.md#物理绑定关系) |
 | TC-026 | 持续动作按 fixed 边界 pressed 状态采样 | P1 | Component | — | Input；Client | 参数化 Left、Right、SoftDrop | 执行按住跨 3 tick、tick 间短按短放、下个 tick 前松开三种时序 | fixed tick=`T0/T1/T2` | 按住时三个 tick 都含动作；完整发生于 tick 间的短按不产生动作；边界前松开后下一 tick 不含动作 | [Confirmed] [本地输入采样器 Spec：持续动作采样](../development/component/local-input-sampler.md#持续动作采样) |
 | TC-027A | 一次性动作按完整输入时序每次 press edge 只提交一次 | P1 | Component | — | Input；Client | 参数化 HardDrop 与两种旋转动作的采样行为 | 执行 tick 间短按短放、按住跨 3 tick、松开后再次按下 | 明确的 press/release/tick 序列 | 每个 press edge 在最近后续 tick 产生一次；持续按住不重复；松开后第二次按下再产生一次 | [Confirmed] [本地输入采样器 Spec：一次性动作采样](../development/component/local-input-sampler.md#一次性动作采样) |
-| TC-027B | sampler 输出经 core 归一化形成 canonical input | P0 | Component Integration | — | Input；Client | 最小 sampler 与 core 输入协作路径可运行 | 采样可形成冲突组合的物理输入，并将 raw `PlayerActions` 交给 core 归一化 | 双旋转；软降+硬降 | core 收到 sampler 的 raw 输出，并分别形成无旋转、仅 HardDrop 的 canonical `PlayerActions` | [Confirmed] [本地输入采样 Contract：协作时序](../development/contract/local-input-sampling.md#协作时序) |
-| TC-028 | 支持版本的内存 RON 数据解析为 typed data | P1 | Component | Content Validation | Configuration | `core::config` 内存解析器 | 解析最小 `rules.stub.ron` 等价内容 | `schema_version=1` 与当前最小合法字段 | 返回对应 typed data | [Confirmed] [版本化运行数据加载 Contract：双方承诺](../development/contract/runtime-data-loading.md#双方承诺) |
-| TC-029 | malformed RON/JSON 返回 Parse typed error | P2 | Component | Content Validation | Configuration | core/client 两类内存解析器 | 参数化提交损坏文本 | 截断 RON；截断 JSON | 两组均返回 Parse 类错误且保留底层原因 | [Confirmed] [版本化运行数据加载 Contract：错误语义](../development/contract/runtime-data-loading.md#错误语义) |
+| TC-027B | sampler 输出经 game_core 归一化形成 canonical input | P0 | Component Integration | — | Input；Client | 最小 sampler 与 game_core 输入协作路径可运行 | 采样可形成冲突组合的物理输入，并将 raw `PlayerActions` 交给 game_core 归一化 | 双旋转；软降+硬降 | game_core 收到 sampler 的 raw 输出，并分别形成无旋转、仅 HardDrop 的 canonical `PlayerActions` | [Confirmed] [本地输入采样 Contract：协作时序](../development/contract/local-input-sampling.md#协作时序) |
+| TC-028 | 支持版本的内存 RON 数据解析为 typed data | P1 | Component | Content Validation | Configuration | `game_core::config` 内存解析器 | 解析最小 `rules.stub.ron` 等价内容 | `schema_version=1` 与当前最小合法字段 | 返回对应 typed data | [Confirmed] [版本化运行数据加载 Contract：双方承诺](../development/contract/runtime-data-loading.md#双方承诺) |
+| TC-029 | malformed RON/JSON 返回 Parse typed error | P2 | Component | Content Validation | Configuration | game_core/client 两类内存解析器 | 参数化提交损坏文本 | 截断 RON；截断 JSON | 两组均返回 Parse 类错误且保留底层原因 | [Confirmed] [版本化运行数据加载 Contract：错误语义](../development/contract/runtime-data-loading.md#错误语义) |
 | TC-030 | 未支持 schema 返回 UnsupportedSchema typed error | P2 | Component | Content Validation | Configuration | 已知仅支持 schema 1 | 参数化解析 RON/JSON | `schema_version=255` | 两组均返回 UnsupportedSchema，错误携带实际版本 | [Confirmed] [版本化运行数据加载 Contract：错误语义](../development/contract/runtime-data-loading.md#错误语义) |
 | TC-031 | catalog locale 不属于支持集合时返回 InvalidData | P1 | Component | Content Validation | Configuration；Client | 本地化 catalog 内存解析器支持 schema 1，客户端支持 locale 集合为 `zh-CN`、`en` | 解析结构合法、schema 受支持且 locale 不受支持的 JSON catalog | `schema_version=1`；`locale=fr`；`messages={}` | 返回 InvalidData；错误标明 locale 必须属于当前支持集合，并保留实际值 `fr` | [Confirmed] [本地化运行时 Spec：语义验证](../development/component/localization-runtime.md#语义验证)；[版本化运行数据加载 Contract：错误语义](../development/contract/runtime-data-loading.md#错误语义) |
 | TC-032 | 资源加载成功与四类失败均形成带上下文的 resolution | P1 | Component Integration | Content Validation | Configuration；Client | 最小 Bevy Asset app、内置默认值与临时 asset root | 参数化加载有效、缺失、malformed、unsupported、invalid 资源 | 有效及前三类失败使用 `assets/data/*.ron` 与 `assets/i18n/*.json` 等价 fixture；invalid 使用 schema 1、`locale=fr` 的 catalog | 有效资源为 `Loaded(typed_data)`；四类失败为 `Fallback { value: built-in default, error }`；invalid 的 typed cause 为 InvalidData；error 含 path、category、typed cause；两类结果均 resolved | [Confirmed] [版本化运行数据加载 Contract：协作时序](../development/contract/runtime-data-loading.md#协作时序)；[本地化运行时 Spec：语义验证](../development/component/localization-runtime.md#语义验证) |
@@ -150,7 +150,7 @@
 | TC-048 | 完整基础状态主路径保持单一顶层状态与对应运行阶段 | P0 | System | Smoke | Client；Match Flow | 已装配客户端，启动资源可 resolved，已确认的状态迁移请求均可触发 | 完成启动并依次触发开始、模式确认、角色确认、暂停、继续、比赛结束、返回主菜单 | Boot→MainMenu→ModeSelect→CharacterSelect→Match→Paused→Match→Result→MainMenu | 每步仅有一个当前 AppState；对应状态的运行阶段在进入后激活；本用例不规定 ModeSelect、CharacterSelect、Result 等状态的业务数据结构或具体内容 | [Confirmed] [游戏基础设施运行架构：状态与分支](../development/system/game-infrastructure-architecture.md#状态与分支) |
 | TC-049 | Linux 目标构建并链接 production client | P0 | System | Smoke | Client | Linux CI runner 与发布支持的 Rust toolchain | 使用生产 Bevy plugin 配置（`DefaultPlugins` + 项目根插件）构建 workspace/client | Linux x86_64；默认功能集合 | 编译、链接、插件装配成功，产出可执行的 production 二进制；本用例不要求运行到 MainMenu（运行路径由 TC-056 覆盖） | [Confirmed] [游戏基础设施运行架构：Production build](../development/system/game-infrastructure-architecture.md#production-build) |
 | TC-050 | Windows 目标构建并链接 production client | P0 | System | Smoke | Client | Windows CI runner 与发布支持的 Rust toolchain | 使用生产 Bevy plugin 配置（`DefaultPlugins` + 项目根插件）构建 workspace/client | Windows x86_64；默认功能集合 | 编译、链接、插件装配成功，产出可执行的 production 二进制；本用例不要求运行到 MainMenu | [Confirmed] [游戏基础设施运行架构：Production build](../development/system/game-infrastructure-architecture.md#production-build) |
-| TC-051 | workspace 依赖图保持 client/net 指向 core 且 core 与平台运行时隔离 | P1 | System | — | Client | 可读取 Cargo metadata 与各 crate manifest，并可单独选择 core package | 检查 Cargo dependency graph 与 core manifest，再独立构建和测试 core | 必需边：client→core、net→core；禁止边：core→client/net；core manifest 禁止 Bevy、网络、窗口、平台目录等平台运行时 crate | 必需边存在，禁止边不存在；core manifest 不含所列平台运行时依赖；core 可独立构建并通过测试 | [Confirmed] [游戏基础设施运行架构：架构职责](../development/system/game-infrastructure-architecture.md#架构职责) |
+| TC-051 | workspace 依赖图保持 client/net 指向 game_core 且 game_core 与平台运行时隔离 | P1 | System | — | Client | 可读取 Cargo metadata 与各 crate manifest，并可单独选择 game_core package | 检查 Cargo dependency graph 与 game_core manifest，再独立构建和测试 game_core | 必需边：client→game_core、net→game_core；禁止边：game_core→client/net；game_core manifest 禁止 Bevy、网络、窗口、平台目录等平台运行时 crate | 必需边存在，禁止边不存在；game_core manifest 不含所列平台运行时依赖；game_core 可独立构建并通过测试 | [Confirmed] [游戏基础设施运行架构：架构职责](../development/system/game-infrastructure-architecture.md#架构职责) |
 | TC-052 | 同一固定方向输入按上下文产生独立领域动作 | P1 | Component | — | Input；Client | 固定 Left 物理方向输入可在 gameplay 与 UI 输入上下文中解释 | 分别在 Match gameplay context 与 Menu UI context 注入同一固定 Left 方向输入 | context=`Match/Menu`；physical input=`Left direction` | Match 中只产生 `GameAction::Left` 并可进入规则输入；Menu 中只产生 `UIAction::Left` 并用于 UI；两个动作类型和输出容器保持独立；Left 不作为用户可配置绑定 | [Confirmed] [UI 动作输入 Spec：物理绑定关系](../development/component/ui-action-input.md#物理绑定关系)、[验收条件](../development/component/ui-action-input.md#验收条件) |
 | TC-053 | fixed tick 仅在 `AppState::Match` 执行，全部非 Match 状态均不产生 Input/Rules | P0 | Component Integration | — | Client | 最小客户端 app 注册状态机与 simulation 能力，Input/Rules 执行次数可观测 | 分别在每个非 Match 状态执行受控 fixed tick，再在 Match 执行受控 fixed tick | `Boot`、`MainMenu`、`ModeSelect`、`CharacterSelect`、`Paused`、`Result`；`Match` | 六个非 Match 状态下 Input/Rules 执行次数均为 0；Match 下两个阶段均按受控 tick 数执行 | [Confirmed] [固定频率规则调度 Contract：运行边界](../development/contract/fixed-tick-simulation.md#运行边界) |
 | TC-054 | `Match → Paused` 后对局 simulation 立即停止 | P0 | Component Integration | — | Client | 当前 `Match`，Input/Rules 执行计数器已运行若干 tick | 提交 `Paused` 请求并运行状态提交，随后提供若干 fixed 执行机会 | 转移前计数=N；转移后 3 个 fixed 执行机会 | 状态转移当拍起不再产生新的 Input/Rules 执行；转移后计数保持为 N | [Confirmed] [固定频率规则调度 Contract：Pause 行为](../development/contract/fixed-tick-simulation.md#pause-行为) |
@@ -175,7 +175,7 @@
 
 ## 实施顺序
 
-1. 先实现 TC-013～TC-022 的纯 core 输入测试，固定最底层数据与归一化语义。
+1. 先实现 TC-013～TC-022 的纯 game_core 输入测试，固定最底层数据与归一化语义。
 2. 实现 TC-001～TC-012、TC-028～TC-033、TC-059 的解析、fallback、持久化与固定/可配置绑定范围测试。
 3. 实现 TC-023～TC-027A、TC-035～TC-036、TC-052 的纯行为测试，以及 TC-027B、TC-034、TC-037～TC-045 的最小 Bevy App 组件集成测试。
 4. 实现 TC-053～TC-055、TC-058 的 `Match`/`Paused` 对局 simulation 生命周期与 `Pause` 直接触发路径测试，复用 TC-042～TC-045 已建立的 fixed tick 观测手段。

@@ -1,0 +1,232 @@
+//! Serializable local user settings and persistence seams.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use bevy::prelude::*;
+use game_core::input::GameAction;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::input::PhysicalInput;
+
+pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Default)]
+pub struct SettingsPlugin;
+
+impl Plugin for SettingsPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<UserSettings>();
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WindowModeSetting {
+    #[default]
+    Windowed,
+    BorderlessFullscreen,
+    Fullscreen,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub enum AnimationIntensity {
+    Low(f32),
+    #[default]
+    Normal,
+    High(f32),
+}
+
+impl AnimationIntensity {
+    #[must_use]
+    pub const fn value(self) -> f32 {
+        match self {
+            Self::Low(value) | Self::High(value) => value,
+            Self::Normal => 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayerInputBindings {
+    pub bindings: BTreeMap<GameAction, Vec<PhysicalInput>>,
+}
+
+impl PlayerInputBindings {
+    pub fn actions_for<'a>(
+        &'a self,
+        input: &'a PhysicalInput,
+    ) -> impl Iterator<Item = GameAction> + 'a {
+        self.bindings
+            .iter()
+            .filter_map(move |(action, inputs)| inputs.contains(input).then_some(*action))
+    }
+
+    #[must_use]
+    pub fn conflict(&self, action: GameAction, input: &PhysicalInput) -> Option<BindingConflict> {
+        action.is_configurable().then(|| {
+            self.bindings.iter().find_map(|(existing_action, inputs)| {
+                (*existing_action != action && inputs.contains(input)).then(|| BindingConflict {
+                    requested: action,
+                    existing: *existing_action,
+                    input: input.clone(),
+                })
+            })
+        })?
+    }
+}
+
+impl Default for PlayerInputBindings {
+    fn default() -> Self {
+        let bindings = GameAction::CONFIGURABLE
+            .into_iter()
+            .map(|action| (action, Vec::new()))
+            .collect();
+        Self { bindings }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindingConflict {
+    pub requested: GameAction,
+    pub existing: GameAction,
+    pub input: PhysicalInput,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
+#[serde(default)]
+pub struct UserSettings {
+    pub schema_version: u32,
+    pub language: String,
+    pub window_mode: WindowModeSetting,
+    pub master_volume: f32,
+    pub sfx_volume: f32,
+    pub players: [PlayerInputBindings; 2],
+    pub vibration: bool,
+    pub character_performance: bool,
+    pub animation_intensity: AnimationIntensity,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            schema_version: SETTINGS_SCHEMA_VERSION,
+            language: "en".into(),
+            window_mode: WindowModeSetting::Windowed,
+            master_volume: 1.0,
+            sfx_volume: 1.0,
+            players: std::array::from_fn(|_| PlayerInputBindings::default()),
+            vibration: true,
+            character_performance: true,
+            animation_intensity: AnimationIntensity::Normal,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum SettingsError {
+    #[error("settings parse failed: {0}")]
+    Parse(String),
+    #[error("unsupported settings schema {found} (supported: {supported})")]
+    UnsupportedSchema { found: u32, supported: u32 },
+    #[error("settings I/O failed at {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+#[derive(Debug)]
+pub enum SettingsLoad {
+    Loaded(UserSettings),
+    Defaulted {
+        settings: UserSettings,
+        error: Option<SettingsError>,
+    },
+}
+
+impl SettingsLoad {
+    #[must_use]
+    pub fn settings(&self) -> &UserSettings {
+        match self {
+            Self::Loaded(settings) | Self::Defaulted { settings, .. } => settings,
+        }
+    }
+}
+
+pub fn parse_settings(source: &str) -> Result<UserSettings, SettingsError> {
+    let settings: UserSettings =
+        ron::from_str(source).map_err(|error| SettingsError::Parse(error.to_string()))?;
+    if settings.schema_version != SETTINGS_SCHEMA_VERSION {
+        return Err(SettingsError::UnsupportedSchema {
+            found: settings.schema_version,
+            supported: SETTINGS_SCHEMA_VERSION,
+        });
+    }
+    Ok(settings)
+}
+
+pub fn serialize_settings(settings: &UserSettings) -> Result<String, SettingsError> {
+    ron::ser::to_string_pretty(settings, ron::ser::PrettyConfig::default())
+        .map_err(|error| SettingsError::Parse(error.to_string()))
+}
+
+#[derive(Debug, Clone)]
+pub struct SettingsStore {
+    pub path: PathBuf,
+}
+
+impl SettingsStore {
+    #[must_use]
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    #[must_use]
+    pub fn platform_default() -> Option<Self> {
+        directories::ProjectDirs::from("org", "PC-Parrot-ACGN-Club", "Codename-Psi")
+            .map(|dirs| Self::new(dirs.config_dir().join("settings.ron")))
+    }
+
+    pub fn load(&self) -> SettingsLoad {
+        match std::fs::read_to_string(&self.path) {
+            Ok(source) => match parse_settings(&source) {
+                Ok(settings) => SettingsLoad::Loaded(settings),
+                Err(error) => SettingsLoad::Defaulted {
+                    settings: UserSettings::default(),
+                    error: Some(error),
+                },
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => SettingsLoad::Defaulted {
+                settings: UserSettings::default(),
+                error: None,
+            },
+            Err(source) => SettingsLoad::Defaulted {
+                settings: UserSettings::default(),
+                error: Some(SettingsError::Io {
+                    path: self.path.clone(),
+                    source,
+                }),
+            },
+        }
+    }
+
+    pub fn save(&self, settings: &UserSettings) -> Result<(), SettingsError> {
+        let serialized = serialize_settings(settings)?;
+        let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent).map_err(|source| SettingsError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+        let temporary = self.path.with_extension("ron.tmp");
+        std::fs::write(&temporary, serialized).map_err(|source| SettingsError::Io {
+            path: temporary.clone(),
+            source,
+        })?;
+        std::fs::rename(&temporary, &self.path).map_err(|source| SettingsError::Io {
+            path: self.path.clone(),
+            source,
+        })
+    }
+}

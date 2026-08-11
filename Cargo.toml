@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/core",
+    "crates/game_core",
     "crates/client",
     "crates/net",
 ]
@@ -15,7 +15,7 @@ rust-version = "1.97.1"
 
 [workspace.dependencies]
 # Internal crates
-core = { path = "crates/core" }
+game_core = { path = "crates/game_core" }
 net = { path = "crates/net" }
 
 # Engine / app — R1 needs 2D + native UI + audio; drop default `3d` to cut compile time.

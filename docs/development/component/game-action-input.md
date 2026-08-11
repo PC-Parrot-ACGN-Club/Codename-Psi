@@ -1,8 +1,8 @@
 # 统一游戏动作与 Tick 输入 Spec
 
-**状态：** Confirmed  
-**主分类：** Component  
-**相关模块：** `core::input`  
+**状态：** Confirmed
+**主分类：** Component
+**相关模块：** `game_core::input`
 **关联文档：** [UI 交互动作 Spec](ui-action-input.md)、[TDD §3–§4](../../TDD.md)、[PRD §5.2](../../PRD.md)
 
 ## 目标
@@ -60,7 +60,7 @@ players[len..8] = PlayerActions::EMPTY
 0 <= len <= 8
 ```
 
-当前 R1/R2 产品对局使用前两个 participant slots；core 输入模型固定支持最多 8 个参与者，包括本地玩家、AI 或后续网络参与者。
+当前 R1/R2 产品对局使用前两个 participant slots；game_core 输入模型固定支持最多 8 个参与者，包括本地玩家、AI 或后续网络参与者。
 
 ## 行为
 
@@ -117,17 +117,17 @@ tick 101: SoftDrop
 tick 102: SoftDrop
 ```
 
-规则可以据此保持软降状态。core 不需要额外的 held 标记。
+规则可以据此保持软降状态。game_core 不需要额外的 held 标记。
 
 ### 一次性动作
 
 硬降和旋转是否只在一次物理按压中出现一个 tick，由输入生产方负责。
 
-core 只消费已经形成的 `PlayerActions`，不区分动作来源或采样方式。
+game_core 只消费已经形成的 `PlayerActions`，不区分动作来源或采样方式。
 
 ## 不变量
 
-- `core::input` 不包含 Bevy `KeyCode`、Gamepad ID、窗口焦点或设备信息。
+- `game_core::input` 不包含 Bevy `KeyCode`、Gamepad ID、窗口焦点或设备信息。
 - `PlayerActions` 只表达当前 tick 的逻辑动作集合。
 - participant slot 在一场比赛中保持稳定身份。
 - `players[len..MAX_PLAYERS]` 始终为 `PlayerActions::EMPTY`。
@@ -155,4 +155,4 @@ core 只消费已经形成的 `PlayerActions`，不区分动作来源或采样�
 - [Confirmed] Issue #11：要求为 P1、P2、AI 和后续网络输入建立统一游戏动作入口。
 - [Confirmed] TDD §3：规则核心只接收已经量化到 tick 的游戏动作。
 - [Confirmed] PRD §5.2：定义左右、软降、硬降、顺/逆时针旋转、确认和返回/暂停等玩家操作。
-- [Confirmed] 当前审核结论：core 逻辑动作只包含六个对局动作；`PlayerActions` 使用位集合；逻辑输入不区分 held / edge；输入模型固定支持最多 8 个 participant slots；逻辑冲突按本文规则归一化。
+- [Confirmed] 当前审核结论：game_core 逻辑动作只包含六个对局动作；`PlayerActions` 使用位集合；逻辑输入不区分 held / edge；输入模型固定支持最多 8 个 participant slots；逻辑冲突按本文规则归一化。
