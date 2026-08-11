@@ -3,7 +3,7 @@
 **状态：** Confirmed  
 **主分类：** Component  
 **相关模块：** `client::settings`  
-**关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[PRD §5.2、§7](../../PRD.md)、[TDD §4–§5](../../TDD.md)
+**关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[PRD §5.2、§7](../../PRD.md)、[TDD §4–§5](../../TDD.md)、[UI 交互动作 Spec](ui-action-input.md)、[统一游戏动作与 Tick 输入 Spec](game-action-input.md)
 
 ## 目标
 
@@ -18,6 +18,8 @@
 | `UserSettings` | 用户当前保存的本机偏好 | RON、带 schema 版本 |
 | settings path | 平台标准应用配置目录中的文件 | 通过平台目录能力解析 |
 | `PlayerInputBindings` | P1/P2 的键盘与手柄绑定 | 两名玩家独立保存 |
+
+`PlayerInputBindings` 只保存可配置绑定；固定绑定范围见[UI 交互动作 Spec](../component/ui-action-input.md)的“物理绑定关系”一节。
 
 设置字段至少覆盖：
 
@@ -69,10 +71,12 @@
 
 ### 输入绑定冲突
 
-- 输入：设置页面准备写入的新绑定。
+- 输入：设置页面准备写入的新绑定（仅 `SoftDrop` / `HardDrop` / `RotateClockwise` / `RotateCounterClockwise` 四个可配置动作）。
 - 处理：判断新绑定是否与同一配置范围内已有绑定冲突。
 - 输出：可供设置 UI 判断的冲突结果。
 - 错误语义：冲突属于可处理业务结果，由设置 UI 决定覆盖或重新绑定。
+
+固定绑定的动作不进入本行为的冲突检测范围。
 
 运行时采样中的逻辑动作冲突由 `core::input` 处理，与这里的绑定编辑冲突无关。
 

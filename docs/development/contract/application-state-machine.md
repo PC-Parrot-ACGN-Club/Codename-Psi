@@ -3,7 +3,7 @@
 **状态：** Confirmed  
 **主分类：** Component Integration  
 **相关模块：** `client::app_state`、状态迁移请求方  
-**关联文档：** [应用状态机 Spec](../component/application-state-machine.md)、[游戏基础设施运行架构](../system/game-infrastructure-architecture.md)
+**关联文档：** [应用状态机 Spec](../component/application-state-machine.md)、[游戏基础设施运行架构](../system/game-infrastructure-architecture.md)、[UI 交互动作 Spec](../component/ui-action-input.md)、[统一游戏动作与 Tick 输入 Spec](../component/game-action-input.md)
 
 ## 目的
 
@@ -21,7 +21,8 @@ Issue #11 当前明确的请求方是启动协调 system：当 `BootstrapStatus`
 
 后续任务增加状态边时，同时定义掌握该迁移前置条件的 client 侧请求方：
 - 游戏玩法实现：对局结束等由 client 侧对局运行组件提出。
-- 游戏表现领域：菜单、返回、暂停、再赛等由页面导航相关组件提出。
+- 游戏表现领域：菜单、返回、再赛等由页面导航相关组件提出；`Paused → Match` 的 `ResumeRequested` 由 `Paused` 页面导航组件提出。
+- `PauseRequested`：由 `client::input`（`LocalInputSampler` 或等价组件）在 `AppState == Match` 时识别固定绑定的 Start 按键后直接提出；`Pause` 不属于 `UIAction` 或 `GameAction`（见[UI 交互动作 Spec](../component/ui-action-input.md)）。
 - 联机功能：需要影响 `AppState` 的联机流程由联机 client 集成组件提出。
 
 ## 数据契约
@@ -110,10 +111,11 @@ MatchCompleted > PauseRequested
 - `MatchCompleted` 与 `PauseRequested` 同周期出现时进入 `Result`。
 - 未定义优先级的不同目标冲突不会产生状态变化，并具有可观察诊断。
 - 非法状态边不会改变当前 `AppState`。
+- `client::input` 可以在 `Match` 语境下直接提出 `PauseRequested`，不需要经过 `UIAction` 或 `GameAction`。
 
 ## Test Basis
 
 - [Confirmed] Issue #11：要求明确应用状态并通过 Bevy 调度切换。
 - [Confirmed] TDD §4：使用 Bevy `States` 管理顶层应用阶段。
 - [Confirmed] TDD §5：设置和文本解析失败时使用安全默认值并提供诊断。
-- [Confirmed] 当前审核结论：状态迁移请求经统一 Arbiter；`MatchCompleted > PauseRequested`;迁移请求方由掌握对应业务前置条件的组件承担。
+- [Confirmed] 当前审核结论：状态迁移请求经统一 Arbiter；`MatchCompleted > PauseRequested`；迁移请求方由掌握对应业务前置条件的组件承担，其中 `PauseRequested` 由 `client::input` 直接提出。
