@@ -15,7 +15,7 @@ fn component_surfaces_are_available_to_external_tests() {
     let bindings = PlayerInputBindings::default();
     let mut sampler = LocalInputSampler::new(vec![bindings]);
     sampler.press(0, PhysicalInput::keyboard("KeyS"));
-    sampler.press_fixed_direction(0, FixedDirection::Left);
+    sampler.press_fixed_direction(0, PhysicalInput::gamepad("DPadLeft"), FixedDirection::Left);
     let sampled = sampler.sample_fixed();
 
     let localization = Localization::new("en", [builtin_english_catalog()]);

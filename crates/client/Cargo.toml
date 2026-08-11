@@ -29,6 +29,8 @@ directories = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Used by the settings persistence test to assert the platform config root.
+directories = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"

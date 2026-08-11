@@ -92,7 +92,9 @@ pub const fn interpret_direction(
 pub struct LocalInputSampler {
     pub bindings: Vec<PlayerInputBindings>,
     pressed: HashSet<(usize, PhysicalInput)>,
-    fixed_directions: HashSet<(usize, FixedDirection)>,
+    /// Fixed-binding directions are keyed by their physical source so that two
+    /// sources meaning the same direction merge into one logical action.
+    fixed_directions: HashSet<(usize, PhysicalInput, FixedDirection)>,
     pending_edges: Vec<PlayerActions>,
     pause_pending: bool,
 }
@@ -124,12 +126,23 @@ impl LocalInputSampler {
         self.pressed.remove(&(player, input.clone()));
     }
 
-    pub fn press_fixed_direction(&mut self, player: usize, direction: FixedDirection) {
-        self.fixed_directions.insert((player, direction));
+    pub fn press_fixed_direction(
+        &mut self,
+        player: usize,
+        source: PhysicalInput,
+        direction: FixedDirection,
+    ) {
+        self.fixed_directions.insert((player, source, direction));
     }
 
-    pub fn release_fixed_direction(&mut self, player: usize, direction: FixedDirection) {
-        self.fixed_directions.remove(&(player, direction));
+    pub fn release_fixed_direction(
+        &mut self,
+        player: usize,
+        source: &PhysicalInput,
+        direction: FixedDirection,
+    ) {
+        self.fixed_directions
+            .remove(&(player, source.clone(), direction));
     }
 
     pub fn press_pause(&mut self) {
@@ -150,19 +163,20 @@ impl LocalInputSampler {
         let count = self.bindings.len().max(self.pending_edges.len());
         let mut sampled = vec![PlayerActions::EMPTY; count];
 
+        // Several physical sources may report the same direction; inserting into
+        // the shared bit set merges them into a single logical action.
+        for (player, _source, direction) in &self.fixed_directions {
+            let Some(player_actions) = sampled.get_mut(*player) else {
+                continue;
+            };
+            if let Some(ContextAction::Game(action)) =
+                interpret_direction(*direction, InputContext::Gameplay)
+            {
+                player_actions.insert(action);
+            }
+        }
+
         for (player, player_actions) in sampled.iter_mut().enumerate() {
-            if self
-                .fixed_directions
-                .contains(&(player, FixedDirection::Left))
-            {
-                player_actions.insert(GameAction::Left);
-            }
-            if self
-                .fixed_directions
-                .contains(&(player, FixedDirection::Right))
-            {
-                player_actions.insert(GameAction::Right);
-            }
             if let Some(edges) = self.pending_edges.get_mut(player) {
                 *player_actions = *player_actions | *edges;
                 *edges = PlayerActions::EMPTY;
