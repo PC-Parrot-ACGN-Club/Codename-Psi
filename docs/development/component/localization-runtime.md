@@ -3,7 +3,7 @@
 **状态：** v1  
 **主分类：** Component  
 **相关模块：** `client::i18n`  
-**关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[TDD §5](../../TDD.md)、[PRD §5.3、§7](../../PRD.md)
+**关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[版本化运行数据加载 Contract](../contract/runtime-data-loading.md)、[TDD §5](../../TDD.md)、[PRD §5.3、§7](../../PRD.md)
 
 ## 目标
 
@@ -37,6 +37,15 @@
   }
 }
 ```
+
+## 语义验证
+
+catalog 完成 JSON 反序列化和 schema 版本检查后，解析器验证其中的 `locale` 是否属于客户端当前支持的 locale 集合。首期支持集合为：
+
+- `zh-CN`；
+- `en`。
+
+catalog 的 `locale` 属于支持集合时通过该项语义验证；`locale` 不属于支持集合时，解析器返回[运行数据加载 Contract](../contract/runtime-data-loading.md)定义的 `InvalidData`。该错误保留违反的约束及实际 locale，资源加载层据此形成带资源上下文的 fallback 结果。
 
 ## 行为
 
@@ -78,9 +87,9 @@ locale = en
 ### 加载文本目录
 
 - 输入：`assets/i18n/zh-CN.json`、`assets/i18n/en.json` 已读取内容。
-- 处理：验证 schema 后构建 key/value catalog。
+- 处理：验证 schema 和 catalog 语义后构建 key/value catalog。
 - 输出：可查询 catalog。
-- 错误语义：解析、schema 和读取错误由运行数据加载 Contract 处理，并提供 fallback 结果。
+- 错误语义：解析、schema、语义和读取错误由运行数据加载 Contract 处理，并提供 fallback 结果；不受支持的 catalog locale 返回 `InvalidData`。
 
 ## 不变量
 
@@ -92,6 +101,7 @@ locale = en
 - 缺失 key 会产生开发诊断。
 - 本地化数据不进入规则确定性状态。
 - 本地化 catalog 使用 JSON。
+- catalog 的 `locale` 属于客户端当前支持的 locale 集合。
 
 ## 验收条件
 
@@ -101,7 +111,7 @@ locale = en
 - 当前语言缺 key、英文存在 key 时返回英文并留下诊断。
 - 两个 catalog 都缺 key 时返回 key 本身并留下诊断。
 - `Localization` 可以作为客户端 Resource 被其它系统只读查询。
-- malformed 或 unsupported catalog 使用运行数据加载 Contract 的 fallback 语义后仍能提供可查询文本。
+- malformed、unsupported 或违反 locale 语义约束的 catalog 使用运行数据加载 Contract 的 fallback 语义后仍能提供可查询文本。
 
 ## Test Basis
 
@@ -109,4 +119,4 @@ locale = en
 - [Confirmed] TDD §5：`zh-CN` / `en` 使用稳定键值；缺失键回退英文，并在开发构建中记录诊断。
 - [Confirmed] PRD §5.3：所有玩家文本使用键值本地化，首版提供 `zh-CN` 和 `en`，缺失键回退英文。
 - [Confirmed] PRD §7：语言属于本机持久化设置。
-- [Confirmed] 当前审核结论：默认语言为 `en`；双重缺失时使用 key 本身占位；`Localization` 作为 client Resource；本地化 catalog 采用 JSON。
+- [Confirmed] 当前审核结论：默认语言为 `en`；双重缺失时使用 key 本身占位；`Localization` 作为 client Resource；本地化 catalog 采用 JSON；catalog locale 必须属于客户端当前支持的 locale 集合，违反时返回 `InvalidData`。

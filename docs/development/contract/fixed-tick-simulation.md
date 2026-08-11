@@ -3,7 +3,7 @@
 **状态：** v1  
 **主分类：** Component Integration  
 **相关模块：** Bevy Schedule、`client::input`、`client::simulation`、后续 `core::MatchState`  
-**关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[本地输入采样 Contract](local-input-sampling.md)、[TDD §3–§4](../../TDD.md)
+**关联文档：** [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)、[应用状态机 Spec](../component/application-state-machine.md)、[游戏基础设施运行架构](../system/game-infrastructure-architecture.md)、[TDD §3–§4](../../TDD.md)
 
 ## 目的
 
@@ -60,6 +60,17 @@ FixedGameSet::Input
 
 如果未来出现必须在同一 fixed tick 中、且明确要求位于规则推进之后执行的新职责，再由对应设计增加新的 SystemSet；Issue #11 不预留空阶段。
 
+## 运行边界
+
+- `FixedGameSet::Input` 与 `FixedGameSet::Rules` 只在 `AppState::Match` 中执行。
+
+### Pause 行为
+
+- 进入 `AppState::Paused` 后，对局模拟停止：`FixedGameSet::Input` 与 `FixedGameSet::Rules` 不再执行。
+- 从 `Paused` 返回 `Match` 后，对局模拟从暂停前已有的规则状态继续推进。
+
+实现可以使用 Bevy 的 run condition、状态调度或其它等价机制表达上述运行边界，只需满足该可观察语义。
+
 ## 调度约束
 
 - fixed schedule 的规则频率配置为 60Hz。
@@ -84,10 +95,14 @@ FixedGameSet::Input
 - 普通 `Update` 执行频率变化不会改变相同 fixed 时间范围内的规则推进语义。
 - 普通 `Update`、渲染和 UI 无法直接推进规则状态。
 - 后续 `MatchState` 可以直接接入 `FixedGameSet::Rules`，无需修改输入与调度边界。
+- `FixedGameSet::Input` 与 `FixedGameSet::Rules` 只在 `AppState::Match` 中执行。
+- 进入 `AppState::Paused` 后，两个 SystemSet 均不再执行。
+- 从 `Paused` 返回 `Match` 后，规则状态从暂停前的状态继续推进，不因暂停而重置或跳变。
 
 ## Test Basis
 
 - [Confirmed] Issue #11：要求建立 60Hz 游戏规则固定更新路径，使渲染帧率与规则推进独立。
 - [Confirmed] TDD §3：规则以 60Hz fixed tick 运行，规则核心消费已经量化到 tick 的动作。
 - [Confirmed] TDD §4：对局模拟使用固定调度，输入采集、UI、音频和渲染使用普通更新调度。
-- [Confirmed] 当前审核结论：fixed schedule 只固定 `Input → Rules` 两段；测试实现方式不进入 Contract。
+- [Confirmed] [应用状态机 Spec](../component/application-state-machine.md)：`AppState` 包含 `Match` 与 `Paused`，`Match ⇄ Paused` 为有效状态边。
+- [Confirmed] 当前审核结论：fixed schedule 只固定 `Input → Rules` 两段；测试实现方式不进入 Contract；`FixedGameSet::Input` 与 `FixedGameSet::Rules` 只在 `AppState::Match` 中执行；`Paused` 停止对局模拟，恢复后从暂停前状态继续推进。

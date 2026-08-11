@@ -3,7 +3,7 @@
 **状态：** v1  
 **主分类：** Component  
 **相关模块：** `core::input`  
-**关联文档：** [TDD §3–§4](../../TDD.md)、[PRD §5.2](../../PRD.md)
+**关联文档：** [UI 交互动作 Spec](ui-action-input.md)、[TDD §3–§4](../../TDD.md)、[PRD §5.2](../../PRD.md)
 
 ## 目标
 
@@ -31,7 +31,7 @@ enum GameAction {
 }
 ```
 
-`Confirm`、`Back`、`Pause` 等界面交互语义属于 client 表现领域，不进入规则核心动作集合。它们可以与对局动作共享物理按键绑定，但由输入上下文解释为不同语义。
+`GameAction` / `PlayerActions` 表达规则领域输入；client UI 输入使用独立的 `UIAction` 语义（见[UI 交互动作 Spec](ui-action-input.md)）。`Confirm`、`Back`、`Pause` 等界面交互语义属于 client 表现领域，不进入规则核心动作集合。`GameAction` 与 `UIAction` 可以在不同输入上下文中复用相同物理按键绑定或位位置，但各自的消费语义保持独立。
 
 ### `PlayerActions`
 
