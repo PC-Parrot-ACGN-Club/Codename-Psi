@@ -1,4 +1,9 @@
 {
   "schema_version": 1,
-  "app_title": "Codename Psi"
+  "locale": "en",
+  "messages": {
+    "app.title": "Codename Psi",
+    "main_menu.start": "Start",
+    "main_menu.settings": "Settings"
+  }
 }

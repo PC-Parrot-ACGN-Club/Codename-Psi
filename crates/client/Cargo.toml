@@ -27,5 +27,8 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 directories = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints.rust]
 unsafe_code = "forbid"
