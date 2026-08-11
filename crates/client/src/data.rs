@@ -7,10 +7,13 @@ use game_core::config::ConfigError;
 use crate::i18n::CatalogError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which `assets/` data class a load belongs to.
+///
+/// User settings are not listed: they live in the platform config directory,
+/// not under `assets/`, and report failures as `SettingsError`.
 pub enum DataCategory {
     Rules,
     Localization,
-    Settings,
     Other,
 }
 
@@ -62,11 +65,8 @@ pub enum DataResolution<T> {
 }
 
 impl<T> DataResolution<T> {
-    #[must_use]
-    pub const fn is_resolved(&self) -> bool {
-        true
-    }
-
+    /// Both variants are resolved, so consumers always get a value; `error`
+    /// distinguishes a clean load from a fallback.
     #[must_use]
     pub fn value(&self) -> &T {
         match self {

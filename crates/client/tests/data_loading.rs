@@ -104,7 +104,6 @@ fn a_valid_resource_resolves_to_loaded_typed_data() {
 
     let resolution = rules_resolution(&app, "valid");
 
-    assert!(resolution.is_resolved());
     assert_eq!(resolution.error(), None);
     assert_eq!(resolution.value().id, "stub");
     assert!(matches!(resolution, DataResolution::Loaded(_)));
@@ -122,7 +121,6 @@ fn a_missing_resource_falls_back_with_io_context() {
     assert_eq!(error.category, DataCategory::Rules);
     assert!(error.path.ends_with("rules.missing.ron"));
     assert_eq!(resolution.value(), &builtin_rules_default());
-    assert!(resolution.is_resolved());
 }
 
 // docs/test/game-infrastructure.md TC-032
@@ -181,8 +179,4 @@ fn a_semantically_invalid_catalog_falls_back_with_an_invalid_data_cause() {
         other => panic!("expected InvalidData, got {other:?}"),
     }
     assert_eq!(resolution.value(), &builtin_english_catalog());
-    assert!(
-        resolution.is_resolved(),
-        "a fallback result is still resolved for consumers"
-    );
 }
