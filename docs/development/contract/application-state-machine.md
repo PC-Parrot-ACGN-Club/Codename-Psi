@@ -22,7 +22,7 @@ Issue #11 当前明确的请求方是启动协调 system：当 `BootstrapStatus`
 后续任务增加状态边时，同时定义掌握该迁移前置条件的 client 侧请求方：
 - 游戏玩法实现：对局结束等由 client 侧对局运行组件提出。
 - 游戏表现领域：菜单、返回、再赛等由页面导航相关组件提出；`Paused → Match` 的 `ResumeRequested` 由 `Paused` 页面导航组件提出。
-- `PauseRequested`：由 `client::input`（`LocalInputSampler` 或等价组件）在 `AppState == Match` 时识别固定绑定的 Start 按键后直接提出；`Pause` 不属于 `UIAction` 或 `GameAction`（见[UI 交互动作 Spec](../component/ui-action-input.md)）。
+- `PauseRequested`：由 `client::input`（`LocalInputSampler` 或等价组件）在 `AppState == Match` 时识别固定绑定的暂停输入后直接提出；`Pause` 不属于 `UIAction` 或 `GameAction`（见[UI 交互动作 Spec](../component/ui-action-input.md)）。暂停输入的固定绑定为手柄 Start 按键与键盘 `Escape`，两者不区分玩家。键盘 `Escape` 在 `Match` 之外的可返回页面等价于 `Back`，由输入上下文区分，不产生 `PauseRequested`。
 - 联机功能：需要影响 `AppState` 的联机流程由联机 client 集成组件提出。
 
 ## 数据契约
@@ -112,6 +112,8 @@ MatchCompleted > PauseRequested
 - 未定义优先级的不同目标冲突不会产生状态变化，并具有可观察诊断。
 - 非法状态边不会改变当前 `AppState`。
 - `client::input` 可以在 `Match` 语境下直接提出 `PauseRequested`，不需要经过 `UIAction` 或 `GameAction`。
+- 手柄 Start 与键盘 `Escape` 在 `Match` 下均产生 `PauseRequested`。
+- 键盘 `Escape` 在 `Match` 之外不产生 `PauseRequested`。
 
 ## Test Basis
 
@@ -119,3 +121,4 @@ MatchCompleted > PauseRequested
 - [Confirmed] TDD §4：使用 Bevy `States` 管理顶层应用阶段。
 - [Confirmed] TDD §5：设置和文本解析失败时使用安全默认值并提供诊断。
 - [Confirmed] 当前审核结论：状态迁移请求经统一 Arbiter；`MatchCompleted > PauseRequested`；迁移请求方由掌握对应业务前置条件的组件承担，其中 `PauseRequested` 由 `client::input` 直接提出。
+- [Confirmed] 当前审核结论：暂停输入的固定绑定为手柄 Start 与键盘 `Escape`，均不区分玩家；`Escape` 在 `Match` 之外等价于 `Back`，由输入上下文区分。

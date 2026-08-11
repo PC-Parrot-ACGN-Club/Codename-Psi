@@ -48,6 +48,28 @@
 | character performance | `true` |
 | animation intensity | `Normal` / `1.0` |
 
+### 默认输入绑定
+
+`PlayerInputBindings` 只保存四个可配置动作，其默认绑定为：
+
+| 动作 | P1 键盘 | P2 键盘 | 手柄 |
+| --- | --- | --- | --- |
+| `SoftDrop` | `S` | `↓` | DPadDown |
+| `HardDrop` | `W` | `↑` | DPadUp |
+| `RotateClockwise` | `K` | `Numpad2` | South |
+| `RotateCounterClockwise` | `J` | `Numpad1` | West |
+
+默认绑定不为空：没有设置文件时，键盘与手柄都可以直接产生全部六个规则动作，其中 `Left` / `Right` 来自[UI 交互动作 Spec](ui-action-input.md)定义的固定方向绑定。
+
+下列物理位在默认绑定下被两个领域共用，由输入上下文区分，不属于绑定冲突：
+
+```text
+P1 W / S        Gameplay: HardDrop / SoftDrop    Menu: Up / Down
+P2 ↑ / ↓        Gameplay: HardDrop / SoftDrop    Menu: Up / Down
+DPadUp / Down   Gameplay: HardDrop / SoftDrop    Menu: Up / Down
+South           Gameplay: RotateClockwise        Menu: Confirm
+```
+
 ## 行为
 
 ### 启动加载
@@ -101,6 +123,7 @@
 - 保存后重启可以恢复 `UserSettings`。
 - P1/P2 键盘和手柄映射可以独立保存与恢复。
 - 默认语言、窗口、音量、震动和动画设置均有明确值。
+- 没有设置文件时，P1、P2 的四个可配置动作均已具备非空默认绑定，键盘与手柄都可直接产生全部六个规则动作。
 - 运行时组件可以读取当前 `UserSettings`。
 - 写入失败不会破坏已有正式设置文件。
 
@@ -112,3 +135,4 @@
 - [Confirmed] TDD §4：客户端维护可序列化输入映射。
 - [Confirmed] TDD §5：设置使用 RON，保存到平台标准应用配置目录；解析错误使用安全默认值并给出诊断。
 - [Confirmed] 当前审核结论：`UserSettings` 只保存用户偏好；采用临时文件 replace/rename 保存；使用 `directories`；默认值按本文定义。
+- [Confirmed] 当前审核结论：四个可配置动作具备非空默认绑定（见「默认输入绑定」）；默认绑定中与固定绑定共用的物理位由输入上下文区分，不进入绑定冲突检测。
