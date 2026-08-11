@@ -28,11 +28,13 @@ fn zero_participants_construct_empty_tick_inputs() {
     assert_eq!(inputs.len(), 0);
     assert!(inputs.is_empty());
     assert_eq!(inputs.active(), &[] as &[PlayerActions]);
-    assert_eq!(
-        inputs.players,
-        [PlayerActions::EMPTY; MAX_PLAYERS],
-        "every storage slot stays empty"
-    );
+    for slot in 0..MAX_PLAYERS {
+        assert_eq!(
+            inputs.player(slot),
+            None,
+            "slot {slot} must report no participant"
+        );
+    }
 }
 
 // docs/test/game-infrastructure.md TC-014
@@ -48,9 +50,9 @@ fn two_participants_keep_slot_order_and_clear_the_tail() {
     assert_eq!(inputs.player(1), Some(slot1));
     for slot in 2..MAX_PLAYERS {
         assert_eq!(
-            inputs.players[slot],
-            PlayerActions::EMPTY,
-            "slot {slot} must stay empty"
+            inputs.player(slot),
+            None,
+            "slot {slot} is past the participant count"
         );
     }
 }

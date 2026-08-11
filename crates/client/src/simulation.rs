@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use game_core::input::{GameAction, PlayerActions, TickInputs};
+use game_core::input::{PlayerActions, TickInputs};
 
 use crate::app_state::AppState;
 use crate::input::LocalInputSampler;
@@ -50,37 +50,16 @@ pub struct RuleState {
     pub checksum: u64,
 }
 
-/// Stable action order used to encode one participant's actions for the checksum.
-const CHECKSUM_ACTION_ORDER: [GameAction; 6] = [
-    GameAction::Left,
-    GameAction::Right,
-    GameAction::SoftDrop,
-    GameAction::HardDrop,
-    GameAction::RotateClockwise,
-    GameAction::RotateCounterClockwise,
-];
-
-fn encode_actions(actions: PlayerActions) -> u8 {
-    CHECKSUM_ACTION_ORDER
-        .iter()
-        .enumerate()
-        .fold(0, |encoded, (bit, action)| {
-            if actions.contains(*action) {
-                encoded | (1 << bit)
-            } else {
-                encoded
-            }
-        })
-}
-
 impl RuleState {
     /// FNV-1a fold over the tick's participant inputs.
     fn advance(&mut self, inputs: &TickInputs) {
         const PRIME: u64 = 0x0000_0100_0000_01b3;
         let mut checksum = self.checksum ^ 0xcbf2_9ce4_8422_2325;
         checksum = (checksum ^ inputs.len() as u64).wrapping_mul(PRIME);
+        // Folds the crate's stable action encoding rather than a private copy,
+        // so the checksum cannot drift from the documented bit layout.
         for actions in inputs.active() {
-            checksum = (checksum ^ u64::from(encode_actions(*actions))).wrapping_mul(PRIME);
+            checksum = (checksum ^ u64::from(actions.bits())).wrapping_mul(PRIME);
         }
         self.checksum = checksum;
         self.tick += 1;

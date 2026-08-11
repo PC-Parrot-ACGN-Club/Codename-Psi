@@ -7,5 +7,5 @@ fn input_surface_is_available_to_external_tests() {
 
     assert_eq!(inputs.len(), 2);
     assert_eq!(inputs.player(0), Some(actions));
-    assert_eq!(inputs.players.len(), MAX_PLAYERS);
+    assert!(TickInputs::new([PlayerActions::EMPTY; MAX_PLAYERS]).is_ok());
 }
