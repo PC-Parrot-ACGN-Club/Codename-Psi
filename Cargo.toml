@@ -42,6 +42,9 @@ rand_chacha = "0.10"
 # Platform config directory for persisted settings
 directories = "6"
 
+# Test-only scratch directories for settings persistence and asset-root fixtures
+tempfile = "3"
+
 # R2 networking (exact bevy_ggrs integration locked after compatibility prototype)
 ggrs = { version = "0.13", features = ["sync-send"] }
 local-ip-address = "0.6"

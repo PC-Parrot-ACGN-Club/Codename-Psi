@@ -7,6 +7,9 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+# Covers docs/test/game-infrastructure.md TC-049 (Linux) and TC-050 (Windows):
+# the production client must compile and link with DefaultPlugins + the project
+# root plugin. Running to MainMenu is covered by TC-056/TC-057 in test.yml.
 jobs:
   build-linux:
     name: build --release (linux-gnu)

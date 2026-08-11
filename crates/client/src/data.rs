@@ -2,6 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
+use game_core::config::ConfigError;
+
+use crate::i18n::CatalogError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataCategory {
     Rules,
@@ -16,6 +20,32 @@ pub enum DataErrorCause {
     Parse(String),
     UnsupportedSchema { found: u32, supported: u32 },
     InvalidData(String),
+}
+
+/// Classify a `game_core` parser failure without losing its reason.
+impl From<ConfigError> for DataErrorCause {
+    fn from(error: ConfigError) -> Self {
+        match error {
+            ConfigError::Ron(reason) | ConfigError::Json(reason) => Self::Parse(reason),
+            ConfigError::UnsupportedSchema { found, supported } => {
+                Self::UnsupportedSchema { found, supported }
+            }
+            ConfigError::InvalidData(reason) => Self::InvalidData(reason),
+        }
+    }
+}
+
+/// Classify a client localization parser failure without losing its reason.
+impl From<CatalogError> for DataErrorCause {
+    fn from(error: CatalogError) -> Self {
+        match error {
+            CatalogError::Parse(reason) => Self::Parse(reason),
+            CatalogError::UnsupportedSchema { found, supported } => {
+                Self::UnsupportedSchema { found, supported }
+            }
+            invalid @ CatalogError::InvalidData { .. } => Self::InvalidData(invalid.to_string()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

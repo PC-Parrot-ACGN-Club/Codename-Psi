@@ -6,7 +6,10 @@ use bevy::prelude::*;
 use game_core::input::{GameAction, PlayerActions};
 use serde::{Deserialize, Serialize};
 
-use crate::app_state::{AppState, AppTransitionCause, AppTransitionRequest};
+use crate::app_state::{
+    AppState, AppTransitionCause, AppTransitionRequest, AppTransitionRequests,
+    arbitrate_transitions,
+};
 use crate::settings::PlayerInputBindings;
 
 #[derive(Debug, Default)]
@@ -14,7 +17,28 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LocalInputSampler>();
+        app.init_resource::<LocalInputSampler>()
+            .add_systems(Update, submit_pause_request.before(arbitrate_transitions));
+    }
+}
+
+/// The fixed gamepad button that proposes a pause.
+///
+/// `Pause` is not a `UIAction` and not a `GameAction`: `client::input` proposes
+/// the state transition directly.
+#[must_use]
+pub fn fixed_pause_button() -> PhysicalInput {
+    PhysicalInput::gamepad("Start")
+}
+
+/// Forward a pending pause press edge straight to the state machine.
+pub fn submit_pause_request(
+    state: Res<State<AppState>>,
+    mut sampler: ResMut<LocalInputSampler>,
+    mut requests: ResMut<AppTransitionRequests>,
+) {
+    if let Some(request) = sampler.take_pause_request(*state.get()) {
+        requests.submit(request.target, request.cause);
     }
 }
 
@@ -92,7 +116,9 @@ pub const fn interpret_direction(
 pub struct LocalInputSampler {
     pub bindings: Vec<PlayerInputBindings>,
     pressed: HashSet<(usize, PhysicalInput)>,
-    fixed_directions: HashSet<(usize, FixedDirection)>,
+    /// Fixed-binding directions are keyed by their physical source so that two
+    /// sources meaning the same direction merge into one logical action.
+    fixed_directions: HashSet<(usize, PhysicalInput, FixedDirection)>,
     pending_edges: Vec<PlayerActions>,
     pause_pending: bool,
 }
@@ -124,16 +150,30 @@ impl LocalInputSampler {
         self.pressed.remove(&(player, input.clone()));
     }
 
-    pub fn press_fixed_direction(&mut self, player: usize, direction: FixedDirection) {
-        self.fixed_directions.insert((player, direction));
+    pub fn press_fixed_direction(
+        &mut self,
+        player: usize,
+        source: PhysicalInput,
+        direction: FixedDirection,
+    ) {
+        self.fixed_directions.insert((player, source, direction));
     }
 
-    pub fn release_fixed_direction(&mut self, player: usize, direction: FixedDirection) {
-        self.fixed_directions.remove(&(player, direction));
+    pub fn release_fixed_direction(
+        &mut self,
+        player: usize,
+        source: &PhysicalInput,
+        direction: FixedDirection,
+    ) {
+        self.fixed_directions
+            .remove(&(player, source.clone(), direction));
     }
 
-    pub fn press_pause(&mut self) {
-        self.pause_pending = true;
+    /// Record a press edge of the fixed pause button; other inputs are ignored.
+    pub fn press_pause(&mut self, source: &PhysicalInput) {
+        if *source == fixed_pause_button() {
+            self.pause_pending = true;
+        }
     }
 
     #[must_use]
@@ -150,19 +190,20 @@ impl LocalInputSampler {
         let count = self.bindings.len().max(self.pending_edges.len());
         let mut sampled = vec![PlayerActions::EMPTY; count];
 
+        // Several physical sources may report the same direction; inserting into
+        // the shared bit set merges them into a single logical action.
+        for (player, _source, direction) in &self.fixed_directions {
+            let Some(player_actions) = sampled.get_mut(*player) else {
+                continue;
+            };
+            if let Some(ContextAction::Game(action)) =
+                interpret_direction(*direction, InputContext::Gameplay)
+            {
+                player_actions.insert(action);
+            }
+        }
+
         for (player, player_actions) in sampled.iter_mut().enumerate() {
-            if self
-                .fixed_directions
-                .contains(&(player, FixedDirection::Left))
-            {
-                player_actions.insert(GameAction::Left);
-            }
-            if self
-                .fixed_directions
-                .contains(&(player, FixedDirection::Right))
-            {
-                player_actions.insert(GameAction::Right);
-            }
             if let Some(edges) = self.pending_edges.get_mut(player) {
                 *player_actions = *player_actions | *edges;
                 *edges = PlayerActions::EMPTY;

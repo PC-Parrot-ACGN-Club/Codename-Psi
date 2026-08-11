@@ -2,6 +2,8 @@
 //!
 //! Full rule profiles replace these stubs when the deterministic kernel lands.
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -16,10 +18,13 @@ pub struct RulesStub {
 }
 
 /// Minimal localization table used to prove the i18n loading path.
+///
+/// Locale-set semantics belong to `client::i18n`; this stub only proves that a
+/// versioned JSON document parses into typed data from an in-memory source.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct I18nStub {
     pub schema_version: u32,
-    pub app_title: String,
+    pub messages: BTreeMap<String, String>,
 }
 
 /// Typed failures for stub config parsing (development diagnostics).
@@ -83,8 +88,14 @@ mod tests {
         let zh = parse_i18n_stub(I18N_ZH).expect("zh-CN i18n stub should parse");
         assert_eq!(en.schema_version, STUB_SCHEMA_VERSION);
         assert_eq!(zh.schema_version, STUB_SCHEMA_VERSION);
-        assert_eq!(en.app_title, "Codename Psi");
-        assert_eq!(zh.app_title, "Codename Psi");
+        assert_eq!(
+            en.messages.get("app.title").map(String::as_str),
+            Some("Codename Psi")
+        );
+        assert_eq!(
+            zh.messages.get("app.title").map(String::as_str),
+            Some("Codename Psi")
+        );
     }
 
     #[test]
