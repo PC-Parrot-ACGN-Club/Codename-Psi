@@ -66,7 +66,12 @@ impl RuleState {
     }
 }
 
-/// Observation counters for the fixed rules path.
+/// Observation record for the fixed rules path.
+///
+/// Opt-in: the production plugin never inserts it, because `stages` and
+/// `consumed_inputs` grow once per fixed tick and would climb without bound
+/// across a 60 Hz session. Tests that want to observe the schedule insert it
+/// themselves, and the recording systems skip the work when it is absent.
 #[derive(Debug, Default, Resource)]
 pub struct SimulationProbe {
     pub produced: u64,
@@ -83,7 +88,6 @@ impl Plugin for SimulationPlugin {
         app.insert_resource(Time::<Fixed>::from_duration(Duration::from_secs_f64(
             1.0 / FIXED_HZ,
         )))
-        .init_resource::<SimulationProbe>()
         .init_resource::<CurrentTickInputs>()
         .init_resource::<RuleState>()
         .configure_sets(
@@ -102,7 +106,7 @@ impl Plugin for SimulationPlugin {
 pub fn prepare_tick_inputs(
     mut sampler: ResMut<LocalInputSampler>,
     mut current: ResMut<CurrentTickInputs>,
-    mut probe: ResMut<SimulationProbe>,
+    probe: Option<ResMut<SimulationProbe>>,
 ) {
     let canonical: Vec<PlayerActions> = sampler
         .sample_fixed()
@@ -116,15 +120,17 @@ pub fn prepare_tick_inputs(
     });
     current.consumed = false;
 
-    probe.produced += 1;
-    probe.stages.push(FixedStage::Input);
+    if let Some(mut probe) = probe {
+        probe.produced += 1;
+        probe.stages.push(FixedStage::Input);
+    }
 }
 
 /// Consume this tick's inputs exactly once and advance the rule state.
 pub fn advance_rules(
     mut current: ResMut<CurrentTickInputs>,
     mut rules: ResMut<RuleState>,
-    mut probe: ResMut<SimulationProbe>,
+    probe: Option<ResMut<SimulationProbe>>,
 ) {
     if current.consumed {
         return;
@@ -132,7 +138,10 @@ pub fn advance_rules(
     current.consumed = true;
 
     rules.advance(&current.inputs);
-    probe.consumed += 1;
-    probe.consumed_inputs.push(current.inputs);
-    probe.stages.push(FixedStage::Rules);
+
+    if let Some(mut probe) = probe {
+        probe.consumed += 1;
+        probe.consumed_inputs.push(current.inputs);
+        probe.stages.push(FixedStage::Rules);
+    }
 }

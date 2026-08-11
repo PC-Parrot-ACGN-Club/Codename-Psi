@@ -32,9 +32,13 @@ pub fn state_only_app() -> App {
 }
 
 /// A minimal client app running the real project root plugin under controlled time.
+///
+/// The simulation probe is opt-in instrumentation the production plugin does
+/// not register, so tests that observe the fixed schedule insert it here.
 pub fn controlled_app() -> App {
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, GameInfrastructurePlugin));
+    app.init_resource::<client::simulation::SimulationProbe>();
     app.world_mut().resource_mut::<Time<Virtual>>().pause();
     app
 }

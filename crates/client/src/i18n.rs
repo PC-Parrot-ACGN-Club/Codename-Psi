@@ -95,13 +95,22 @@ impl Localization {
             return value.clone();
         }
 
-        self.diagnostics
+        // UI code queries text every frame, so an unfiltered log would grow
+        // without bound on a single missing key. One entry per (locale, key)
+        // keeps the diagnostic just as informative and bounds it by the size
+        // of the catalog.
+        let diagnostic = MissingKeyDiagnostic {
+            locale: self.current_locale.clone(),
+            key: key.into(),
+        };
+        let mut diagnostics = self
+            .diagnostics
             .lock()
-            .expect("localization diagnostic mutex poisoned")
-            .push(MissingKeyDiagnostic {
-                locale: self.current_locale.clone(),
-                key: key.into(),
-            });
+            .expect("localization diagnostic mutex poisoned");
+        if !diagnostics.contains(&diagnostic) {
+            diagnostics.push(diagnostic);
+        }
+        drop(diagnostics);
 
         self.catalogs
             .get(DEFAULT_LOCALE)

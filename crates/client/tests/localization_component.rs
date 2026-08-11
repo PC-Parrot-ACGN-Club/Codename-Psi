@@ -73,6 +73,30 @@ fn a_key_missing_from_the_current_locale_falls_back_to_english_with_a_diagnostic
     );
 }
 
+/// UI code queries text every frame, so a repeated miss must not accumulate.
+#[test]
+fn repeated_lookups_of_one_missing_key_record_a_single_diagnostic() {
+    let localization = Localization::new(
+        "zh-CN",
+        [
+            catalog("zh-CN", &[]),
+            catalog("en", &[("main_menu.start", "Start")]),
+        ],
+    );
+
+    for _ in 0..64 {
+        let _ = localization.text("main_menu.start");
+        let _ = localization.text("missing.example");
+    }
+
+    let diagnostics = localization.diagnostics();
+    assert_eq!(
+        diagnostics.len(),
+        2,
+        "one entry per (locale, key), got {diagnostics:?}"
+    );
+}
+
 // docs/test/game-infrastructure.md TC-010
 #[test]
 fn a_key_missing_everywhere_is_returned_as_its_own_placeholder() {
