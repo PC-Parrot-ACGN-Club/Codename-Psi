@@ -42,11 +42,7 @@ fn assert_single_current_state(app: &App, expected: AppState) {
 }
 
 fn phase_ran(app: &App, state: AppState) -> bool {
-    app.world()
-        .resource::<PhaseRuns>()
-        .0
-        .iter()
-        .any(|seen| *seen == state)
+    app.world().resource::<PhaseRuns>().0.contains(&state)
 }
 
 fn clear_phases(app: &mut App) {

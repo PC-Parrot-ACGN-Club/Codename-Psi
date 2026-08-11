@@ -19,7 +19,26 @@ const FORBIDDEN_IN_GAME_CORE: [&str; 8] = [
     "local-ip-address",
 ];
 
-/// Collect dependency names from every dependency table of a manifest.
+/// Whether a manifest table header is a *normal* dependency table.
+///
+/// `[dev-dependencies]` and `[build-dependencies]` are deliberately excluded: a
+/// required edge must not be satisfiable by a test-only or build-only
+/// dependency. Target-specific tables such as
+/// `[target.'cfg(unix)'.dependencies]` still count, while their `dev-`/`build-`
+/// forms do not, because only the normal ones end in `.dependencies`.
+fn is_normal_dependency_table(header: &str) -> bool {
+    let Some(name) = header
+        .trim_start_matches('[')
+        .split(']')
+        .next()
+        .map(str::trim)
+    else {
+        return false;
+    };
+    name == "dependencies" || name.ends_with(".dependencies")
+}
+
+/// Collect dependency names from the normal dependency tables of a manifest.
 fn dependency_names(manifest: &str) -> Vec<String> {
     let mut names = Vec::new();
     let mut in_dependencies = false;
@@ -27,7 +46,7 @@ fn dependency_names(manifest: &str) -> Vec<String> {
     for line in manifest.lines() {
         let line = line.trim();
         if line.starts_with('[') {
-            in_dependencies = line.contains("dependencies");
+            in_dependencies = is_normal_dependency_table(line);
             continue;
         }
         if !in_dependencies || line.is_empty() || line.starts_with('#') {
@@ -85,11 +104,25 @@ fn game_core_stays_isolated_from_platform_runtimes() {
 
 // docs/test/game-infrastructure.md TC-051
 #[test]
-fn the_dependency_name_scan_reads_real_manifest_entries() {
+fn the_dependency_name_scan_reads_normal_tables_only() {
     let dependencies = dependency_names(CLIENT_MANIFEST);
 
     assert!(
         dependencies.contains(&"bevy".to_string()),
         "the scan must actually see client's dependency table: {dependencies:?}"
     );
+    // `tempfile` is a dev-dependency of client only. If it shows up here, the
+    // required-edge assertions above would also pass for a game_core moved into
+    // `[dev-dependencies]`, which would no longer be a runtime edge.
+    assert!(
+        !dependencies.contains(&"tempfile".to_string()),
+        "a dev-only dependency must never satisfy a required edge: {dependencies:?}"
+    );
+    assert!(is_normal_dependency_table(
+        "[target.'cfg(unix)'.dependencies]"
+    ));
+    assert!(!is_normal_dependency_table("[dev-dependencies]"));
+    assert!(!is_normal_dependency_table(
+        "[target.'cfg(unix)'.dev-dependencies]"
+    ));
 }

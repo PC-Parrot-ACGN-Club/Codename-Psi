@@ -62,6 +62,20 @@ impl PlayerInputBindings {
             .filter_map(move |(action, inputs)| inputs.contains(input).then_some(*action))
     }
 
+    /// Reject fixed physical bindings before they enter the persisted surface.
+    ///
+    /// `GameAction` deserializes every variant, so a hand-edited document could
+    /// otherwise carry `Left`/`Right` into the configurable binding map and be
+    /// written back out on the next save.
+    fn reject_fixed_bindings(&self) -> Result<(), SettingsError> {
+        self.bindings
+            .keys()
+            .find(|action| !action.is_configurable())
+            .map_or(Ok(()), |action| {
+                Err(SettingsError::NonConfigurableBinding(*action))
+            })
+    }
+
     #[must_use]
     pub fn conflict(&self, action: GameAction, input: &PhysicalInput) -> Option<BindingConflict> {
         action.is_configurable().then(|| {
@@ -129,6 +143,8 @@ pub enum SettingsError {
     Parse(String),
     #[error("unsupported settings schema {found} (supported: {supported})")]
     UnsupportedSchema { found: u32, supported: u32 },
+    #[error("{0:?} is a fixed physical binding and cannot be persisted as a player binding")]
+    NonConfigurableBinding(GameAction),
     #[error("settings I/O failed at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -164,10 +180,16 @@ pub fn parse_settings(source: &str) -> Result<UserSettings, SettingsError> {
             supported: SETTINGS_SCHEMA_VERSION,
         });
     }
+    for player in &settings.players {
+        player.reject_fixed_bindings()?;
+    }
     Ok(settings)
 }
 
 pub fn serialize_settings(settings: &UserSettings) -> Result<String, SettingsError> {
+    for player in &settings.players {
+        player.reject_fixed_bindings()?;
+    }
     ron::ser::to_string_pretty(settings, ron::ser::PrettyConfig::default())
         .map_err(|error| SettingsError::Parse(error.to_string()))
 }
@@ -213,6 +235,21 @@ impl SettingsStore {
     }
 
     pub fn save(&self, settings: &UserSettings) -> Result<(), SettingsError> {
+        self.save_with(settings, |staged, official| {
+            std::fs::rename(staged, official)
+        })
+    }
+
+    /// Write-then-replace with an injectable replace step.
+    ///
+    /// The seam exists so tests can fail the replace *after* the staging file
+    /// was written successfully — the only way to exercise the branch that has
+    /// to leave the official file and the in-memory value untouched.
+    pub fn save_with(
+        &self,
+        settings: &UserSettings,
+        replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    ) -> Result<(), SettingsError> {
         let serialized = serialize_settings(settings)?;
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         std::fs::create_dir_all(parent).map_err(|source| SettingsError::Io {
@@ -224,7 +261,7 @@ impl SettingsStore {
             path: temporary.clone(),
             source,
         })?;
-        std::fs::rename(&temporary, &self.path).map_err(|source| SettingsError::Io {
+        replace(&temporary, &self.path).map_err(|source| SettingsError::Io {
             path: self.path.clone(),
             source,
         })

@@ -23,12 +23,16 @@ fn a_successful_save_is_reloadable_and_leaves_no_partial_file() {
     let root = tempfile::tempdir().expect("temporary config root");
     let store = SettingsStore::new(root.path().join("settings.ron"));
 
-    let mut old = UserSettings::default();
-    old.language = "en".into();
+    let old = UserSettings {
+        language: "en".into(),
+        ..Default::default()
+    };
     store.save(&old).expect("the first save succeeds");
 
-    let mut new = old.clone();
-    new.language = "zh-CN".into();
+    let new = UserSettings {
+        language: "zh-CN".into(),
+        ..old.clone()
+    };
     store.save(&new).expect("the replacing save succeeds");
 
     let reloaded = store.load();
@@ -47,19 +51,34 @@ fn a_failed_replace_keeps_the_official_file_and_the_in_memory_value() {
     let path = root.path().join("settings.ron");
     let store = SettingsStore::new(&path);
 
-    let mut old = UserSettings::default();
-    old.language = "en".into();
+    let old = UserSettings {
+        language: "en".into(),
+        ..Default::default()
+    };
     store.save(&old).expect("the first save succeeds");
 
-    // Block the staging path so the write-then-replace strategy cannot complete.
-    std::fs::create_dir(path.with_extension("ron.tmp")).expect("block the staging path");
+    let in_memory = UserSettings {
+        language: "zh-CN".into(),
+        ..old.clone()
+    };
 
-    let mut in_memory = old.clone();
-    in_memory.language = "zh-CN".into();
+    // Fail the replace step itself: the staging file must already be written,
+    // otherwise this would only cover a failure to stage.
+    let mut staged_before_replace = false;
     let error = store
-        .save(&in_memory)
-        .expect_err("the blocked replace must fail observably");
+        .save_with(&in_memory, |staged, _official| {
+            staged_before_replace = staged.is_file();
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "replace refused",
+            ))
+        })
+        .expect_err("the failed replace must fail observably");
 
+    assert!(
+        staged_before_replace,
+        "the staging file must be fully written before the replace step runs"
+    );
     assert!(
         !error.to_string().is_empty(),
         "the failure must be observable to the caller"

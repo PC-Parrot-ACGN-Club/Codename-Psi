@@ -100,8 +100,10 @@ fn a_malformed_settings_file_falls_back_to_defaults_with_a_parse_diagnostic() {
 fn an_unsupported_settings_schema_falls_back_to_defaults_with_a_version_diagnostic() {
     let root = tempfile::tempdir().expect("temporary config root");
     let path = root.path().join("settings.ron");
-    let mut unsupported = UserSettings::default();
-    unsupported.schema_version = 255;
+    let unsupported = UserSettings {
+        schema_version: 255,
+        ..Default::default()
+    };
     std::fs::write(&path, serialize_settings(&unsupported).expect("serialize")).expect("write");
     let store = SettingsStore::new(&path);
 
@@ -334,4 +336,94 @@ fn fixed_binding_actions_are_excluded_from_conflict_detection() {
             .is_some(),
         "the configurable scope itself still reports conflicts"
     );
+}
+
+/// A document whose P1 binding map carries one fixed-binding action alongside
+/// the four configurable ones.
+fn settings_ron_binding(fixed: &str) -> String {
+    format!(
+        r#"(
+    schema_version: 1,
+    players: ((
+        bindings: {{
+            {fixed}: [Keyboard("KeyJ")],
+            SoftDrop: [Keyboard("KeyS")],
+            HardDrop: [Keyboard("KeyW")],
+            RotateClockwise: [Keyboard("KeyD")],
+            RotateCounterClockwise: [Keyboard("KeyA")],
+        }},
+    ), (
+        bindings: {{
+            SoftDrop: [Keyboard("ArrowDown")],
+            HardDrop: [Keyboard("ArrowUp")],
+            RotateClockwise: [Keyboard("ArrowRight")],
+            RotateCounterClockwise: [Keyboard("ArrowLeft")],
+        }},
+    )),
+)
+"#
+    )
+}
+
+fn assert_fixed_binding_is_rejected(fixed: GameAction, name: &str) {
+    match parse_settings(&settings_ron_binding(name)) {
+        Err(SettingsError::NonConfigurableBinding(rejected)) => assert_eq!(rejected, fixed),
+        other => panic!("a persisted {fixed:?} binding must be rejected, got {other:?}"),
+    }
+}
+
+// docs/test/game-infrastructure.md TC-003
+#[test]
+fn a_document_binding_the_fixed_left_action_is_rejected() {
+    assert_fixed_binding_is_rejected(GameAction::Left, "Left");
+}
+
+// docs/test/game-infrastructure.md TC-003
+#[test]
+fn a_document_binding_the_fixed_right_action_is_rejected() {
+    assert_fixed_binding_is_rejected(GameAction::Right, "Right");
+}
+
+// docs/test/game-infrastructure.md TC-004
+#[test]
+fn a_settings_value_carrying_a_fixed_binding_cannot_be_serialized_back() {
+    for fixed in FIXED_GAME_ACTIONS {
+        let mut settings = UserSettings::default();
+        settings.players[0]
+            .bindings
+            .insert(fixed, vec![PhysicalInput::keyboard("KeyJ")]);
+
+        match serialize_settings(&settings) {
+            Err(SettingsError::NonConfigurableBinding(rejected)) => assert_eq!(rejected, fixed),
+            other => panic!("a {fixed:?} binding must not be writable, got {other:?}"),
+        }
+    }
+}
+
+// docs/test/game-infrastructure.md TC-059
+#[test]
+fn a_document_with_a_fixed_binding_defaults_and_is_never_written_back() {
+    let root = tempfile::tempdir().expect("temporary config root");
+    let path = root.path().join("settings.ron");
+    std::fs::write(&path, settings_ron_binding("Left")).expect("write settings");
+    let store = SettingsStore::new(&path);
+
+    let load = store.load();
+
+    assert_eq!(load.settings(), &UserSettings::default());
+    match load {
+        SettingsLoad::Defaulted {
+            error: Some(SettingsError::NonConfigurableBinding(GameAction::Left)),
+            ..
+        } => {}
+        other => panic!("a fixed binding must leave a scope diagnostic, got {other:?}"),
+    }
+
+    // Saving what was actually loaded must not re-emit the rejected binding.
+    store
+        .save(&UserSettings::default())
+        .expect("the defaulted value is savable");
+    let reloaded = store.load();
+    assert!(matches!(reloaded, SettingsLoad::Loaded(_)));
+    assert_only_configurable_bindings(reloaded.settings());
 }
