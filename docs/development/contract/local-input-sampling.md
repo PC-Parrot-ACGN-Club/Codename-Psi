@@ -33,20 +33,7 @@
 
 ## 逻辑动作边界
 
-采样端只报告该 tick 采样到哪些逻辑动作，不决定互斥逻辑组合的最终含义。
-
-统一归一化规则由 `core::input` 提供：
-
-```text
-Left + Right
-→ neither
-
-RotateClockwise + RotateCounterClockwise
-→ neither
-
-SoftDrop + HardDrop
-→ HardDrop
-```
+采样端只报告该 tick 采样到哪些逻辑动作，不决定互斥逻辑组合的最终含义；统一归一化规则以[统一游戏动作与 Tick 输入 Spec](../component/game-action-input.md)的"逻辑动作归一化"一节为准，本 Contract 不重复定义。
 
 相同逻辑语义的多个物理来源不属于冲突：
 

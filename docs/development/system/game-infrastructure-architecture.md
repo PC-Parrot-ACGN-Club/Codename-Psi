@@ -3,7 +3,7 @@
 **状态：** v1
 **主分类：** System  
 **相关模块：** `core`、`client`、`net`、Bevy 应用运行时  
-**关联文档：** [PRD](../../PRD.md)、[TDD](../../TDD.md)、[应用状态机 Spec](../component/application-state-machine.md)、[应用状态机协作 Contract](../contract/application-state-machine.md)
+**关联文档：** [PRD](../../PRD.md)、[TDD](../../TDD.md)、[应用状态机 Spec](../component/application-state-machine.md)、[应用状态机协作 Contract](../contract/application-state-machine.md)、[固定频率规则调度 Contract](../contract/fixed-tick-simulation.md)
 
 ## 目标与范围
 
@@ -29,6 +29,7 @@
 6. 进入 `Match` 后，普通 `Update` 负责设备输入采集和表现更新。
 7. Bevy 固定调度以 60Hz 消费量化后的 tick 输入并驱动规则状态。
 8. 表现系统读取最近规则状态提供的可观察数据更新画面、UI 和音频。
+9. 进入 `Paused` 后对局 simulation 停止；恢复 `Match` 后从暂停前已有的规则状态继续推进（详见[固定频率规则调度 Contract](../contract/fixed-tick-simulation.md)）。
 
 ## 启动准备
 
@@ -93,13 +94,53 @@ settings == Resolved
 - 用户设置、渲染实体、音频、动画和网络 socket 不进入 `core` 的可回滚规则状态。
 - 顶层 `AppState` 表达客户端宏观运行阶段；对局内部规则状态与网络连接生命周期使用各自的状态模型。
 
+## 自动化启动验收
+
+生产客户端与自动化 startup smoke 复用同一个项目根插件：
+
+```text
+Production client
+DefaultPlugins
++ 项目根插件
+
+Automated startup smoke
+minimal Bevy runtime
++ 项目根插件
+```
+
+自动化 startup smoke 验证以下路径：
+
+```text
+创建 Bevy App
+→ 注册与生产客户端相同的项目根插件
+→ AppState 初始化为 Boot
+→ UserSettings 完成 bootstrap resolution
+→ Localization 完成 bootstrap resolution
+→ 两项均 Resolved
+→ Boot → MainMenu
+→ 测试正常结束
+```
+
+跨平台验收拆分为两个层面：
+
+### Production build
+
+Linux 与 Windows 均构建并链接真实 production client，覆盖真实客户端依赖，包括生产 Bevy plugin 配置（`DefaultPlugins` + 项目根插件）。
+
+### Automated startup smoke
+
+Linux 与 Windows 均运行复用项目根插件、无真实窗口依赖的最小 Bevy App smoke，验证项目根插件能够完成基础设施装配、`AppState` 初始化、启动准备 bootstrap resolution 以及 `Boot → MainMenu` 主路径。自动化 smoke 不要求真实窗口交互；真实窗口启动仍属于 production client 的运行能力。
+
 ## 验收条件
 
-- Linux 与 Windows 目标可以构建并启动 `client`。
+- Linux 与 Windows 均可以构建并链接 production client，使用与生产环境一致的 Bevy plugin 配置。
+- Linux 与 Windows 均可以运行复用项目根插件的自动化 startup smoke，且不要求真实窗口交互。
+- 自动化 startup smoke 覆盖：项目根插件装配、`AppState` 初始化为 `Boot`、`UserSettings` 与 `Localization` 完成 bootstrap resolution、`Boot → MainMenu` 主路径。
 - 应用初始化后进入 `Boot`；设置与本地化均 `Resolved` 后进入 `MainMenu`。
 - `MainMenu` 及后续状态中 `UserSettings` 与 `Localization` 已可用。
 - 顶层阶段由单一应用状态机管理，并可完成基础主路径状态切换。
 - 对局规则入口挂接到 60Hz 固定调度；普通 `Update` 频率不会改变 fixed tick 计数。
+- 进入 `Paused` 后对局 simulation 停止；恢复 `Match` 后从暂停前已有的规则状态继续推进。
 - `client` 可以使用 `core`，`net` 可以使用 `core`，`core` 不获得 Bevy、窗口、文件系统或网络依赖。
 
 ## Test Basis
@@ -107,4 +148,5 @@ settings == Resolved
 - [Confirmed] Issue #11：要求 Bevy 0.19.x 运行时、明确应用状态、60Hz 固定更新、输入/资源/设置能力和 `core` / `client` / `net` 边界。
 - [Confirmed] TDD §2：定义 workspace 职责和 `client → core`、`net → core` 依赖方向。
 - [Confirmed] TDD §3–§5：定义固定 tick、Bevy States、配置、本地化和安全默认值。
-- [Confirmed] 当前审核结论：`Boot` 作为设置与本地化的启动同步屏障；`main.rs` 保持薄入口；应用状态机为独立 Component。
+- [Confirmed] [固定频率规则调度 Contract](../contract/fixed-tick-simulation.md)：`FixedGameSet::Input` / `FixedGameSet::Rules` 只在 `AppState::Match` 中执行，`Paused` 停止对局模拟。
+- [Confirmed] 当前审核结论：`Boot` 作为设置与本地化的启动同步屏障；`main.rs` 保持薄入口；应用状态机为独立 Component；生产客户端与自动化 startup smoke 复用同一项目根插件（方案 A）；Production build 与 Automated startup smoke 的跨平台验收职责分开定义。
