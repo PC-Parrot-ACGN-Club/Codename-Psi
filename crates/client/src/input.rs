@@ -19,15 +19,22 @@ impl Plugin for InputPlugin {
         app.init_resource::<LocalInputSampler>()
             .init_resource::<UiInputState>()
             .add_message::<UIActionEvent>()
+            // Sampling must observe this frame's devices *before* this frame's
+            // fixed ticks. Bevy's main schedule runs `RunFixedMainLoop` ahead of
+            // `Update`, so capturing in `Update` would hand every rule tick the
+            // previous frame's device state.
+            .add_systems(
+                RunFixedMainLoop,
+                (install_settings_bindings, capture_devices)
+                    .chain()
+                    .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+            )
+            // The pause request is a state transition, so it stays with the
+            // other requesters in `Update`; the edge it reads was recorded by
+            // `capture_devices` earlier in the same frame.
             .add_systems(
                 Update,
-                (
-                    install_settings_bindings,
-                    capture_devices,
-                    submit_pause_request,
-                )
-                    .chain()
-                    .in_set(AppTransitionSet::Request),
+                submit_pause_request.in_set(AppTransitionSet::Request),
             )
             // Menu contexts only: in `Match` the same physical directions are
             // rules input, and must not also move UI focus.
@@ -268,11 +275,12 @@ pub fn install_settings_bindings(
     }
 }
 
-/// Read real keyboard and gamepad state into the sampler each `Update`.
+/// Read real keyboard and gamepad state into the sampler once per frame.
 ///
 /// The sampler owns the fixed-tick semantics; this system only reports what is
-/// physically held or newly pressed right now. Gamepads are matched to local
-/// players by connection order, so the first connected pad drives player 0.
+/// physically held right now and which press edges happened this frame.
+/// Gamepads are matched to local players by connection order, so the first
+/// connected pad drives player 0.
 pub fn capture_devices(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
@@ -282,22 +290,32 @@ pub fn capture_devices(
 
     // Collected first: resolving a binding borrows the sampler that the
     // press/release calls below need mutably.
-    let mut configurable: Vec<(usize, PhysicalInput, bool)> = Vec::new();
+    let mut configurable: Vec<(usize, PhysicalInput, bool, bool)> = Vec::new();
     for (player, bindings) in sampler.bindings.iter().enumerate() {
         let pad = pads.get(player).copied();
         for input in bindings.bindings.values().flatten() {
-            let held = match input {
-                PhysicalInput::Keyboard(name) => {
-                    keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
-                }
+            let (held, edge) = match input {
+                PhysicalInput::Keyboard(name) => keyboard_from_name(name)
+                    .map_or((false, false), |code| {
+                        (keyboard.pressed(code), keyboard.just_pressed(code))
+                    }),
                 PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
                     .zip(pad)
-                    .is_some_and(|(button, pad)| pad.pressed(button)),
+                    .map_or((false, false), |(button, pad)| {
+                        (pad.pressed(button), pad.just_pressed(button))
+                    }),
             };
-            configurable.push((player, input.clone(), held));
+            configurable.push((player, input.clone(), held, edge));
         }
     }
-    for (player, input, held) in configurable {
+    for (player, input, held, edge) in configurable {
+        // A press that also ended this frame still owes the rules layer one
+        // action, so the edge is reported even though nothing is held now.
+        // `press` only records the edge on the transition, so the extra call
+        // when the input is still held is a no-op.
+        if edge {
+            sampler.press(player, input.clone());
+        }
         if held {
             sampler.press(player, input);
         } else {

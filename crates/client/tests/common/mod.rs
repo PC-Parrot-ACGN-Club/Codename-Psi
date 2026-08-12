@@ -6,8 +6,13 @@
 
 #![allow(dead_code)]
 
+use std::time::Duration;
+
+use bevy::input::ButtonState;
+use bevy::input::keyboard::{Key, KeyboardInput, NativeKey};
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
+use bevy::time::TimeUpdateStrategy;
 use client::GameInfrastructurePlugin;
 use client::app_state::{AppState, AppTransitionCause, AppTransitionRequests};
 use client::input::{LocalInputSampler, PhysicalInput};
@@ -63,6 +68,40 @@ pub fn controlled_app_with_asset_root(root: impl Into<String>) -> App {
     app.init_resource::<client::simulation::SimulationProbe>();
     app.world_mut().resource_mut::<Time<Virtual>>().pause();
     app
+}
+
+/// A client app driven by the production main schedule instead of by hand.
+///
+/// The harness above pauses time and runs `FixedUpdate` directly, which cannot
+/// observe where sampling sits relative to the fixed loop -- it is the caller
+/// that decides the order. Here time advances a fixed amount per `update()`, so
+/// `RunFixedMainLoop` runs the ticks itself and the real ordering is under test.
+pub fn production_schedule_app() -> App {
+    let mut app = controlled_app();
+    app.world_mut().resource_mut::<Time<Virtual>>().unpause();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(FRAME));
+    app
+}
+
+/// One rules tick worth of wall clock, so one frame drives exactly one tick.
+pub const FRAME: Duration = Duration::from_nanos(16_666_667);
+
+/// Feed a key through the real event path.
+///
+/// Writing `ButtonInput` directly would not survive `keyboard_input_system`,
+/// which clears the just-pressed set in `PreUpdate` before replaying events.
+/// Only messages produce a press edge the capture system can observe, which is
+/// exactly what a real device does.
+pub fn send_key(app: &mut App, code: KeyCode, state: ButtonState) {
+    let window = Entity::PLACEHOLDER;
+    app.world_mut().write_message(KeyboardInput {
+        key_code: code,
+        logical_key: Key::Unidentified(NativeKey::Unidentified),
+        state,
+        text: None,
+        repeat: false,
+        window,
+    });
 }
 
 /// Pump frames until the startup barrier resolves.
