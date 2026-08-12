@@ -123,20 +123,20 @@ minimal Bevy runtime
 → 测试正常结束
 ```
 
-跨平台验收拆分为两个层面：
+启动验收拆分为两个层面：
 
 ### Production build
 
-Linux 与 Windows 均构建并链接真实 production client，覆盖真实客户端依赖，包括生产 Bevy plugin 配置（`DefaultPlugins` + 项目根插件）。
+在 Linux 构建并链接真实 production client，覆盖真实客户端依赖，包括生产 Bevy plugin 配置（`DefaultPlugins` + 项目根插件）。
 
 ### Automated startup smoke
 
-Linux 与 Windows 均运行复用项目根插件、无真实窗口依赖的最小 Bevy App smoke，验证项目根插件能够完成基础设施装配、`AppState` 初始化、启动准备 bootstrap resolution 以及 `Boot → MainMenu` 主路径。自动化 smoke 不要求真实窗口交互；真实窗口启动仍属于 production client 的运行能力。
+在 Linux 运行复用项目根插件、无真实窗口依赖的最小 Bevy App smoke，验证项目根插件能够完成基础设施装配、`AppState` 初始化、启动准备 bootstrap resolution 以及 `Boot → MainMenu` 主路径。自动化 smoke 不要求真实窗口交互；真实窗口启动仍属于 production client 的运行能力。
 
 ## 验收条件
 
-- Linux 与 Windows 均可以构建并链接 production client，使用与生产环境一致的 Bevy plugin 配置。
-- Linux 与 Windows 均可以运行复用项目根插件的自动化 startup smoke，且不要求真实窗口交互。
+- Linux 可以构建并链接 production client，使用与生产环境一致的 Bevy plugin 配置。
+- Linux 可以运行复用项目根插件的自动化 startup smoke，且不要求真实窗口交互。
 - 自动化 startup smoke 覆盖：项目根插件装配、`AppState` 初始化为 `Boot`、`UserSettings` 与 `Localization` 完成 bootstrap resolution、`Boot → MainMenu` 主路径。
 - 应用初始化后进入 `Boot`；设置与本地化均 `Resolved` 后进入 `MainMenu`。
 - 启动资源在 `5s` 内没有返回结果时按加载失败处理并进入 `Resolved`，`Boot` 不会永久停留。
@@ -152,5 +152,5 @@ Linux 与 Windows 均运行复用项目根插件、无真实窗口依赖的最�
 - [Confirmed] TDD §2：定义 workspace 职责和 `client → game_core`、`net → game_core` 依赖方向。
 - [Confirmed] TDD §3–§5：定义固定 tick、Bevy States、配置、本地化和安全默认值。
 - [Confirmed] [固定频率规则调度 Contract](../contract/fixed-tick-simulation.md)：`FixedGameSet::Input` / `FixedGameSet::Rules` 只在 `AppState::Match` 中执行，`Paused` 停止对局模拟。
-- [Confirmed] 当前审核结论：`Boot` 作为设置与本地化的启动同步屏障；`main.rs` 保持薄入口；应用状态机为独立 Component；生产客户端与自动化 startup smoke 复用同一项目根插件（方案 A）；Production build 与 Automated startup smoke 的跨平台验收职责分开定义。
+- [Confirmed] 当前审核结论：`Boot` 作为设置与本地化的启动同步屏障；`main.rs` 保持薄入口；应用状态机为独立 Component；生产客户端与自动化 startup smoke 复用同一项目根插件（方案 A）；Production build 与 Automated startup smoke 的启动验收职责分开定义。
 - [Confirmed] 当前审核结论：启动准备设置 `5s` 超时，超时按加载失败处理并以内置默认值进入 `Resolved`，保证 `Boot` 屏障在有限时间内释放。

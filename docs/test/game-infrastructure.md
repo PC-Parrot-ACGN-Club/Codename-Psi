@@ -23,7 +23,7 @@
 
 - 参数化用例的一行代表一个逻辑用例，实施时每组测试数据都作为独立 case 执行并报告。
 - 诊断以实现可提供的错误、事件或日志等形式观测；测试只核对 Confirmed 文档要求的分类与上下文，不固定错误载体或 API 名称。
-- Production build（TC-049～TC-050）由 `release.yml`（`workflow_dispatch` 手动触发）的 Windows/Linux runner 执行；自动化 startup smoke（TC-056～TC-057）与其余测试由 `test.yml`（push/PR 自动触发）的 Windows/Linux runner 执行。
+- Production build（TC-049）由 `release.yml`（`workflow_dispatch` 手动触发）的 Linux runner 执行；自动化 startup smoke（TC-056）与其余测试由 `test.yml`（目标分支为 `main` 的 pull request 触发）的 Linux runner 执行。开发分支的推送不触发 CI，该阶段由本地执行覆盖，见 [TDD](../TDD.md) §7.1、§7.2。
 - 生产客户端与自动化 startup smoke 共用同一项目根插件（方案 A）；smoke 侧不要求真实窗口，production build 侧使用与生产环境一致的 `DefaultPlugins` 配置；自动退出方式由实现选择。
 
 ## 范围边界
@@ -80,8 +80,8 @@
 ### System — Client
 
 - 从 `Boot` 到 `Result` 再回主菜单的基础状态主路径（TC-048；Concern: Smoke）。
-- Linux、Windows production client 构建与链接（TC-049～TC-050；Concern: Smoke）。
-- Linux、Windows 复用项目根插件的自动化 startup smoke（TC-056～TC-057；Concern: Smoke）。
+- Linux production client 构建与链接（TC-049；Concern: Smoke）。
+- Linux 复用项目根插件的自动化 startup smoke（TC-056；Concern: Smoke）。
 - workspace 依赖方向与 `game_core` 平台隔离（TC-051）。
 
 ## 设计方法与覆盖模型
@@ -92,7 +92,7 @@
 | 边界值分析 | participant 数量 `0/2/8/9`；fixed tick 前后事件边界 | TC-013～TC-016、TC-026～TC-027A |
 | 判定表 | 输入冲突组合；启动任务 `Pending/Resolved` 组合 | TC-017～TC-020、TC-046 |
 | 状态迁移 | 全部基础状态边、同状态、非法边、已定义请求仲裁、`Match`/`Paused` 对局 simulation 生命周期 | TC-034～TC-040、TC-048、TC-053～TC-055 |
-| 场景 / 协作路径 | 设置保存恢复、资源加载 fallback、客户端主路径、Pause 直接触发、跨平台构建与自动化启动 smoke | TC-004、TC-027B、TC-032～TC-033、TC-047～TC-050、TC-056～TC-058 |
+| 场景 / 协作路径 | 设置保存恢复、资源加载 fallback、客户端主路径、Pause 直接触发、production 构建与自动化启动 smoke | TC-004、TC-027B、TC-032～TC-033、TC-047～TC-049、TC-056、TC-058 |
 | 变形测试 | Update 次数变化时 fixed tick 结果保持一致 | TC-045 |
 | 错误猜测 | tick 间短按、持续按住一次性动作、保存 replace 失败、重复迁移请求 | TC-026～TC-027A、TC-033、TC-039 |
 
@@ -149,14 +149,12 @@
 | TC-047 | 设置与本地化加载失败经 fallback 后仍解除启动屏障 | P0 | Component Integration | Smoke；Content Validation | Configuration；Client | 最小启动 app，设置与 catalog 均使用失败 fixture | 完成两类加载与启动协调 | malformed settings；missing/unsupported locale catalog | 两项 resolution 均含可用默认值和原始诊断并标记 Resolved；应用进入 MainMenu；查询设置与文本安全可用 | [Confirmed] [游戏基础设施运行架构：主流程](../development/system/game-infrastructure-architecture.md#主流程) |
 | TC-048 | 完整基础状态主路径保持单一顶层状态与对应运行阶段 | P0 | System | Smoke | Client；Match Flow | 已装配客户端，启动资源可 resolved，已确认的状态迁移请求均可触发 | 完成启动并依次触发开始、模式确认、角色确认、暂停、继续、比赛结束、返回主菜单 | Boot→MainMenu→ModeSelect→CharacterSelect→Match→Paused→Match→Result→MainMenu | 每步仅有一个当前 AppState；对应状态的运行阶段在进入后激活；本用例不规定 ModeSelect、CharacterSelect、Result 等状态的业务数据结构或具体内容 | [Confirmed] [游戏基础设施运行架构：状态与分支](../development/system/game-infrastructure-architecture.md#状态与分支) |
 | TC-049 | Linux 目标构建并链接 production client | P0 | System | Smoke | Client | Linux CI runner 与发布支持的 Rust toolchain | 使用生产 Bevy plugin 配置（`DefaultPlugins` + 项目根插件）构建 workspace/client | Linux x86_64；默认功能集合 | 编译、链接、插件装配成功，产出可执行的 production 二进制；本用例不要求运行到 MainMenu（运行路径由 TC-056 覆盖） | [Confirmed] [游戏基础设施运行架构：Production build](../development/system/game-infrastructure-architecture.md#production-build) |
-| TC-050 | Windows 目标构建并链接 production client | P0 | System | Smoke | Client | Windows CI runner 与发布支持的 Rust toolchain | 使用生产 Bevy plugin 配置（`DefaultPlugins` + 项目根插件）构建 workspace/client | Windows x86_64；默认功能集合 | 编译、链接、插件装配成功，产出可执行的 production 二进制；本用例不要求运行到 MainMenu | [Confirmed] [游戏基础设施运行架构：Production build](../development/system/game-infrastructure-architecture.md#production-build) |
 | TC-051 | workspace 依赖图保持 client/net 指向 game_core 且 game_core 与平台运行时隔离 | P1 | System | — | Client | 可读取 Cargo metadata 与各 crate manifest，并可单独选择 game_core package | 检查 Cargo dependency graph 与 game_core manifest，再独立构建和测试 game_core | 必需边：client→game_core、net→game_core；禁止边：game_core→client/net；game_core manifest 禁止 Bevy、网络、窗口、平台目录等平台运行时 crate | 必需边存在，禁止边不存在；game_core manifest 不含所列平台运行时依赖；game_core 可独立构建并通过测试 | [Confirmed] [游戏基础设施运行架构：架构职责](../development/system/game-infrastructure-architecture.md#架构职责) |
 | TC-052 | 同一固定方向输入按上下文产生独立领域动作 | P1 | Component | — | Input；Client | 固定 Left 物理方向输入可在 gameplay 与 UI 输入上下文中解释 | 分别在 Match gameplay context 与 Menu UI context 注入同一固定 Left 方向输入 | context=`Match/Menu`；physical input=`Left direction` | Match 中只产生 `GameAction::Left` 并可进入规则输入；Menu 中只产生 `UIAction::Left` 并用于 UI；两个动作类型和输出容器保持独立；Left 不作为用户可配置绑定 | [Confirmed] [UI 动作输入 Spec：物理绑定关系](../development/component/ui-action-input.md#物理绑定关系)、[验收条件](../development/component/ui-action-input.md#验收条件) |
 | TC-053 | fixed tick 仅在 `AppState::Match` 执行，全部非 Match 状态均不产生 Input/Rules | P0 | Component Integration | — | Client | 最小客户端 app 注册状态机与 simulation 能力，Input/Rules 执行次数可观测 | 分别在每个非 Match 状态执行受控 fixed tick，再在 Match 执行受控 fixed tick | `Boot`、`MainMenu`、`ModeSelect`、`CharacterSelect`、`Paused`、`Result`；`Match` | 六个非 Match 状态下 Input/Rules 执行次数均为 0；Match 下两个阶段均按受控 tick 数执行 | [Confirmed] [固定频率规则调度 Contract：运行边界](../development/contract/fixed-tick-simulation.md#运行边界) |
 | TC-054 | `Match → Paused` 后对局 simulation 立即停止 | P0 | Component Integration | — | Client | 当前 `Match`，Input/Rules 执行计数器已运行若干 tick | 提交 `Paused` 请求并运行状态提交，随后提供若干 fixed 执行机会 | 转移前计数=N；转移后 3 个 fixed 执行机会 | 状态转移当拍起不再产生新的 Input/Rules 执行；转移后计数保持为 N | [Confirmed] [固定频率规则调度 Contract：Pause 行为](../development/contract/fixed-tick-simulation.md#pause-行为) |
 | TC-055 | `Paused → Match` 恢复后规则状态从暂停前继续推进 | P0 | Component Integration | — | Client | Match 中已推进至可观察的非初始规则状态 S，并记录已消费 tick 数 | 转移至 `Paused`、停留若干受控 fixed tick、转移回 `Match` 并再推进若干 tick | 暂停前状态=S；暂停期间 3 ticks；恢复后 3 ticks | 恢复起点为暂停前状态 S，暂停期间没有重置或跳变；恢复后 tick 计数从暂停前继续累加 | [Confirmed] [固定频率规则调度 Contract：Pause 行为](../development/contract/fixed-tick-simulation.md#pause-行为) |
 | TC-056 | Linux 自动化 startup smoke 复用项目根插件跑通 Boot→MainMenu | P0 | System | Smoke | Client | Linux CI runner；最小 Bevy runtime + 与生产客户端相同的项目根插件，不含真实窗口依赖 | 运行可自动退出的 startup smoke | Linux x86_64 | 项目根插件装配成功；`AppState` 初始化为 `Boot`；`UserSettings` 与 `Localization` 完成 bootstrap resolution；应用到达 `MainMenu`；进程正常退出；全程不要求真实窗口交互 | [Confirmed] [游戏基础设施运行架构：自动化启动验收](../development/system/game-infrastructure-architecture.md#自动化启动验收) |
-| TC-057 | Windows 自动化 startup smoke 复用项目根插件跑通 Boot→MainMenu | P0 | System | Smoke | Client | Windows CI runner；最小 Bevy runtime + 与生产客户端相同的项目根插件，不含真实窗口依赖 | 运行可自动退出的 startup smoke | Windows x86_64 | 项目根插件装配成功；`AppState` 初始化为 `Boot`；`UserSettings` 与 `Localization` 完成 bootstrap resolution；应用到达 `MainMenu`；进程正常退出；全程不要求真实窗口交互 | [Confirmed] [游戏基础设施运行架构：自动化启动验收](../development/system/game-infrastructure-architecture.md#自动化启动验收) |
 | TC-058 | `Match` 语境下固定 Start 按键由 `client::input` 直接提出 `PauseRequested` | P0 | Component Integration | — | Input；Client | 当前 `AppState::Match`；`client::input` 使用固定手柄 Start 按键；状态迁移结果可观测 | 采样到手柄 Start 按键 press edge 并运行状态提交周期 | 手柄 Start press edge，`AppState::Match` | 当前状态提交为 `Paused`；该触发不产生 `UIAction` 或 `GameAction`（生命周期效果由 TC-054 覆盖）；迁移请求和内部协作类型由实现决定 | [Confirmed] [应用状态机协作 Contract：参与者与职责](../development/contract/application-state-machine.md#参与者与职责)；[UI 动作输入 Spec：不变量](../development/component/ui-action-input.md#不变量) |
 | TC-059 | 固定绑定动作不出现在 `PlayerInputBindings` 且不参与绑定冲突检测 | P1 | Component | — | Configuration；Input | 默认或已保存的玩家输入设置可查询和序列化 | 检查持久化结果与可配置绑定冲突行为 | `UIAction` 全部六项；`GameAction::Left`、`GameAction::Right`；四项可配置 `GameAction` | 持久化设置只包含四项可配置 `GameAction`；绑定冲突行为只处理这四项；固定绑定动作保持在可配置与冲突检测范围外 | [Confirmed] [UI 动作输入 Spec：物理绑定关系](../development/component/ui-action-input.md#物理绑定关系)；[本机用户设置 Spec：数据模型](../development/component/user-settings.md#数据模型)、[输入绑定冲突](../development/component/user-settings.md#输入绑定冲突) |
 | TC-060 | `PlayerActions` 位编码为锁定的稳定格式 | P0 | Component | Determinism | Input | 可在无 Bevy 环境构造 `PlayerActions` | 分别构造六个单动作集合并读取底层 `u8` | 六个 `GameAction` 各自单独置位 | `Left`/`Right`/`SoftDrop`/`HardDrop`/`RotateClockwise`/`RotateCounterClockwise` 依次对应 bit 0–5，底层值为 `1/2/4/8/16/32`；任意动作组合的 bit 6–7 恒为 0 | [Confirmed] [统一游戏动作与 Tick 输入 Spec：位编码](../development/component/game-action-input.md#位编码) |
@@ -178,7 +176,7 @@
 | Rules 与数值 | 本轮只覆盖规则调用边界；玩法公式由后续规则设计覆盖。 |
 | AI | 统一 `PlayerActions`/`TickInputs` 类型边界已覆盖；AI 动作合法性由 AI 设计覆盖。 |
 | Network | crate 依赖方向与统一输入容量已覆盖；握手、同步、回滚和断线由 R2 设计覆盖。 |
-| CI 环境匹配 | `test.yml`（push/PR 自动触发）的 `test-linux`/`test-windows` job 分别对 Linux、Windows 执行 `cargo test --workspace`，Linux 与 Windows 自动化 smoke（TC-056～TC-057）均有对应 CI 执行路径；`release.yml`（`workflow_dispatch` 手动触发）的 `build-linux`/`build-windows` job 分别以 `--release` 构建 production client（TC-049～TC-050），不运行测试。 |
+| CI 环境匹配 | `test.yml`（目标分支为 `main` 的 pull request 触发）的 `test-linux` job 执行 `cargo fmt`、`cargo clippy`、`cargo test --workspace` 与 linux-gnu 构建，自动化 smoke（TC-056）有对应 CI 执行路径；`release.yml`（`workflow_dispatch` 手动触发）的 `build-linux` job 以 `--release` 构建 production client（TC-049），不运行测试。开发分支的推送不触发 CI，由本地执行覆盖。 |
 
 ## 实施顺序
 
@@ -186,7 +184,7 @@
 2. 实现 TC-001～TC-012、TC-028～TC-033、TC-059 的解析、fallback、持久化与固定/可配置绑定范围测试。
 3. 实现 TC-023～TC-027A、TC-035～TC-036、TC-052 的纯行为测试，以及 TC-027B、TC-034、TC-037～TC-045 的最小 Bevy App 组件集成测试。
 4. 实现 TC-053～TC-055、TC-058 的 `Match`/`Paused` 对局 simulation 生命周期与 `Pause` 直接触发路径测试，复用 TC-042～TC-045 已建立的 fixed tick 观测手段。
-5. 最后接入 TC-046～TC-051、TC-056～TC-057 的启动、主路径、平台 CI 与依赖边界测试；TC-049～TC-050 在 `release.yml`（手动触发）执行，TC-056～TC-057 在 `test.yml`（push/PR 自动触发）执行。
+5. 最后接入 TC-046～TC-049、TC-051、TC-056 的启动、主路径、CI 与依赖边界测试；TC-049 在 `release.yml`（手动触发）执行，TC-056 在 `test.yml`（PR→`main` 触发）执行。
 6. 随实现接通设备输入、默认绑定与异步资源加载时补充 TC-060～TC-066：TC-060～TC-061 属纯 game_core 层，随步骤 1 的输入语义一并固定；TC-062～TC-064 随设备采样接入；TC-065 复用步骤 4 的 Pause 观测手段；TC-066 随启动屏障异步化在步骤 5 接入。
 
 ## 审核记录

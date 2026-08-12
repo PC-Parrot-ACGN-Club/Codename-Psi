@@ -13,8 +13,11 @@ Codename Psi — a local Fever-style (Puyo Puyo-esque) versus game, Rust + Bevy.
 - Test all: `cargo test`
 - Test one crate: `cargo test -p game_core`
 - Format check: `cargo fmt --check`
-- Toolchain is pinned to `1.97.1` via `rust-toolchain.toml` (installs `rustfmt` + `clippy`), but CI does **not** currently run `cargo clippy` — don't assume lint failures are caught before review.
-- CI (`.github/workflows/ci.yml`) runs with `RUSTFLAGS=-D warnings`: `cargo fmt --all -- --check`, `cargo test --workspace`, and a build for `x86_64-unknown-linux-gnu` (ubuntu job, installs Bevy's Linux system libs) plus a separate build-only job for `x86_64-pc-windows-gnullvm`.
+- Toolchain is pinned to `1.97.1` via `rust-toolchain.toml` (installs `rustfmt` + `clippy`).
+- **CI only runs on pull requests targeting `main`** (`.github/workflows/test.yml`). Pushes to development branches are not verified by CI at all — this is a deliberate trade-off against the organization's Actions quota (`docs/TDD.md` §7.2). Run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets` and `cargo test --workspace` locally before committing; nothing else will catch a regression until the `main` PR.
+- That PR job runs with `RUSTFLAGS=-D warnings`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets`, `cargo test -p game_core`, `cargo test --workspace`, and a build for `x86_64-unknown-linux-gnu` (ubuntu job, installs Bevy's Linux system libs).
+- Target platform for R1 and R2 is **Linux only** — `x86_64-unknown-linux-gnu` is the sole build target across docs, `test.yml` and `release.yml`. Other targets are out of scope until R2 ships; don't add build matrix entries for them without a corresponding PRD/TDD change.
+- `release.yml` is `workflow_dispatch` only: it builds the production client with `--release` (test design TC-049) and runs no tests.
 
 ## Architecture
 
