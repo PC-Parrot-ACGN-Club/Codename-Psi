@@ -61,6 +61,12 @@ Gamepad Left
 
 相同逻辑动作的多个物理来源合并为同一动作。
 
+### 摇杆方向判定
+
+左摇杆按阈值 `0.5` 转换为方向输入：分量绝对值超过阈值视为该方向处于按下状态，未超过视为未按下。摇杆方向在采样中与十字键、键盘方向键等价，多来源按上一节合并。
+
+方向输入不提供连发（DAS/ARR）：持续保持方向只按持续动作语义在每个 fixed tick 产生一次逻辑动作，采样器不额外插入重复触发。规则层需要的移动重复节奏由玩法设计定义。
+
 ### 持续动作采样
 
 Left、Right 和 SoftDrop 使用 fixed tick 边界的当前按下状态。
@@ -119,6 +125,8 @@ RotateClockwise + RotateCounterClockwise
 - 持续按住 HardDrop 或旋转输入不会在后续 fixed tick 自动重复产生动作。
 - 一个完整发生在两个 fixed tick 之间的 HardDrop 或旋转按下操作可以在下一个 fixed tick 被采样。
 - 采样器输出可以直接交给 game_core::input 归一化，不包含设备相关数据。
+- 左摇杆分量绝对值超过 `0.5` 时对应方向成立，未超过时不成立，且与十字键、键盘方向合并为同一逻辑动作。
+- 持续保持方向输入时，采样器不产生连发，每个 fixed tick 只按持续动作语义产生一次动作。
 
 ## Test Basis
 
@@ -126,3 +134,4 @@ RotateClockwise + RotateCounterClockwise
 - [Confirmed] TDD §3：规则核心只接收量化到 tick 的动作。
 - [Confirmed] TDD §4：键盘与手柄映射由客户端维护为可序列化动作表，每名本地玩家独立。
 - [Confirmed] 当前审核结论：本地输入处理作为独立采样 Component；持续动作按 fixed tick 边界的当前按下状态采样；硬降与旋转每次物理按下产生一次且不会因持续按住重复；逻辑动作冲突统一交给 game_core::input。
+- [Confirmed] 当前审核结论：左摇杆方向阈值 `0.5`，与十字键、键盘方向等价合并；采样器不提供方向连发。

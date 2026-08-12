@@ -4,13 +4,15 @@
 //! built-in default, so the barrier releases while diagnostics are kept.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
+use bevy::asset::LoadState;
 use bevy::prelude::*;
 
-use crate::app_state::{
-    AppState, AppTransitionCause, AppTransitionRequests, arbitrate_transitions,
+use crate::app_state::{AppState, AppTransitionCause, AppTransitionRequests, AppTransitionSet};
+use crate::data::{
+    DataCategory, DataErrorCause, DataLoadError, DataResolution, SourceText, resolve_source,
 };
-use crate::data::{DataCategory, DataErrorCause, DataLoadError, DataResolution, resolve_text};
 use crate::i18n::{
     DEFAULT_LOCALE, Localization, SUPPORTED_LOCALES, builtin_english_catalog, parse_catalog,
 };
@@ -39,21 +41,37 @@ impl BootstrapStatus {
 
 /// Where the startup loaders read from.
 ///
-/// `settings: None` means the platform config directory; the asset root is
-/// relative to the working directory the binary was launched from.
-#[derive(Debug, Clone, Resource)]
+/// Only settings live here: they are stored in the platform config directory
+/// rather than under `assets/`, so they are outside the asset pipeline. The
+/// asset root belongs to Bevy's `AssetPlugin`. `None` means the platform
+/// default config directory.
+#[derive(Debug, Clone, Default, Resource)]
 pub struct BootstrapPaths {
     pub settings: Option<PathBuf>,
-    pub asset_root: PathBuf,
 }
 
-impl Default for BootstrapPaths {
-    fn default() -> Self {
-        Self {
-            settings: None,
-            asset_root: PathBuf::from("assets"),
-        }
-    }
+/// How long the barrier waits for a startup asset before falling back.
+///
+/// Asset reads are asynchronous, so without a deadline a source that never
+/// resolves would strand the app in `Boot`. Timing out is treated as a load
+/// failure: the built-in default is used and the barrier releases.
+pub const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The in-flight localization reads, plus how long they have been waiting.
+#[derive(Debug, Resource)]
+pub struct LocalizationLoad {
+    handles: Vec<(String, Handle<SourceText>)>,
+    waited: Duration,
+}
+
+/// What a bootstrap step writes: the resolved value, its state, its diagnostics.
+///
+/// Grouped so a step takes one output parameter instead of three.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct BootstrapOutput<'w, 's> {
+    pub commands: Commands<'w, 's>,
+    pub status: ResMut<'w, BootstrapStatus>,
+    pub diagnostics: ResMut<'w, BootstrapDiagnostics>,
 }
 
 /// Diagnostics kept from a fallback so consumers can still see what failed.
@@ -71,11 +89,12 @@ impl Plugin for BootstrapPlugin {
         app.init_resource::<BootstrapStatus>()
             .init_resource::<BootstrapPaths>()
             .init_resource::<BootstrapDiagnostics>()
-            .add_systems(Startup, (load_settings, load_localization).chain())
+            .add_systems(Startup, (load_settings, start_localization_load).chain())
             .add_systems(
                 Update,
-                request_main_menu
-                    .before(arbitrate_transitions)
+                (poll_localization, request_main_menu)
+                    .chain()
+                    .in_set(AppTransitionSet::Request)
                     .run_if(in_state(AppState::Boot)),
             );
     }
@@ -111,30 +130,83 @@ pub fn load_settings(
     status.settings = BootstrapTaskState::Resolved;
 }
 
-/// Resolve the localization catalogs, keeping the English built-in as fallback.
-pub fn load_localization(
-    paths: Res<BootstrapPaths>,
+/// Ask Bevy Asset for every supported catalog.
+pub fn start_localization_load(asset_server: Res<AssetServer>, mut commands: Commands) {
+    let handles = SUPPORTED_LOCALES
+        .iter()
+        .map(|locale| {
+            (
+                (*locale).to_string(),
+                asset_server.load::<SourceText>(format!("i18n/{locale}.json")),
+            )
+        })
+        .collect();
+    commands.insert_resource(LocalizationLoad {
+        handles,
+        waited: Duration::ZERO,
+    });
+}
+
+/// Resolve the localization catalogs once their reads settle, or on timeout.
+///
+/// Reading is asynchronous, so this polls until every catalog has either been
+/// read or failed. Parsing stays here rather than in the asset loader: that is
+/// what keeps `Parse`, `UnsupportedSchema` and `InvalidData` distinguishable
+/// from Bevy's opaque read failure.
+pub fn poll_localization(
+    time: Res<Time<Real>>,
+    asset_server: Res<AssetServer>,
+    sources: Res<Assets<SourceText>>,
     settings: Res<UserSettings>,
-    mut commands: Commands,
-    mut status: ResMut<BootstrapStatus>,
-    mut diagnostics: ResMut<BootstrapDiagnostics>,
+    mut load: ResMut<LocalizationLoad>,
+    mut out: BootstrapOutput,
 ) {
+    let BootstrapOutput {
+        commands,
+        status,
+        diagnostics,
+    } = &mut out;
+
+    if status.localization == BootstrapTaskState::Resolved {
+        return;
+    }
+
+    load.waited += time.delta();
+    let timed_out = load.waited >= BOOTSTRAP_TIMEOUT;
+
     let mut catalogs = Vec::new();
-    for locale in SUPPORTED_LOCALES {
-        let path = paths.asset_root.join("i18n").join(format!("{locale}.json"));
-        let resolution = resolve_text(
-            path,
+    let mut errors = Vec::new();
+    for (locale, handle) in &load.handles {
+        let path = format!("i18n/{locale}.json");
+        let source = match asset_server.load_state(handle) {
+            LoadState::Loaded => sources
+                .get(handle)
+                .map(|text| Ok(text.0.as_str()))
+                .unwrap_or(Err(DataErrorCause::Io("asset dropped after load".into()))),
+            LoadState::Failed(error) => Err(DataErrorCause::Io(error.to_string())),
+            _ if timed_out => Err(DataErrorCause::Io(format!(
+                "timed out after {}s",
+                BOOTSTRAP_TIMEOUT.as_secs()
+            ))),
+            // Still reading: nothing to resolve this frame.
+            _ => return,
+        };
+
+        match resolve_source(
+            &path,
             DataCategory::Localization,
             builtin_english_catalog(),
-            |source| parse_catalog(source).map_err(DataErrorCause::from),
-        );
-        match resolution {
+            source,
+            |text| parse_catalog(text).map_err(DataErrorCause::from),
+        ) {
             DataResolution::Loaded(catalog) => catalogs.push(catalog),
-            DataResolution::Fallback { error, .. } => diagnostics.localization.push(error),
+            DataResolution::Fallback { error, .. } => errors.push(error),
         }
     }
 
-    // A usable English catalog is always available, even when every file failed.
+    diagnostics.localization.extend(errors);
+
+    // A usable English catalog is always available, even when every read failed.
     if !catalogs
         .iter()
         .any(|catalog| catalog.locale == DEFAULT_LOCALE)

@@ -9,8 +9,11 @@ use bevy::prelude::*;
 use client::GameInfrastructurePlugin;
 use client::app_state::{AppState, AppTransitionCause};
 use client::bootstrap::{BootstrapStatus, BootstrapTaskState};
-use client::input::{LocalInputSampler, fixed_pause_button};
-use common::{ALL_STATES, commit, controlled_app, current_state, install_sampler, submit};
+use client::input::{LocalInputSampler, fixed_pause_inputs};
+use common::{
+    ALL_STATES, commit, controlled_app, current_state, install_sampler, run_until_bootstrap_ready,
+    submit,
+};
 
 /// Counts how often each state's gated run phase executed.
 #[derive(Debug, Default, Resource)]
@@ -64,7 +67,9 @@ fn startup_smoke_reuses_the_root_plugin_and_reaches_main_menu() {
         "AppState initializes to Boot"
     );
 
-    app.update();
+    // Catalog reads are asynchronous, so pump until the barrier settles rather
+    // than assuming a fixed frame count.
+    run_until_bootstrap_ready(&mut app);
 
     let status = *app.world().resource::<BootstrapStatus>();
     assert_eq!(
@@ -93,6 +98,7 @@ fn the_basic_main_path_keeps_one_current_state_at_every_step() {
     assert_single_current_state(&app, AppState::Boot);
 
     // Boot -> MainMenu is released by the startup barrier itself.
+    run_until_bootstrap_ready(&mut app);
     commit(&mut app);
     assert_single_current_state(&app, AppState::MainMenu);
     assert!(phase_ran(&app, AppState::MainMenu));
@@ -131,7 +137,7 @@ fn the_basic_main_path_keeps_one_current_state_at_every_step() {
     clear_phases(&mut app);
     app.world_mut()
         .resource_mut::<LocalInputSampler>()
-        .press_pause(&fixed_pause_button());
+        .press_pause(&fixed_pause_inputs()[0]);
     commit(&mut app);
     assert_single_current_state(&app, AppState::Paused);
     assert!(phase_ran(&app, AppState::Paused));

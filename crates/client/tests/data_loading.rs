@@ -1,17 +1,16 @@
-//! Resource loading through a minimal Bevy app: `Loaded` plus four failure kinds.
+//! Resource loading through Bevy Asset: `Loaded` plus four failure kinds.
 //!
-//! Reading stays on `std::fs` by decision; the Bevy app supplies the runtime the
-//! resolution actually happens in, and the asset root is a temporary directory.
+//! Reads go through the asset server against a temporary asset root, which is
+//! the reading boundary the loading contract defines. Parsing stays outside the
+//! asset loader so each failure keeps its typed cause.
 
-use std::path::PathBuf;
-
+use bevy::asset::{AssetPlugin, AssetServer, Assets, Handle, LoadState};
 use bevy::prelude::*;
-use client::data::{DataCategory, DataErrorCause, DataResolution, resolve_text};
+use client::data::{
+    DataCategory, DataErrorCause, DataPlugin, DataResolution, SourceText, resolve_source,
+};
 use client::i18n::{Catalog, builtin_english_catalog, parse_catalog};
 use game_core::config::{RulesStub, parse_rules_stub};
-
-#[derive(Debug, Resource)]
-struct AssetRoot(PathBuf);
 
 #[derive(Debug, Resource)]
 struct RulesResolutions(Vec<(&'static str, DataResolution<RulesStub>)>);
@@ -26,28 +25,76 @@ fn builtin_rules_default() -> RulesStub {
     }
 }
 
-fn resolve_fixtures(root: Res<AssetRoot>, mut commands: Commands) {
-    let data = root.0.join("data");
-    let rules = ["valid", "missing", "malformed", "unsupported"]
-        .into_iter()
-        .map(|name| {
-            let resolution = resolve_text(
-                data.join(format!("rules.{name}.ron")),
+/// Handles requested in `Startup`, resolved once the reads settle.
+#[derive(Debug, Resource)]
+struct Pending {
+    rules: Vec<(&'static str, Handle<SourceText>)>,
+    catalog: Handle<SourceText>,
+}
+
+fn request_fixtures(asset_server: Res<AssetServer>, mut commands: Commands) {
+    commands.insert_resource(Pending {
+        rules: ["valid", "missing", "malformed", "unsupported"]
+            .into_iter()
+            .map(|name| (name, asset_server.load(format!("data/rules.{name}.ron"))))
+            .collect(),
+        catalog: asset_server.load("i18n/invalid.json"),
+    });
+}
+
+/// Map a settled handle to the source text, or to the read failure.
+fn source_of<'a>(
+    asset_server: &AssetServer,
+    sources: &'a Assets<SourceText>,
+    handle: &Handle<SourceText>,
+) -> Option<Result<&'a str, DataErrorCause>> {
+    match asset_server.load_state(handle) {
+        LoadState::Loaded => Some(
+            sources
+                .get(handle)
+                .map(|text| Ok(text.0.as_str()))
+                .unwrap_or(Err(DataErrorCause::Io("asset dropped".into()))),
+        ),
+        LoadState::Failed(error) => Some(Err(DataErrorCause::Io(error.to_string()))),
+        _ => None,
+    }
+}
+
+fn resolve_fixtures(
+    asset_server: Res<AssetServer>,
+    sources: Res<Assets<SourceText>>,
+    pending: Res<Pending>,
+    mut commands: Commands,
+) {
+    let mut rules = Vec::new();
+    for (name, handle) in &pending.rules {
+        let Some(source) = source_of(&asset_server, &sources, handle) else {
+            return;
+        };
+        rules.push((
+            *name,
+            resolve_source(
+                format!("data/rules.{name}.ron"),
                 DataCategory::Rules,
                 builtin_rules_default(),
-                |source| parse_rules_stub(source).map_err(DataErrorCause::from),
-            );
-            (name, resolution)
-        })
-        .collect();
-    commands.insert_resource(RulesResolutions(rules));
+                source,
+                |text| parse_rules_stub(text).map_err(DataErrorCause::from),
+            ),
+        ));
+    }
 
-    let catalog = resolve_text(
-        root.0.join("i18n").join("invalid.json"),
+    let Some(source) = source_of(&asset_server, &sources, &pending.catalog) else {
+        return;
+    };
+    let catalog = resolve_source(
+        "i18n/invalid.json",
         DataCategory::Localization,
         builtin_english_catalog(),
-        |source| parse_catalog(source).map_err(DataErrorCause::from),
+        source,
+        |text| parse_catalog(text).map_err(DataErrorCause::from),
     );
+
+    commands.insert_resource(RulesResolutions(rules));
     commands.insert_resource(CatalogResolution(catalog));
 }
 
@@ -79,12 +126,25 @@ fn app_with_fixtures() -> (App, tempfile::TempDir) {
     .expect("write invalid catalog");
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .insert_resource(AssetRoot(root.path().to_path_buf()))
-        .add_systems(Startup, resolve_fixtures);
-    app.update();
+    app.add_plugins((
+        MinimalPlugins,
+        AssetPlugin {
+            file_path: root.path().to_string_lossy().into_owned(),
+            ..default()
+        },
+        DataPlugin,
+    ))
+    .add_systems(Startup, request_fixtures)
+    .add_systems(Update, resolve_fixtures);
 
-    (app, root)
+    // Reads are asynchronous; pump until every fixture has settled.
+    for _ in 0..2000 {
+        app.update();
+        if app.world().get_resource::<CatalogResolution>().is_some() {
+            return (app, root);
+        }
+    }
+    panic!("fixtures never settled");
 }
 
 fn rules_resolution(app: &App, name: &str) -> DataResolution<RulesStub> {
@@ -104,7 +164,6 @@ fn a_valid_resource_resolves_to_loaded_typed_data() {
 
     let resolution = rules_resolution(&app, "valid");
 
-    assert!(resolution.is_resolved());
     assert_eq!(resolution.error(), None);
     assert_eq!(resolution.value().id, "stub");
     assert!(matches!(resolution, DataResolution::Loaded(_)));
@@ -122,7 +181,6 @@ fn a_missing_resource_falls_back_with_io_context() {
     assert_eq!(error.category, DataCategory::Rules);
     assert!(error.path.ends_with("rules.missing.ron"));
     assert_eq!(resolution.value(), &builtin_rules_default());
-    assert!(resolution.is_resolved());
 }
 
 // docs/test/game-infrastructure.md TC-032
@@ -181,8 +239,4 @@ fn a_semantically_invalid_catalog_falls_back_with_an_invalid_data_cause() {
         other => panic!("expected InvalidData, got {other:?}"),
     }
     assert_eq!(resolution.value(), &builtin_english_catalog());
-    assert!(
-        resolution.is_resolved(),
-        "a fallback result is still resolved for consumers"
-    );
 }

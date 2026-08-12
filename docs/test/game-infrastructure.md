@@ -30,11 +30,11 @@
 
 本稿覆盖文档中已具备可判定结果的行为。以下内容由后续设计提供 Test Basis 后增加用例：
 
-- `PlayerActions` 的底层整数类型、bit 编号及稳定网络编码。
+- `PlayerActions` 位编码之上的稳定网络报文格式（bit 编号本身已锁定，见 TC-060）。
 - `RuleProfile`、角色、Fever 题面及其它玩法配置的完整 schema 和语义约束。
 - UI 返回、退出、再赛等新增状态边及其仲裁优先级。
 - 无已定义优先级的不同目标冲突规则保留为未来测试要求；新增真实且可构造的冲突状态边时再增加用例。
-- `Pause` 的键盘等价固定按键尚未指定（`a9f8253` 只确认了手柄 Start 按键与直连 `PauseRequested` 的触发机制），键盘侧留待后续设计补充后再增加对应用例。
+- 方向输入的连发（DAS/ARR）节奏：当前设计确认为不提供连发（TC-064 锁定该结论），具体重复移动规则留待玩法设计。
 - 规则 tick 的网络帧号、回滚状态、渲染表现和音频结果。
 
 `main.rs` 薄入口、模块所有权和禁止平行状态字段属于架构审查项；TC-051 对可机械验证的 crate 依赖边界提供回归保护。
@@ -100,7 +100,7 @@
 
 | ID | 标题 | Priority | Test Level | Concern | Domain | 前置条件 | 操作/刺激 | 测试数据 | 预期结果 | Test Basis / 证据状态 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TC-001 | 默认构造产生完整安全设置 | P1 | Component | — | Configuration；Client | 无设置输入 | 构造 `UserSettings::default()` 或等价默认值 | language=`en`；window=`Windowed`；master/sfx=`1.0`；vibration/performance=`true`；animation=`Normal/1.0`；P1/P2 默认绑定范围 | 文档已定义默认值的字段完整且取值正确；P1/P2 的 `PlayerInputBindings` 均覆盖 `SoftDrop`/`HardDrop`/`RotateClockwise`/`RotateCounterClockwise` 四项可配置 `GameAction`，不含 `UIAction` 或 `GameAction::Left`/`Right`；各动作的具体默认键位由实现决定 | [Confirmed] [本机用户设置 Spec：默认值](../development/component/user-settings.md#默认值)；[UI 动作输入 Spec：物理绑定关系](../development/component/ui-action-input.md#物理绑定关系) |
+| TC-001 | 默认构造产生完整安全设置 | P1 | Component | — | Configuration；Client | 无设置输入 | 构造 `UserSettings::default()` 或等价默认值 | language=`en`；window=`Windowed`；master/sfx=`1.0`；vibration/performance=`true`；animation=`Normal/1.0`；P1/P2 默认绑定范围 | 文档已定义默认值的字段完整且取值正确；P1/P2 的 `PlayerInputBindings` 均覆盖 `SoftDrop`/`HardDrop`/`RotateClockwise`/`RotateCounterClockwise` 四项可配置 `GameAction`，不含 `UIAction` 或 `GameAction::Left`/`Right`；四项默认绑定均非空，取值按[默认输入绑定](../development/component/user-settings.md#默认输入绑定)定义 | [Confirmed] [本机用户设置 Spec：默认值](../development/component/user-settings.md#默认值)；[UI 动作输入 Spec：物理绑定关系](../development/component/ui-action-input.md#物理绑定关系) |
 | TC-002 | 缺失、malformed 与 unsupported 设置均恢复完整默认值并区分诊断 | P1 | Component | — | Configuration；Client | 可调用设置解析/恢复入口并观察结果与诊断 | 分别提交三类输入 | 文件不存在；`(`；`schema_version=255` | 三组结果均为完整默认设置；缺失文件走缺省结果；malformed 与 unsupported 分别留下可区分的解析类、版本不支持类诊断；诊断载体与具体类型由实现决定 | [Confirmed] [本机用户设置 Spec：启动加载](../development/component/user-settings.md#启动加载) |
 | TC-003 | 设置解析成功恢复全部持久化字段 | P1 | Component | — | Configuration；Client | 支持的 settings schema | 解析完整 RON | 非默认语言、窗口、音量、两名玩家各自四项可配置 `GameAction` 的键盘与手柄绑定、震动、角色演出、动画强度 | 结果逐字段等于输入；只解析四项可配置 `GameAction` 绑定，不含 `UIAction` 或 `GameAction::Left`/`Right` 字段；P1/P2 数据未互换或合并 | [Confirmed] [本机用户设置 Spec：数据模型](../development/component/user-settings.md#数据模型) |
 | TC-004 | 设置序列化后重新加载保持值相等 | P1 | Component | — | Configuration；Client | 一份包含全部字段的非默认设置 | 序列化到内存，再解析序列化结果 | language=`zh-CN`；window 非默认；音量边界内非默认值；P1/P2 各四项可配置 `GameAction` 的互异绑定 | 恢复值与原值逐字段相等；四项可配置绑定往返一致；结果不含 `UIAction` 或 `GameAction::Left`/`Right` 字段；schema 版本存在 | [Confirmed] [本机用户设置 Spec：保存设置](../development/component/user-settings.md#保存设置) |
@@ -159,6 +159,13 @@
 | TC-057 | Windows 自动化 startup smoke 复用项目根插件跑通 Boot→MainMenu | P0 | System | Smoke | Client | Windows CI runner；最小 Bevy runtime + 与生产客户端相同的项目根插件，不含真实窗口依赖 | 运行可自动退出的 startup smoke | Windows x86_64 | 项目根插件装配成功；`AppState` 初始化为 `Boot`；`UserSettings` 与 `Localization` 完成 bootstrap resolution；应用到达 `MainMenu`；进程正常退出；全程不要求真实窗口交互 | [Confirmed] [游戏基础设施运行架构：自动化启动验收](../development/system/game-infrastructure-architecture.md#自动化启动验收) |
 | TC-058 | `Match` 语境下固定 Start 按键由 `client::input` 直接提出 `PauseRequested` | P0 | Component Integration | — | Input；Client | 当前 `AppState::Match`；`client::input` 使用固定手柄 Start 按键；状态迁移结果可观测 | 采样到手柄 Start 按键 press edge 并运行状态提交周期 | 手柄 Start press edge，`AppState::Match` | 当前状态提交为 `Paused`；该触发不产生 `UIAction` 或 `GameAction`（生命周期效果由 TC-054 覆盖）；迁移请求和内部协作类型由实现决定 | [Confirmed] [应用状态机协作 Contract：参与者与职责](../development/contract/application-state-machine.md#参与者与职责)；[UI 动作输入 Spec：不变量](../development/component/ui-action-input.md#不变量) |
 | TC-059 | 固定绑定动作不出现在 `PlayerInputBindings` 且不参与绑定冲突检测 | P1 | Component | — | Configuration；Input | 默认或已保存的玩家输入设置可查询和序列化 | 检查持久化结果与可配置绑定冲突行为 | `UIAction` 全部六项；`GameAction::Left`、`GameAction::Right`；四项可配置 `GameAction` | 持久化设置只包含四项可配置 `GameAction`；绑定冲突行为只处理这四项；固定绑定动作保持在可配置与冲突检测范围外 | [Confirmed] [UI 动作输入 Spec：物理绑定关系](../development/component/ui-action-input.md#物理绑定关系)；[本机用户设置 Spec：数据模型](../development/component/user-settings.md#数据模型)、[输入绑定冲突](../development/component/user-settings.md#输入绑定冲突) |
+| TC-060 | `PlayerActions` 位编码为锁定的稳定格式 | P0 | Component | Determinism | Input | 可在无 Bevy 环境构造 `PlayerActions` | 分别构造六个单动作集合并读取底层 `u8` | 六个 `GameAction` 各自单独置位 | `Left`/`Right`/`SoftDrop`/`HardDrop`/`RotateClockwise`/`RotateCounterClockwise` 依次对应 bit 0–5，底层值为 `1/2/4/8/16/32`；任意动作组合的 bit 6–7 恒为 0 | [Confirmed] [统一游戏动作与 Tick 输入 Spec：位编码](../development/component/game-action-input.md#位编码) |
+| TC-061 | 槽位访问器区分「参与者不存在」与「无动作」 | P1 | Component | — | Input | 构造 `len` 为 2 的 `TickInputs`，其中 slot 1 无动作 | 分别查询 slot 1 与 slot 2 | slot 1 为 `EMPTY`；slot 2 超出 `len` | slot 1 返回存在且为空动作；slot 2 返回「无该参与者」；两者结果可区分 | [Confirmed] [统一游戏动作与 Tick 输入 Spec：`TickInputs`](../development/component/game-action-input.md#tickinputs) |
+| TC-062 | 默认绑定非空且覆盖六个规则动作 | P1 | Component | Content Validation | Configuration；Input | 使用内置默认设置，无设置文件 | 按默认绑定分别注入键盘与手柄物理输入并采样 | 默认 `UserSettings`；P1/P2 键盘与手柄默认键位 | 键盘与手柄均可产生全部六个 `GameAction`；四项可配置动作的默认绑定均非空 | [Confirmed] [本机用户设置 Spec：默认输入绑定](../development/component/user-settings.md#默认输入绑定)；[UI 交互动作 Spec：固定绑定表](../development/component/ui-action-input.md#固定绑定表) |
+| TC-063 | 左摇杆方向按阈值 `0.5` 判定 | P2 | Component | — | Input | 采样器可接收摇杆分量 | 提交阈值上下与边界处的分量后采样 | 分量 `0.4`、`0.5`、`0.6` | `0.4` 与 `0.5` 不产生方向动作，`0.6` 产生；摇杆方向与十字键、键盘方向合并为同一逻辑动作 | [Confirmed] [本地输入采样器 Spec：摇杆方向判定](../development/component/local-input-sampler.md#摇杆方向判定) |
+| TC-064 | 持续保持方向输入不产生连发 | P2 | Component | — | Input | 采样器持有已绑定的方向输入 | 保持方向按下并连续采样多个 fixed tick | 保持 `Left` 按下 5 个 tick | 每个 tick 各产生一次 `Left`，采样器不额外插入重复触发 | [Confirmed] [本地输入采样器 Spec：摇杆方向判定](../development/component/local-input-sampler.md#摇杆方向判定) |
+| TC-065 | 键盘 `Escape` 按上下文产生 `Pause` 或 `Back` | P1 | Component Integration | — | Input；Client | 最小 Bevy App 已注册项目根插件 | 分别在 `Match` 与可返回页面状态下按下 `Escape` | `AppState::Match`；`AppState::MainMenu` | `Match` 下提出 `PauseRequested` 并进入 `Paused`；`MainMenu` 下不提出 `PauseRequested`，按 `Back` 语义处理 | [Confirmed] [应用状态机协作 Contract：参与者与职责](../development/contract/application-state-machine.md#参与者与职责)；[UI 交互动作 Spec：全局 `Escape`](../development/component/ui-action-input.md#全局-escape) |
+| TC-066 | 启动资源超时后仍进入 `Resolved` 并释放屏障 | P1 | Component Integration | Smoke | Client；Configuration | 最小 Bevy App，启动资源加载不返回结果 | 推进应用直到超过启动超时 | 加载超时 `5s` | 两项启动任务均进入 `Resolved` 并使用内置默认值；保留超时诊断；`Boot → MainMenu` 完成，应用不停留在 `Boot` | [Confirmed] [游戏基础设施运行架构：启动准备](../development/system/game-infrastructure-architecture.md#启动准备) |
 
 ## 风险查漏
 
@@ -166,8 +173,8 @@
 | --- | --- |
 | 状态与流程 | 主路径、全部基础边、非法边、同状态、重复、已定义优先级和启动屏障均有直接用例；`Match ⇄ Paused` 对局 simulation 的启停与状态延续由 TC-053～TC-055 覆盖；`PauseRequested` 直接触发路径由 TC-058 覆盖。无已定义优先级的不同目标冲突等待新增真实可构造状态边时补充测试。 |
 | Configuration | schema 支持、解析、版本、语义错误、资源路径、fallback、设置默认值与原子保存均有直接用例；本地化 catalog locale 语义约束（`InvalidData`）已覆盖（TC-031）；固定绑定与四项可配置 `GameAction` 绑定的范围划分已覆盖（TC-059）。 |
-| Client 与 Input | 六种 GameAction、六种 UIAction、输入上下文隔离、slot 容量、玩家隔离、多来源、fixed 边界与 edge 保留均有直接用例；TC-023/024/052/059 固定了现有固定绑定与可配置绑定的范围划分；TC-058 覆盖 `PauseRequested` 的固定 Start 直接触发路径；TC-054～TC-055 覆盖其 simulation 生命周期效果。`Pause` 的键盘等价按键仍未指定（见范围边界）。 |
-| Determinism | TC-045 直接验证相同初始规则状态与相同量化输入序列产生相同 fixed 规则结果。输入结构、归一化、SystemSet 顺序和 Pause 生命周期按各自功能覆盖，均不标记 Determinism。 |
+| Client 与 Input | 六种 GameAction、六种 UIAction、输入上下文隔离、slot 容量、玩家隔离、多来源、fixed 边界与 edge 保留均有直接用例；TC-023/024/052/059 固定了现有固定绑定与可配置绑定的范围划分；TC-058 覆盖 `PauseRequested` 的固定 Start 直接触发路径；TC-054～TC-055 覆盖其 simulation 生命周期效果；TC-065 覆盖键盘 `Escape` 在 `Match` 与菜单下的上下文分流；TC-062～TC-064 覆盖默认绑定非空、摇杆阈值与无连发。 |
+| Determinism | TC-045 直接验证相同初始规则状态与相同量化输入序列产生相同 fixed 规则结果；TC-060 钉死 `PlayerActions` 的稳定位编码，保护校验和与后续网络编码的字节稳定性。输入结构、归一化、SystemSet 顺序和 Pause 生命周期按各自功能覆盖，均不标记 Determinism。 |
 | Rules 与数值 | 本轮只覆盖规则调用边界；玩法公式由后续规则设计覆盖。 |
 | AI | 统一 `PlayerActions`/`TickInputs` 类型边界已覆盖；AI 动作合法性由 AI 设计覆盖。 |
 | Network | crate 依赖方向与统一输入容量已覆盖；握手、同步、回滚和断线由 R2 设计覆盖。 |
@@ -180,9 +187,11 @@
 3. 实现 TC-023～TC-027A、TC-035～TC-036、TC-052 的纯行为测试，以及 TC-027B、TC-034、TC-037～TC-045 的最小 Bevy App 组件集成测试。
 4. 实现 TC-053～TC-055、TC-058 的 `Match`/`Paused` 对局 simulation 生命周期与 `Pause` 直接触发路径测试，复用 TC-042～TC-045 已建立的 fixed tick 观测手段。
 5. 最后接入 TC-046～TC-051、TC-056～TC-057 的启动、主路径、平台 CI 与依赖边界测试；TC-049～TC-050 在 `release.yml`（手动触发）执行，TC-056～TC-057 在 `test.yml`（push/PR 自动触发）执行。
+6. 随实现接通设备输入、默认绑定与异步资源加载时补充 TC-060～TC-066：TC-060～TC-061 属纯 game_core 层，随步骤 1 的输入语义一并固定；TC-062～TC-064 随设备采样接入；TC-065 复用步骤 4 的 Pause 观测手段；TC-066 随启动屏障异步化在步骤 5 接入。
 
 ## 审核记录
 
 | 审核人    | 日期      | 结论  | 备注 |
 |-----------|-----------|-------|------|
 | OKOtohime | 2026-8-12 | 通过  | v1   |
+| OKOtohime | 2026-8-12 | 通过  | v2：位编码、键盘固定绑定、默认绑定、摇杆阈值、`Escape` 分流与启动超时落地；新增 TC-060～TC-066 |

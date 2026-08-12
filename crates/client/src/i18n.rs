@@ -81,8 +81,21 @@ impl Localization {
         }
     }
 
-    pub fn set_locale(&mut self, locale: impl Into<String>) {
-        self.current_locale = locale.into();
+    /// Switch the current locale, falling back when it has no catalog.
+    ///
+    /// Returns whether the requested locale was available. An unavailable
+    /// locale leaves every lookup falling through to English anyway, so this
+    /// selects the default outright rather than leaving the resource pointing
+    /// at a catalog that does not exist.
+    pub fn set_locale(&mut self, locale: impl Into<String>) -> bool {
+        let locale = locale.into();
+        let available = self.catalogs.contains_key(&locale);
+        self.current_locale = if available {
+            locale
+        } else {
+            DEFAULT_LOCALE.to_string()
+        };
+        available
     }
 
     #[must_use]
@@ -95,13 +108,22 @@ impl Localization {
             return value.clone();
         }
 
-        self.diagnostics
+        // UI code queries text every frame, so an unfiltered log would grow
+        // without bound on a single missing key. One entry per (locale, key)
+        // keeps the diagnostic just as informative and bounds it by the size
+        // of the catalog.
+        let diagnostic = MissingKeyDiagnostic {
+            locale: self.current_locale.clone(),
+            key: key.into(),
+        };
+        let mut diagnostics = self
+            .diagnostics
             .lock()
-            .expect("localization diagnostic mutex poisoned")
-            .push(MissingKeyDiagnostic {
-                locale: self.current_locale.clone(),
-                key: key.into(),
-            });
+            .expect("localization diagnostic mutex poisoned");
+        if !diagnostics.contains(&diagnostic) {
+            diagnostics.push(diagnostic);
+        }
+        drop(diagnostics);
 
         self.catalogs
             .get(DEFAULT_LOCALE)

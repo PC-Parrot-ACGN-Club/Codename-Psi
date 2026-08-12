@@ -39,7 +39,22 @@ enum GameAction {
 
 该类型只表达“本 tick 哪些逻辑动作成立”，不记录动作来自持续按住、按下沿、键盘、手柄、AI 或网络。
 
-具体 Rust 底层整数类型与 bit 编号在确定日志或网络稳定编码需求时再锁定。
+#### 位编码
+
+底层类型为 `u8`，bit 编号如下：
+
+| bit | 动作 |
+| --- | --- |
+| 0 | `Left` |
+| 1 | `Right` |
+| 2 | `SoftDrop` |
+| 3 | `HardDrop` |
+| 4 | `RotateClockwise` |
+| 5 | `RotateCounterClockwise` |
+
+bit 6–7 为保留位，始终为 0。
+
+该编码是稳定格式：确定性验证日志、快照校验和与后续网络输入编码都依赖它。因此 bit 编号不随 `GameAction` 声明顺序的调整而改变；新增逻辑动作时使用保留位，不重排既有 bit。
 
 ### `TickInputs`
 
@@ -61,6 +76,12 @@ players[len..8] = PlayerActions::EMPTY
 ```
 
 当前 R1/R2 产品对局使用前两个 participant slots；game_core 输入模型固定支持最多 8 个参与者，包括本地玩家、AI 或后续网络参与者。
+
+`players` 与 `len` 为私有字段，槽位通过访问器读取：有效槽位返回该槽位的 `PlayerActions`，超出 `len` 的槽位返回“无该参与者”。因此“参与者不存在”与“该参与者本 tick 无动作”在调用方看到的类型上已经区分开，不需要在存储层为槽位占用引入第二种表示。
+
+尾部 `PlayerActions::EMPTY` 是规范化要求而非语义：它保证相同逻辑输入具有唯一字节表示，使相等性、哈希、校验和与后续网络编码不受尾部残留影响。字段私有化后尾部不对外可见。
+
+掉线参与者保留槽位身份但标记缺席等稀疏占用需求由 R2 联机设计定义，届时使用显式占用标记，不改变本节的连续槽位语义。
 
 ## 行为
 
@@ -144,11 +165,9 @@ game_core 只消费已经形成的 `PlayerActions`，不区分动作来源或采
 - `RotateClockwise + RotateCounterClockwise` 归一化为空旋转。
 - `SoftDrop + HardDrop` 归一化为 `HardDrop`。
 - 连续 tick 可以通过重复出现的逻辑动作表达持续输入。
-- `PlayerActions` 可复制、比较，并为后续稳定日志或网络编码保留实现空间。
-
-## 待审核设计点
-
-- [Inferred] exact bit encoding 留到确定性日志或网络协议需要稳定编码时锁定。
+- `PlayerActions` 可复制、比较，并使用本文定义的稳定位编码。
+- 六个逻辑动作的 bit 编号与保留位取值可以被直接断言。
+- 超出 `len` 的槽位查询返回“无该参与者”，与该槽位有效但无动作的结果不同。
 
 ## Test Basis
 
@@ -156,3 +175,4 @@ game_core 只消费已经形成的 `PlayerActions`，不区分动作来源或采
 - [Confirmed] TDD §3：规则核心只接收已经量化到 tick 的游戏动作。
 - [Confirmed] PRD §5.2：定义左右、软降、硬降、顺/逆时针旋转、确认和返回/暂停等玩家操作。
 - [Confirmed] 当前审核结论：game_core 逻辑动作只包含六个对局动作；`PlayerActions` 使用位集合；逻辑输入不区分 held / edge；输入模型固定支持最多 8 个 participant slots；逻辑冲突按本文规则归一化。
+- [Confirmed] 当前审核结论：`PlayerActions` 底层为 `u8`，六个动作按本文「位编码」一节固定 bit 0–5，bit 6–7 保留为 0，该编码作为稳定格式锁定；`TickInputs` 字段私有化，槽位占用通过访问器表达而非在存储层引入 `Option`；尾部 `EMPTY` 定位为规范化要求；稀疏槽位占用留待 R2 联机设计。
