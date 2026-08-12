@@ -131,12 +131,21 @@ minimal Bevy runtime
 
 ### Automated startup smoke
 
-在 Linux 运行复用项目根插件、无真实窗口依赖的最小 Bevy App smoke，验证项目根插件能够完成基础设施装配、`AppState` 初始化、启动准备 bootstrap resolution 以及 `Boot → MainMenu` 主路径。自动化 smoke 不要求真实窗口交互；真实窗口启动仍属于 production client 的运行能力。
+在 Linux 运行复用项目根插件、无真实窗口依赖的最小 Bevy App smoke，验证项目根插件能够完成基础设施装配、`AppState` 初始化、启动准备 bootstrap resolution 以及 `Boot → MainMenu` 主路径。自动化 smoke 不要求真实窗口交互。
+
+### 真实窗口启动
+
+自动化 smoke 与 production build 都不覆盖 `DefaultPlugins` 的运行时初始化、窗口后端和平台动态依赖：二者分别在无窗口 runtime 中运行、以及只编译链接不运行。因此真实窗口启动是独立的验收面。
+
+该项以**有界启动运行**验收：启动真实 `psi` 二进制，在到达 `MainMenu` 后的一个确定帧自动退出，以进程退出码作为结论。有界退出由 Bevy 的 `bevy_ci_testing` 能力提供，经 `client` 的 `ci_testing` feature 开启，退出帧由 `CI_TESTING_CONFIG` 指向的配置决定；该 feature 不进入发布构建。
+
+执行环境需要虚拟显示与软件渲染后端（`xvfb` 与 Mesa 的软件 Vulkan 驱动），单次执行的安装与运行开销明显高于其余测试。因此该项只在手动触发的发布工作流中运行，不进入拉取请求门禁，与 [TDD](../../TDD.md) §7.2 的额度取舍一致。
 
 ## 验收条件
 
 - Linux 可以构建并链接 production client，使用与生产环境一致的 Bevy plugin 配置。
 - Linux 可以运行复用项目根插件的自动化 startup smoke，且不要求真实窗口交互。
+- 真实 `psi` 二进制可以创建窗口、到达 `MainMenu` 并在确定帧正常退出；该项由手动触发的发布工作流执行，不进入拉取请求门禁。
 - 自动化 startup smoke 覆盖：项目根插件装配、`AppState` 初始化为 `Boot`、`UserSettings` 与 `Localization` 完成 bootstrap resolution、`Boot → MainMenu` 主路径。
 - 应用初始化后进入 `Boot`；设置与本地化均 `Resolved` 后进入 `MainMenu`。
 - 启动资源在 `5s` 内没有返回结果时按加载失败处理并进入 `Resolved`，`Boot` 不会永久停留。
@@ -153,4 +162,5 @@ minimal Bevy runtime
 - [Confirmed] TDD §3–§5：定义固定 tick、Bevy States、配置、本地化和安全默认值。
 - [Confirmed] [固定频率规则调度 Contract](../contract/fixed-tick-simulation.md)：`FixedGameSet::Input` / `FixedGameSet::Rules` 只在 `AppState::Match` 中执行，`Paused` 停止对局模拟。
 - [Confirmed] 当前审核结论：`Boot` 作为设置与本地化的启动同步屏障；`main.rs` 保持薄入口；应用状态机为独立 Component；生产客户端与自动化 startup smoke 复用同一项目根插件（方案 A）；Production build 与 Automated startup smoke 的启动验收职责分开定义。
+- [Inferred] 待确认设计结论：真实窗口启动作为第三个验收面单列，以 `bevy_ci_testing` 的有界退出在手动触发的发布工作流中验收。原文档只写“真实窗口启动仍属于 production client 的运行能力”，没有任何验收路径，导致 Issue #11 的“正常启动”缺少关闭证据。已验证 `bevy/bevy_ci_testing` 可在本项目精简的 bevy feature 集（`2d`/`ui`/`audio`）下编译；xvfb 加软件 Vulkan 的运行时环境由该工作流首次执行时证实。
 - [Confirmed] 当前审核结论：启动准备设置 `5s` 超时，超时按加载失败处理并以内置默认值进入 `Resolved`，保证 `Boot` 屏障在有限时间内释放。
