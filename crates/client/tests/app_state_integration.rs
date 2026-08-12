@@ -219,3 +219,42 @@ fn match_completed_wins_over_pause_requested_when_pause_is_submitted_first() {
         "the losing request must never enter Paused"
     );
 }
+
+/// The rejection branch is reachable today: `Match` is the one state with two
+/// valid targets, so a cause pair outside the precedence table must leave the
+/// state untouched rather than let declaration order pick a winner.
+#[test]
+fn a_conflict_without_declared_precedence_is_rejected() {
+    let mut app = observed_app();
+    advance_to(&mut app, AppState::Match);
+
+    submit(
+        &mut app,
+        AppState::Result,
+        AppTransitionCause::ReturnToMainMenu,
+    );
+    submit(
+        &mut app,
+        AppState::Paused,
+        AppTransitionCause::PauseRequested,
+    );
+    commit(&mut app);
+
+    assert_eq!(
+        current_state(&app),
+        AppState::Match,
+        "an undeclared conflict must not change state"
+    );
+
+    let diagnostics = &app
+        .world()
+        .resource::<client::app_state::AppTransitionDiagnostics>()
+        .0;
+    assert!(
+        diagnostics.iter().any(|diagnostic| matches!(
+            diagnostic,
+            client::app_state::AppTransitionDiagnostic::ConflictingTargets(_)
+        )),
+        "the rejection must be observable: {diagnostics:?}"
+    );
+}

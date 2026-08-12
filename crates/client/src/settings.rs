@@ -17,7 +17,10 @@ pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<UserSettings>();
+        app.init_resource::<UserSettings>()
+            .init_resource::<LastSaveError>()
+            .add_message::<SaveSettingsRequest>()
+            .add_systems(Update, (save_settings_on_request, apply_settings));
     }
 }
 
@@ -90,13 +93,43 @@ impl PlayerInputBindings {
     }
 }
 
-impl Default for PlayerInputBindings {
-    fn default() -> Self {
+impl PlayerInputBindings {
+    /// Built-in bindings for a local player slot.
+    ///
+    /// These are deliberately non-empty: with no settings file the game still
+    /// has to be playable on both keyboard and gamepad. Keyboard keys differ
+    /// per player so two locals never fight over one key; the gamepad column is
+    /// the same for both because players are told apart by which pad they hold.
+    ///
+    /// Fixed bindings (directions, confirm, back, pause) are not listed here --
+    /// they are not user-configurable and live in `client::input`.
+    #[must_use]
+    pub fn for_player(player: usize) -> Self {
+        let keyboard = match player {
+            0 => ["KeyS", "KeyW", "KeyK", "KeyJ"],
+            _ => ["ArrowDown", "ArrowUp", "Numpad2", "Numpad1"],
+        };
+        let gamepad = ["DPadDown", "DPadUp", "South", "West"];
+
         let bindings = GameAction::CONFIGURABLE
             .into_iter()
-            .map(|action| (action, Vec::new()))
+            .zip(keyboard)
+            .zip(gamepad)
+            .map(|((action, key), button)| {
+                (
+                    action,
+                    vec![PhysicalInput::keyboard(key), PhysicalInput::gamepad(button)],
+                )
+            })
             .collect();
         Self { bindings }
+    }
+}
+
+impl Default for PlayerInputBindings {
+    /// Player 0's bindings; use [`PlayerInputBindings::for_player`] for a slot.
+    fn default() -> Self {
+        Self::for_player(0)
     }
 }
 
@@ -129,7 +162,7 @@ impl Default for UserSettings {
             window_mode: WindowModeSetting::Windowed,
             master_volume: 1.0,
             sfx_volume: 1.0,
-            players: std::array::from_fn(|_| PlayerInputBindings::default()),
+            players: std::array::from_fn(PlayerInputBindings::for_player),
             vibration: true,
             character_performance: true,
             animation_intensity: AnimationIntensity::Normal,
@@ -265,5 +298,89 @@ impl SettingsStore {
             path: self.path.clone(),
             source,
         })
+    }
+}
+
+/// Ask for the current `UserSettings` to be written to disk.
+///
+/// Saving is a request rather than a direct call so that UI code does not need
+/// the settings path, and so a failed write is reported in one place.
+#[derive(Message, Debug, Clone, Copy, Default)]
+pub struct SaveSettingsRequest;
+
+/// The outcome of the most recent save, for the settings UI to display.
+#[derive(Debug, Default, Resource)]
+pub struct LastSaveError(pub Option<String>);
+
+/// Persist the current settings when a save is requested.
+///
+/// A failed write keeps the in-memory value and the existing file untouched;
+/// only the reported error changes.
+pub fn save_settings_on_request(
+    mut requests: MessageReader<SaveSettingsRequest>,
+    paths: Res<crate::bootstrap::BootstrapPaths>,
+    settings: Res<UserSettings>,
+    mut last_error: ResMut<LastSaveError>,
+) {
+    if requests.read().count() == 0 {
+        return;
+    }
+
+    let store = match &paths.settings {
+        Some(path) => Some(SettingsStore::new(path)),
+        None => SettingsStore::platform_default(),
+    };
+    let Some(store) = store else {
+        last_error.0 = Some("no platform config directory is available".into());
+        return;
+    };
+
+    last_error.0 = match store.save(&settings) {
+        Ok(()) => None,
+        Err(error) => {
+            warn!("failed to save settings: {error}");
+            Some(error.to_string())
+        }
+    };
+}
+
+/// Push settings that other runtime systems own into those systems.
+///
+/// Runs when `UserSettings` changes, which covers both the value resolved at
+/// startup and any later edit, so the settings screen only has to mutate the
+/// resource.
+///
+/// Input bindings are deliberately not pushed here. The sampler is populated
+/// once by `client::input::install_settings_bindings`, and re-pushing on every
+/// change would overwrite a sampler that was installed deliberately. Applying
+/// an edited binding belongs with the settings screen that can perform the
+/// edit, which does not exist yet.
+pub fn apply_settings(
+    settings: Res<UserSettings>,
+    mut localization: ResMut<crate::i18n::Localization>,
+    mut windows: Query<&mut Window>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+
+    if !localization.set_locale(settings.language.clone()) {
+        warn!(
+            "locale {} has no catalog; falling back to the default",
+            settings.language
+        );
+    }
+
+    for mut window in &mut windows {
+        window.mode = match settings.window_mode {
+            WindowModeSetting::Windowed => bevy::window::WindowMode::Windowed,
+            WindowModeSetting::BorderlessFullscreen => {
+                bevy::window::WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+            }
+            WindowModeSetting::Fullscreen => bevy::window::WindowMode::Fullscreen(
+                MonitorSelection::Current,
+                VideoModeSelection::Current,
+            ),
+        };
     }
 }

@@ -48,6 +48,34 @@ pub struct PlayerActions(u8);
 impl PlayerActions {
     pub const EMPTY: Self = Self(0);
 
+    /// Bits 6-7 are reserved by the stable encoding and always read as zero.
+    const RESERVED_MASK: u8 = 0b1100_0000;
+
+    /// The stable wire/log encoding: bit 0-5 in `GameAction` order.
+    ///
+    /// Deterministic verification logs, snapshot checksums and later network
+    /// input encoding all depend on this value, so it is part of the crate's
+    /// public contract rather than an implementation detail.
+    #[must_use]
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// Rebuild a set from the stable encoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` when a reserved bit is set, so a corrupt or
+    /// future-versioned payload cannot silently decode into a valid set.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        if bits & Self::RESERVED_MASK != 0 {
+            None
+        } else {
+            Some(Self(bits))
+        }
+    }
+
     #[must_use]
     pub const fn from_action(action: GameAction) -> Self {
         Self(action.mask())
@@ -128,10 +156,17 @@ pub enum TickInputsError {
 }
 
 /// Inputs for every stable participant slot in one rules tick.
+///
+/// The fields stay private so `players[len..]` cannot be observed or
+/// corrupted from outside: keeping the tail empty is what gives identical
+/// logical inputs one canonical byte form, which equality, hashing,
+/// checksums and later network encoding all rely on. Slot occupancy is a
+/// question for [`TickInputs::player`], which separates "no such
+/// participant" from "that participant did nothing".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TickInputs {
-    pub players: [PlayerActions; MAX_PLAYERS],
-    pub len: u8,
+    players: [PlayerActions; MAX_PLAYERS],
+    len: u8,
 }
 
 impl TickInputs {
@@ -180,5 +215,35 @@ impl TickInputs {
 impl Default for TickInputs {
     fn default() -> Self {
         Self::EMPTY
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The tail is unobservable from outside, so the canonicalization rule it
+    /// exists for is guarded here, next to the code that has to maintain it.
+    #[test]
+    fn unused_slots_stay_empty() {
+        let inputs = TickInputs::new([PlayerActions::from_action(GameAction::Left)])
+            .expect("one participant fits");
+
+        assert!(
+            inputs.players[inputs.len()..]
+                .iter()
+                .all(|actions| *actions == PlayerActions::EMPTY),
+            "slots past len must stay empty to keep one canonical encoding"
+        );
+    }
+
+    #[test]
+    fn identical_logical_inputs_compare_equal() {
+        let actions = PlayerActions::from_action(GameAction::HardDrop);
+
+        assert_eq!(
+            TickInputs::new([actions]).expect("one participant fits"),
+            TickInputs::new([actions]).expect("one participant fits"),
+        );
     }
 }

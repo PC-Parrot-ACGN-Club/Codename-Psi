@@ -52,7 +52,10 @@ fn root_plugin_is_available_to_a_minimal_bevy_app() {
     );
     assert!(app.world().contains_resource::<UserSettings>());
     assert!(app.world().contains_resource::<Localization>());
-    assert!(app.world().contains_resource::<SimulationProbe>());
+    assert!(
+        !app.world().contains_resource::<SimulationProbe>(),
+        "the probe is test instrumentation and must stay out of the production assembly"
+    );
 
     app.world_mut().resource_mut::<BootstrapStatus>().settings = BootstrapTaskState::Resolved;
     app.world_mut()

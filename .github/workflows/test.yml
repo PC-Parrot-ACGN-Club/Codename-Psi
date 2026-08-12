@@ -36,6 +36,9 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets
+
       # game_core must stay buildable and testable without any platform runtime.
       - name: cargo test -p game_core (crate isolation)
         run: cargo test -p game_core
