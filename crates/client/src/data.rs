@@ -8,11 +8,12 @@
 //! last three into Bevy's opaque load failure.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use bevy::asset::io::Reader;
-use bevy::asset::{Asset, AssetLoader, LoadContext};
+use bevy::asset::{Asset, AssetLoader, LoadContext, LoadState};
 use bevy::prelude::*;
-use game_core::config::ConfigError;
+use game_core::config::{ConfigError, RulesStub, STUB_SCHEMA_VERSION, parse_rules_stub};
 
 use crate::i18n::CatalogError;
 
@@ -131,14 +132,110 @@ impl AssetLoader for SourceTextLoader {
     }
 }
 
-/// Registers the project's asset reading path.
+/// Where the rules document lives under `assets/`.
+///
+/// The path belongs here rather than to any consumer: `client::data` owns the
+/// asset root and the load lifecycle, and consumers only read the resolution.
+pub const RULES_PATH: &str = "data/rules.stub.ron";
+
+/// How long a data read may hang before it is treated as failed.
+///
+/// Without this a stalled read would leave consumers with no typed data at
+/// all, which is the one outcome the contract rules out. Matches the startup
+/// barrier's timeout; unlike the barrier, this load does not gate `Boot`.
+pub const DATA_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Rules used when the file cannot be read or parsed.
+fn builtin_rules() -> RulesStub {
+    RulesStub {
+        schema_version: STUB_SCHEMA_VERSION,
+        id: "builtin".into(),
+    }
+}
+
+/// A rules read in flight; removed once the resolution is published.
+#[derive(Debug, Resource)]
+pub struct RulesLoad {
+    handle: Handle<SourceText>,
+    waited: Duration,
+}
+
+/// The resolved rules document, in the form consumers read.
+///
+/// Present only once the load settles. Both resolutions carry a usable value,
+/// so a consumer never has to handle "loaded but empty".
+#[derive(Debug, Resource)]
+pub struct RulesData(pub DataResolution<RulesStub>);
+
+impl RulesData {
+    #[must_use]
+    pub fn rules(&self) -> &RulesStub {
+        self.0.value()
+    }
+
+    /// The read or parse failure behind a fallback, if this is one.
+    #[must_use]
+    pub fn error(&self) -> Option<&DataLoadError> {
+        self.0.error()
+    }
+}
+
+/// Ask Bevy Asset for the rules document.
+pub fn start_rules_load(asset_server: Res<AssetServer>, mut commands: Commands) {
+    commands.insert_resource(RulesLoad {
+        handle: asset_server.load::<SourceText>(RULES_PATH),
+        waited: Duration::ZERO,
+    });
+}
+
+/// Publish the rules resolution once the read settles, or on timeout.
+///
+/// Parsing stays here rather than in the asset loader, for the reason given at
+/// the top of this module: it is what keeps the typed causes apart.
+pub fn poll_rules(
+    time: Res<Time<Real>>,
+    asset_server: Res<AssetServer>,
+    sources: Res<Assets<SourceText>>,
+    mut load: ResMut<RulesLoad>,
+    mut commands: Commands,
+) {
+    load.waited += time.delta();
+    let timed_out = load.waited >= DATA_LOAD_TIMEOUT;
+
+    let source = match asset_server.load_state(&load.handle) {
+        LoadState::Loaded => sources
+            .get(&load.handle)
+            .map(|text| Ok(text.0.as_str()))
+            .unwrap_or(Err(DataErrorCause::Io("asset dropped after load".into()))),
+        LoadState::Failed(error) => Err(DataErrorCause::Io(error.to_string())),
+        _ if timed_out => Err(DataErrorCause::Io(format!(
+            "timed out after {}s",
+            DATA_LOAD_TIMEOUT.as_secs()
+        ))),
+        // Still reading: nothing to resolve this frame.
+        _ => return,
+    };
+
+    commands.insert_resource(RulesData(resolve_source(
+        RULES_PATH,
+        DataCategory::Rules,
+        builtin_rules(),
+        source,
+        |text| parse_rules_stub(text).map_err(DataErrorCause::from),
+    )));
+    commands.remove_resource::<RulesLoad>();
+}
+
+/// Registers the project's asset reading path and data load lifecycle.
 #[derive(Debug, Default)]
 pub struct DataPlugin;
 
 impl Plugin for DataPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<SourceText>()
-            .register_asset_loader(SourceTextLoader);
+            .register_asset_loader(SourceTextLoader)
+            .add_systems(Startup, start_rules_load)
+            .add_systems(Update, poll_rules.run_if(resource_exists::<RulesLoad>));
     }
 }
 
