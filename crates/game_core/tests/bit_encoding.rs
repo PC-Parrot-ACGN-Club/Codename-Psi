@@ -88,3 +88,48 @@ fn an_absent_participant_is_distinct_from_one_that_did_nothing() {
         "slot 2 has no participant at all this match"
     );
 }
+
+// docs/test/game-infrastructure.md TC-072
+#[test]
+fn every_public_decode_entry_rejects_the_reserved_bits() {
+    for bits in [0u8, 63] {
+        assert_eq!(
+            PlayerActions::from_bits(bits).map(PlayerActions::bits),
+            Some(bits),
+            "{bits} uses only the six defined bits and must decode"
+        );
+        assert_eq!(
+            serde_json::from_str::<PlayerActions>(&bits.to_string())
+                .expect("a legal encoding decodes")
+                .bits(),
+            bits,
+            "serde must agree with from_bits on {bits}"
+        );
+    }
+
+    // Bit 6, bit 7, and both: a corrupt or future-versioned payload.
+    for bits in [64u8, 128, 192] {
+        assert_eq!(
+            PlayerActions::from_bits(bits),
+            None,
+            "from_bits must reject the reserved bits in {bits}"
+        );
+        assert!(
+            serde_json::from_str::<PlayerActions>(&bits.to_string()).is_err(),
+            "serde must not be a way around the reserved-bit invariant ({bits})"
+        );
+    }
+}
+
+// docs/test/game-infrastructure.md TC-072
+#[test]
+fn a_decoded_set_round_trips_through_serialization() {
+    let actions = PlayerActions::from_actions([GameAction::Left, GameAction::HardDrop]);
+    let encoded = serde_json::to_string(&actions).expect("serializes");
+
+    assert_eq!(encoded, "9", "the wire form is the bare bit value");
+    assert_eq!(
+        serde_json::from_str::<PlayerActions>(&encoded).expect("decodes"),
+        actions
+    );
+}

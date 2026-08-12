@@ -35,15 +35,46 @@ impl GameAction {
         )
     }
 
+    /// The bit this action occupies in the stable encoding.
+    ///
+    /// Written out rather than derived from the variant's position, because
+    /// the encoding outlives this declaration order: reordering the enum for
+    /// readability must not silently rewrite logs, checksums or wire payloads.
     const fn mask(self) -> u8 {
-        1 << self as u8
+        match self {
+            Self::Left => 1 << 0,
+            Self::Right => 1 << 1,
+            Self::SoftDrop => 1 << 2,
+            Self::HardDrop => 1 << 3,
+            Self::RotateClockwise => 1 << 4,
+            Self::RotateCounterClockwise => 1 << 5,
+        }
     }
 }
 
 /// Fixed-width set of logical actions for one participant and one tick.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// `Deserialize` is written by hand so every public way in goes through
+/// [`PlayerActions::from_bits`]. A derived one would accept the reserved bits
+/// that `from_bits` exists to reject.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct PlayerActions(u8);
+
+impl<'de> Deserialize<'de> for PlayerActions {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = u8::deserialize(deserializer)?;
+        Self::from_bits(bits).ok_or_else(|| {
+            serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(u64::from(bits)),
+                &"a bit set with the reserved bits 6-7 clear",
+            )
+        })
+    }
+}
 
 impl PlayerActions {
     pub const EMPTY: Self = Self(0);
