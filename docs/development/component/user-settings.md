@@ -7,7 +7,7 @@
 
 ## 目标
 
-保存并恢复客户端本机偏好，为窗口、音频、输入、本地化、震动和表现设置提供统一持久化来源。
+保存并恢复客户端本机偏好，为窗口、音频、输入、本地化和震动提供统一持久化来源。
 
 `UserSettings` 提供当前用户设置，并负责持久化和恢复。
 
@@ -30,9 +30,7 @@
 - P1 keyboard mapping；
 - P2 keyboard mapping；
 - P1/P2 gamepad mapping；
-- vibration；
-- character performance；
-- animation intensity。
+- vibration。
 
 ## 默认值
 
@@ -45,8 +43,6 @@
 | master volume | `1.0` |
 | sfx volume | `1.0` |
 | vibration | `true` |
-| character performance | `true` |
-| animation intensity | `Normal` / `1.0` |
 
 ### 默认输入绑定
 
@@ -122,14 +118,15 @@ South           Gameplay: RotateClockwise        Menu: Confirm
 - malformed/unsupported 设置文件产生诊断并回退完整默认设置。
 - 保存后重启可以恢复 `UserSettings`。
 - P1/P2 键盘和手柄映射可以独立保存与恢复。
-- 默认语言、窗口、音量、震动和动画设置均有明确值。
+- 默认语言、窗口、音量和震动均有明确值。
 - 没有设置文件时，P1、P2 的四个可配置动作均已具备非空默认绑定，键盘与手柄都可直接产生全部六个规则动作。
 - 运行时组件可以读取当前 `UserSettings`。
 - 写入失败不会破坏已有正式设置文件。
 
 ## Test Basis
 
-- [Confirmed] Issue #11：要求持久化语言、窗口模式、音量、键盘映射、手柄映射、震动、角色演出和动画强度。
+- [Confirmed] Issue #11：要求持久化语言、窗口模式、音量、键盘映射、手柄映射与震动。
+- [Inferred] 待确认设计结论：移除 character performance 与 animation intensity 两项表现开关。二者在 R1 没有消费者，且各自要求表现层额外实现一条降级渲染路径；`UserSettings` 使用 `#[serde(default)]`，删除字段不需要 schema 升版或迁移，将来重新引入同样是零迁移成本。
 - [Confirmed] PRD §5.2：P1/P2 独立映射、键盘/手柄支持和冲突提示。
 - [Confirmed] PRD §7：定义需要持久化的用户设置。
 - [Confirmed] TDD §4：客户端维护可序列化输入映射。

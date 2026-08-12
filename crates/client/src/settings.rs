@@ -32,24 +32,6 @@ pub enum WindowModeSetting {
     Fullscreen,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-pub enum AnimationIntensity {
-    Low(f32),
-    #[default]
-    Normal,
-    High(f32),
-}
-
-impl AnimationIntensity {
-    #[must_use]
-    pub const fn value(self) -> f32 {
-        match self {
-            Self::Low(value) | Self::High(value) => value,
-            Self::Normal => 1.0,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerInputBindings {
     pub bindings: BTreeMap<GameAction, Vec<PhysicalInput>>,
@@ -150,8 +132,6 @@ pub struct UserSettings {
     pub sfx_volume: f32,
     pub players: [PlayerInputBindings; 2],
     pub vibration: bool,
-    pub character_performance: bool,
-    pub animation_intensity: AnimationIntensity,
 }
 
 impl Default for UserSettings {
@@ -164,8 +144,6 @@ impl Default for UserSettings {
             sfx_volume: 1.0,
             players: std::array::from_fn(PlayerInputBindings::for_player),
             vibration: true,
-            character_performance: true,
-            animation_intensity: AnimationIntensity::Normal,
         }
     }
 }
