@@ -7,17 +7,35 @@ use bevy::prelude::*;
 use client::GameInfrastructurePlugin;
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Codename Psi".into(),
-                ..default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "Codename Psi".into(),
             ..default()
-        }))
-        .add_plugins(GameInfrastructurePlugin)
-        .add_systems(Startup, setup)
-        .run();
+        }),
+        ..default()
+    }))
+    .add_plugins(GameInfrastructurePlugin)
+    .add_systems(Startup, setup);
+
+    #[cfg(feature = "ci_testing")]
+    app.add_systems(
+        OnEnter(client::app_state::AppState::MainMenu),
+        reached_main_menu,
+    );
+
+    app.run();
+}
+
+/// Marker for the bounded startup run, printed once the app is past `Boot`.
+///
+/// The exit event alone only proves the process came down cleanly; a build that
+/// never left `Boot` would exit just as successfully. The release workflow
+/// requires this line as well, which is what makes the run an acceptance of
+/// reaching `MainMenu` rather than of merely starting.
+#[cfg(feature = "ci_testing")]
+fn reached_main_menu() {
+    info!("startup-smoke: reached MainMenu");
 }
 
 fn setup(mut commands: Commands) {

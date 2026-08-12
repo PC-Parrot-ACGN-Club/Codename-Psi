@@ -34,3 +34,47 @@ jobs:
 
       - name: cargo build --release (linux-gnu)
         run: cargo build --locked --release --workspace --target x86_64-unknown-linux-gnu
+
+  # docs/test/game-infrastructure.md TC-074: the only check that exercises
+  # DefaultPlugins' runtime init, the window backend and the platform dynamic
+  # libraries. It needs a virtual display and a software Vulkan backend, which
+  # is why it lives here and not in the pull-request gate (docs/TDD.md 7.2).
+  startup-smoke:
+    name: bounded startup run (linux-gnu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies (Bevy)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libxkbcommon-dev
+
+      - name: Install a virtual display and a software Vulkan backend
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libxkbcommon-x11-0 libxcb-xfixes0-dev
+          sudo add-apt-repository ppa:kisak/turtle -y
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dri mesa-vulkan-drivers
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: x86_64-unknown-linux-gnu
+
+      # A clean exit alone would also pass for a build stuck in `Boot`, so the
+      # run has to show it reached `MainMenu` as well.
+      - name: Run the client to MainMenu and exit
+        env:
+          CI_TESTING_CONFIG: .github/ci-testing/startup.ron
+        run: |
+          set -o pipefail
+          xvfb-run cargo run --locked --features ci_testing \
+            --target x86_64-unknown-linux-gnu 2>&1 | tee startup.log
+          grep -q "startup-smoke: reached MainMenu" startup.log
