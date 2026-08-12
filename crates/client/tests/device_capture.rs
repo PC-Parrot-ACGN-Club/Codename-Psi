@@ -6,10 +6,11 @@
 
 mod common;
 
+use bevy::ecs::message::Messages;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use client::app_state::AppState;
-use client::input::STICK_THRESHOLD;
+use client::input::{STICK_THRESHOLD, UIAction, UIActionEvent};
 use client::simulation::RuleState;
 use common::{advance_to, controlled_app, run_fixed_tick};
 use game_core::input::{GameAction, PlayerActions};
@@ -199,4 +200,100 @@ fn escape_proposes_a_pause_only_inside_match() {
         before,
         "pausing must not advance or reset the rule state"
     );
+}
+
+/// Drain the UI actions emitted during the frames run so far.
+fn drain_ui_actions(app: &mut App) -> Vec<UIActionEvent> {
+    let messages = app.world().resource::<Messages<UIActionEvent>>();
+    let mut cursor = messages.get_cursor();
+    cursor.read(messages).copied().collect()
+}
+
+// docs/test/game-infrastructure.md TC-052
+#[test]
+fn menu_context_turns_fixed_directions_into_ui_actions() {
+    let mut app = controlled_app();
+    advance_to(&mut app, AppState::MainMenu);
+
+    press_key(&mut app, KeyCode::KeyA);
+    press_key(&mut app, KeyCode::Space);
+    app.update();
+
+    let emitted = drain_ui_actions(&mut app);
+    assert!(
+        emitted.contains(&UIActionEvent {
+            player: 0,
+            action: UIAction::Left,
+        }),
+        "KeyA is P1's fixed Left in a menu, got {emitted:?}"
+    );
+    assert!(
+        emitted.contains(&UIActionEvent {
+            player: 0,
+            action: UIAction::Confirm,
+        }),
+        "Space is P1's fixed Confirm, got {emitted:?}"
+    );
+}
+
+// docs/test/game-infrastructure.md TC-052
+#[test]
+fn the_same_physical_direction_does_not_produce_ui_actions_inside_match() {
+    let mut app = controlled_app();
+    advance_to(&mut app, AppState::Match);
+
+    press_key(&mut app, KeyCode::KeyA);
+    app.update();
+
+    assert!(
+        drain_ui_actions(&mut app).is_empty(),
+        "in Match the direction is rules input only, never a focus move"
+    );
+    assert!(
+        tick_actions(&mut app, 0).contains(GameAction::Left),
+        "the same key still drives the rules action"
+    );
+}
+
+// docs/test/game-infrastructure.md TC-064
+#[test]
+fn holding_a_menu_direction_moves_focus_once() {
+    let mut app = controlled_app();
+    advance_to(&mut app, AppState::MainMenu);
+
+    press_key(&mut app, KeyCode::KeyA);
+    for _ in 0..5 {
+        app.update();
+    }
+
+    let moves = drain_ui_actions(&mut app)
+        .into_iter()
+        .filter(|event| event.action == UIAction::Left)
+        .count();
+    assert_eq!(
+        moves, 1,
+        "a held direction must not auto-repeat focus moves"
+    );
+}
+
+// docs/test/game-infrastructure.md TC-052
+#[test]
+fn the_two_local_players_emit_their_own_ui_actions() {
+    let mut app = controlled_app();
+    advance_to(&mut app, AppState::MainMenu);
+
+    press_key(&mut app, KeyCode::Space);
+    press_key(&mut app, KeyCode::Enter);
+    app.update();
+
+    let emitted = drain_ui_actions(&mut app);
+    for player in 0..2 {
+        assert!(
+            emitted.contains(&UIActionEvent {
+                player,
+                action: UIAction::Confirm,
+            }),
+            "player {player} has its own fixed Confirm key, got {emitted:?}"
+        );
+    }
 }

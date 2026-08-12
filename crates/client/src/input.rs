@@ -16,16 +16,25 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LocalInputSampler>().add_systems(
-            Update,
-            (
-                install_settings_bindings,
-                capture_devices,
-                submit_pause_request,
+        app.init_resource::<LocalInputSampler>()
+            .init_resource::<UiInputState>()
+            .add_message::<UIActionEvent>()
+            .add_systems(
+                Update,
+                (
+                    install_settings_bindings,
+                    capture_devices,
+                    submit_pause_request,
+                )
+                    .chain()
+                    .in_set(AppTransitionSet::Request),
             )
-                .chain()
-                .in_set(AppTransitionSet::Request),
-        );
+            // Menu contexts only: in `Match` the same physical directions are
+            // rules input, and must not also move UI focus.
+            .add_systems(
+                Update,
+                emit_ui_actions.run_if(not(in_state(AppState::Match))),
+            );
     }
 }
 
@@ -196,6 +205,54 @@ const FIXED_DPAD_DIRECTIONS: [(GamepadButton, FixedDirection); 4] = [
     (GamepadButton::DPadDown, FixedDirection::Down),
 ];
 
+/// Fixed keyboard confirm/back keys for a local player slot.
+#[must_use]
+pub fn fixed_keyboard_menu_keys(player: usize) -> Option<[(KeyCode, UIAction); 2]> {
+    match player {
+        0 => Some([
+            (KeyCode::Space, UIAction::Confirm),
+            (KeyCode::ShiftLeft, UIAction::Back),
+        ]),
+        1 => Some([
+            (KeyCode::Enter, UIAction::Confirm),
+            (KeyCode::ShiftRight, UIAction::Back),
+        ]),
+        _ => None,
+    }
+}
+
+/// Fixed gamepad confirm/back buttons, shared by every local player.
+const FIXED_GAMEPAD_MENU_BUTTONS: [(GamepadButton, UIAction); 2] = [
+    (GamepadButton::South, UIAction::Confirm),
+    (GamepadButton::East, UIAction::Back),
+];
+
+/// A UI action produced by a local player in a menu context.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UIActionEvent {
+    pub player: usize,
+    pub action: UIAction,
+}
+
+/// Held UI sources, so focus moves once per press instead of once per frame.
+#[derive(Debug, Default, Resource)]
+pub struct UiInputState {
+    held: HashSet<(usize, PhysicalInput, UIAction)>,
+}
+
+impl UiInputState {
+    /// Report a source's state, returning `true` on the rising edge only.
+    fn edge(&mut self, player: usize, source: PhysicalInput, action: UIAction, held: bool) -> bool {
+        let key = (player, source, action);
+        if held {
+            self.held.insert(key)
+        } else {
+            self.held.remove(&key);
+            false
+        }
+    }
+}
+
 /// Give the sampler the player's bindings once settings are available.
 ///
 /// Without this the sampler starts with no bindings and no key would ever
@@ -303,6 +360,76 @@ pub fn capture_devices(
                 .is_some_and(|button| pads.iter().any(|pad| pad.pressed(button))),
         };
         sampler.update_pause_input(&input, held);
+    }
+}
+
+/// Turn fixed physical inputs into `UIAction`s while outside `Match`.
+///
+/// The same physical direction that drives `GameAction::Left`/`Right` in
+/// gameplay drives focus movement here; the input context decides which domain
+/// consumes it, and the two never merge. Emission is edge-triggered so holding
+/// a direction moves focus once rather than every frame.
+pub fn emit_ui_actions(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    mut state: ResMut<UiInputState>,
+    mut writer: MessageWriter<UIActionEvent>,
+) {
+    let pads: Vec<&Gamepad> = gamepads.iter().collect();
+
+    for player in 0..2 {
+        let pad = pads.get(player).copied();
+        let mut emit = |source: PhysicalInput, action: UIAction, held: bool| {
+            if state.edge(player, source, action, held) {
+                writer.write(UIActionEvent { player, action });
+            }
+        };
+
+        for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
+            if let Some(ContextAction::Ui(action)) =
+                interpret_direction(direction, InputContext::Menu)
+            {
+                let source = PhysicalInput::keyboard(format!("{code:?}"));
+                emit(source, action, keyboard.pressed(code));
+            }
+        }
+        for (code, action) in fixed_keyboard_menu_keys(player).into_iter().flatten() {
+            let source = PhysicalInput::keyboard(format!("{code:?}"));
+            emit(source, action, keyboard.pressed(code));
+        }
+
+        let Some(pad) = pad else { continue };
+
+        for (button, direction) in FIXED_DPAD_DIRECTIONS {
+            if let Some(ContextAction::Ui(action)) =
+                interpret_direction(direction, InputContext::Menu)
+            {
+                let source = PhysicalInput::gamepad(format!("{button:?}"));
+                emit(source, action, pad.pressed(button));
+            }
+        }
+        for (button, action) in FIXED_GAMEPAD_MENU_BUTTONS {
+            let source = PhysicalInput::gamepad(format!("{button:?}"));
+            emit(source, action, pad.pressed(button));
+        }
+
+        let stick = pad.left_stick();
+        for (value, negative, positive, axis) in [
+            (stick.x, FixedDirection::Left, FixedDirection::Right, "X"),
+            (stick.y, FixedDirection::Down, FixedDirection::Up, "Y"),
+        ] {
+            let source = PhysicalInput::gamepad(format!("LeftStick{axis}"));
+            for (direction, active) in [
+                (negative, value < -STICK_THRESHOLD),
+                (positive, value > STICK_THRESHOLD),
+            ] {
+                if let Some(ContextAction::Ui(action)) =
+                    interpret_direction(direction, InputContext::Menu)
+                {
+                    emit(source.clone(), action, active);
+                }
+            }
+        }
     }
 }
 
