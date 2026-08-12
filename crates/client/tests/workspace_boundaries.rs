@@ -1,11 +1,14 @@
 //! Mechanical regression guard for the workspace dependency direction.
 //!
-//! Manifests are embedded at compile time so the check does not depend on the
-//! working directory or on `cargo` being invocable from inside a test.
+//! The graph comes from `cargo metadata`, not from reading the manifests as
+//! text. Cargo reports the real package name of every dependency, so a rename
+//! (`quiet = { package = "bevy" }`) cannot slip a forbidden crate past these
+//! assertions, and target-specific or workspace-inherited tables are already
+//! resolved by the time we see them.
 
-const GAME_CORE_MANIFEST: &str = include_str!("../../game_core/Cargo.toml");
-const CLIENT_MANIFEST: &str = include_str!("../Cargo.toml");
-const NET_MANIFEST: &str = include_str!("../../net/Cargo.toml");
+use std::process::Command;
+
+use serde_json::Value;
 
 /// Platform runtime crates that must never reach the pure rules crate.
 const FORBIDDEN_IN_GAME_CORE: [&str; 8] = [
@@ -19,67 +22,71 @@ const FORBIDDEN_IN_GAME_CORE: [&str; 8] = [
     "local-ip-address",
 ];
 
-/// Whether a manifest table header is a *normal* dependency table.
+/// The workspace's own packages and their declared dependencies.
 ///
-/// `[dev-dependencies]` and `[build-dependencies]` are deliberately excluded: a
-/// required edge must not be satisfiable by a test-only or build-only
-/// dependency. Target-specific tables such as
-/// `[target.'cfg(unix)'.dependencies]` still count, while their `dev-`/`build-`
-/// forms do not, because only the normal ones end in `.dependencies`.
-fn is_normal_dependency_table(header: &str) -> bool {
-    let Some(name) = header
-        .trim_start_matches('[')
-        .split(']')
-        .next()
-        .map(str::trim)
-    else {
-        return false;
-    };
-    name == "dependencies" || name.ends_with(".dependencies")
+/// `--no-deps` keeps this to the workspace members, so the check neither
+/// resolves nor touches the registry. `--locked` keeps it honest about the
+/// committed lockfile, matching how CI builds.
+fn workspace_metadata() -> Value {
+    let output = Command::new(env!("CARGO"))
+        .args(["metadata", "--no-deps", "--format-version", "1", "--locked"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("cargo metadata is runnable from the test");
+
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("cargo metadata emits JSON")
 }
 
-/// Collect dependency names from the normal dependency tables of a manifest.
-fn dependency_names(manifest: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut in_dependencies = false;
+/// Real package names a crate depends on at build time.
+///
+/// Dev- and build-dependencies are excluded: a required edge must not be
+/// satisfiable by a test-only dependency, and a forbidden crate is only
+/// forbidden where it would ship.
+fn normal_dependencies(metadata: &Value, package: &str) -> Vec<String> {
+    let packages = metadata["packages"]
+        .as_array()
+        .expect("metadata lists packages");
+    let entry = packages
+        .iter()
+        .find(|candidate| candidate["name"] == package)
+        .unwrap_or_else(|| panic!("{package} is a workspace member"));
 
-    for line in manifest.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_dependencies = is_normal_dependency_table(line);
-            continue;
-        }
-        if !in_dependencies || line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some(name) = line.split(['=', '.']).next() else {
-            continue;
-        };
-        let name = name.trim();
-        if !name.is_empty() {
-            names.push(name.to_string());
-        }
-    }
-    names
+    entry["dependencies"]
+        .as_array()
+        .expect("a package lists dependencies")
+        .iter()
+        .filter(|dependency| dependency["kind"].is_null())
+        .map(|dependency| {
+            dependency["name"]
+                .as_str()
+                .expect("a dependency has a name")
+                .to_string()
+        })
+        .collect()
 }
 
 // docs/test/game-infrastructure.md TC-051
 #[test]
 fn client_and_net_depend_on_game_core() {
-    assert!(
-        dependency_names(CLIENT_MANIFEST).contains(&"game_core".to_string()),
-        "client -> game_core is a required edge"
-    );
-    assert!(
-        dependency_names(NET_MANIFEST).contains(&"game_core".to_string()),
-        "net -> game_core is a required edge"
-    );
+    let metadata = workspace_metadata();
+
+    for dependent in ["client", "net"] {
+        assert!(
+            normal_dependencies(&metadata, dependent).contains(&"game_core".to_string()),
+            "{dependent} -> game_core is a required edge"
+        );
+    }
 }
 
 // docs/test/game-infrastructure.md TC-051
 #[test]
 fn game_core_depends_on_neither_client_nor_net() {
-    let dependencies = dependency_names(GAME_CORE_MANIFEST);
+    let dependencies = normal_dependencies(&workspace_metadata(), "game_core");
 
     for forbidden in ["client", "net"] {
         assert!(
@@ -92,7 +99,7 @@ fn game_core_depends_on_neither_client_nor_net() {
 // docs/test/game-infrastructure.md TC-051
 #[test]
 fn game_core_stays_isolated_from_platform_runtimes() {
-    let dependencies = dependency_names(GAME_CORE_MANIFEST);
+    let dependencies = normal_dependencies(&workspace_metadata(), "game_core");
 
     for forbidden in FORBIDDEN_IN_GAME_CORE {
         assert!(
@@ -104,25 +111,27 @@ fn game_core_stays_isolated_from_platform_runtimes() {
 
 // docs/test/game-infrastructure.md TC-051
 #[test]
-fn the_dependency_name_scan_reads_normal_tables_only() {
-    let dependencies = dependency_names(CLIENT_MANIFEST);
+fn the_dependency_scan_sees_real_package_names_and_skips_dev_only_edges() {
+    let metadata = workspace_metadata();
+    let client = normal_dependencies(&metadata, "client");
 
     assert!(
-        dependencies.contains(&"bevy".to_string()),
-        "the scan must actually see client's dependency table: {dependencies:?}"
+        client.contains(&"bevy".to_string()),
+        "the scan must actually see client's dependencies: {client:?}"
     );
-    // `tempfile` is a dev-dependency of client only. If it shows up here, the
-    // required-edge assertions above would also pass for a game_core moved into
-    // `[dev-dependencies]`, which would no longer be a runtime edge.
+    // `tempfile` is a dev-dependency of client only. If it showed up here, the
+    // required-edge assertions would also pass for a `game_core` moved into
+    // `[dev-dependencies]`, which is no longer a runtime edge.
     assert!(
-        !dependencies.contains(&"tempfile".to_string()),
-        "a dev-only dependency must never satisfy a required edge: {dependencies:?}"
+        !client.contains(&"tempfile".to_string()),
+        "a dev-only dependency must never satisfy a required edge: {client:?}"
     );
-    assert!(is_normal_dependency_table(
-        "[target.'cfg(unix)'.dependencies]"
-    ));
-    assert!(!is_normal_dependency_table("[dev-dependencies]"));
-    assert!(!is_normal_dependency_table(
-        "[target.'cfg(unix)'.dev-dependencies]"
-    ));
+
+    // `net` is declared as an optional dependency behind a feature. It is still
+    // a normal edge, which is what makes the forbidden-crate checks meaningful:
+    // an optional dependency ships as soon as its feature is on.
+    assert!(
+        client.contains(&"net".to_string()),
+        "an optional dependency is still a normal edge: {client:?}"
+    );
 }

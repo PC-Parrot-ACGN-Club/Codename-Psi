@@ -96,7 +96,7 @@ GGRS 是 R2 的首选同步方案。最终依赖版本与 `bevy_ggrs` 集成方�
 ### 7.2 GitHub Actions
 
 - **触发策略：** 全量验证仅在目标分支为 `main` 的拉取请求上运行。这是 Actions 额度约束下的有意取舍：推送到开发分支不触发 CI，该阶段依赖 7.1 约定的本地验证，CI 只在合入 `main` 前把关。额度条件变化后再评估是否恢复推送触发。
-- 全量验证以 `RUSTFLAGS=-D warnings` 运行 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets`、`cargo test -p game_core`（crate 隔离）、`cargo test --workspace` 与 `x86_64-unknown-linux-gnu` 构建。
+- 全量验证以 `RUSTFLAGS=-D warnings` 运行 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets`、`cargo test -p game_core`（crate 隔离）、`cargo test --workspace` 与 `x86_64-unknown-linux-gnu` 构建。除格式检查外均使用 `--locked`，使 CI 的依赖解析与提交的 `Cargo.lock` 一致，不在流水线中重新解析。
 - 本地开发与 CI 均通过 `rust-toolchain.toml` 使用 Rust `1.97.1`，工具链升级作为独立变更并运行完整 CI。
 - 构建目标为 `x86_64-unknown-linux-gnu`。R1、R2 不交付其他构建目标，是否扩展在 R2 完成后再评估。
 - Bevy 图形窗口只纳入构建与最小启动冒烟测试；规则与同步测试保持无窗口运行，确保 CI 稳定。

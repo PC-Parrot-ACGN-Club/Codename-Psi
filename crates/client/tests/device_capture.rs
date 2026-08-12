@@ -76,6 +76,46 @@ fn default_bindings_let_the_keyboard_drive_every_rule_action() {
 
 // docs/test/game-infrastructure.md TC-062
 #[test]
+fn default_bindings_let_a_gamepad_drive_every_rule_action() {
+    let mut app = controlled_app();
+    let pad = spawn_gamepad(&mut app);
+    advance_to(&mut app, AppState::Match);
+
+    // Directions are fixed to the D-pad; the configurable four default to
+    // DPadDown/DPadUp/South/West.
+    for (button, action) in [
+        (GamepadButton::DPadLeft, GameAction::Left),
+        (GamepadButton::DPadRight, GameAction::Right),
+        (GamepadButton::DPadDown, GameAction::SoftDrop),
+        (GamepadButton::DPadUp, GameAction::HardDrop),
+        (GamepadButton::South, GameAction::RotateClockwise),
+        (GamepadButton::West, GameAction::RotateCounterClockwise),
+    ] {
+        app.world_mut()
+            .entity_mut(pad)
+            .get_mut::<Gamepad>()
+            .expect("the pad stays spawned")
+            .digital_mut()
+            .press(button);
+
+        let actions = tick_actions(&mut app, 0);
+        assert!(
+            actions.contains(action),
+            "{button:?} must produce {action:?} with default bindings, got {actions:?}"
+        );
+
+        app.world_mut()
+            .entity_mut(pad)
+            .get_mut::<Gamepad>()
+            .expect("the pad stays spawned")
+            .digital_mut()
+            .release(button);
+        capture_and_tick(&mut app);
+    }
+}
+
+// docs/test/game-infrastructure.md TC-062
+#[test]
 fn the_two_local_players_use_their_own_default_keys() {
     let mut app = controlled_app();
     advance_to(&mut app, AppState::Match);
