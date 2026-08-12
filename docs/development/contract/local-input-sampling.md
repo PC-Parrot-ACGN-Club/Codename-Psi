@@ -26,8 +26,8 @@
 
 ## 协作时序
 
-1. 普通 Update 捕获输入状态和尚未提交的一次性操作；fixed tick 根据当前绑定及采样状态生成 raw PlayerActions
-2. fixed tick 到来时，采样器根据当前物理 pressed 状态、pending press edge 和当前生效绑定生成每名本地玩家的 raw `PlayerActions`。
+1. 每帧在引擎输入更新之后、fixed 调度之前捕获一次输入状态和尚未提交的一次性操作。
+2. fixed tick 到来时，采样器根据当前物理 pressed 状态、pending press edge（定义见[本地输入采样器 Spec：press edge](../component/local-input-sampler.md#press-edge)）和当前生效绑定生成每名本地玩家的 raw `PlayerActions`。
 3. 相同逻辑动作的多个物理来源在采样阶段合并。
 4. raw `PlayerActions` 交给 `game_core::input` 进行逻辑动作归一化。
 
@@ -52,13 +52,15 @@ Keyboard Left + Gamepad Left
 
 ## 双方承诺
 
+- 捕获阶段：每帧在 fixed 调度之前完成一次采样，使当帧输入对当帧 fixed tick 可见。
 - 持续动作按 fixed tick 边界按下状态采样；
-- 一次性动作每次物理按下最多提交一次，并保留 tick 间完成的按下操作。
+- 一次性动作每个 press edge 最多提交一次，并保留 tick 间完成的 press edge。
 - `game_core::input`：对所有来源使用相同的逻辑动作归一化规则。
 
 ## 验收条件
 
 - 本地键盘/手柄输入可经采样与归一化形成规则层 `PlayerActions`。
+- 同一帧按下的输入在该帧的 fixed tick 即可形成 `PlayerActions`，不延后一帧。
 
 ## Test Basis
 
