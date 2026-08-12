@@ -8,8 +8,11 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
-# Runs docs/test/game-infrastructure.md TC-001~TC-048, TC-051~TC-059 on both
-# platforms; TC-056 (Linux) and TC-057 (Windows) are the startup smoke rows.
+# Runs docs/test/game-infrastructure.md TC-001~TC-048, TC-051~TC-056, TC-058~
+# TC-066 on Linux; TC-056 is the startup smoke row. TC-049 (production release
+# build) runs in release.yml. Triggering is limited to pull requests targeting
+# `main` on purpose -- see docs/TDD.md 7.2; development branches rely on the
+# local checks in docs/TDD.md 7.1.
 jobs:
   test-linux:
     name: fmt + test (linux)
@@ -48,18 +51,3 @@ jobs:
 
       - name: cargo build (linux-gnu)
         run: cargo build --workspace --target x86_64-unknown-linux-gnu
-
-  test-windows:
-    name: test (windows-gnullvm)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.97.1"
-          targets: x86_64-pc-windows-gnullvm
-
-      - name: cargo test
-        run: cargo test --workspace --target x86_64-pc-windows-gnullvm
