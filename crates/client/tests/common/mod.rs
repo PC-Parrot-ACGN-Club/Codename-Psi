@@ -36,8 +36,15 @@ pub fn state_only_app() -> App {
 /// The simulation probe is opt-in instrumentation the production plugin does
 /// not register, so tests that observe the fixed schedule insert it here.
 pub fn controlled_app() -> App {
-    controlled_app_with_asset_root("assets")
+    controlled_app_with_asset_root(WORKSPACE_ASSETS)
 }
+
+/// The real `assets/` tree.
+///
+/// Integration tests run with the package directory as their working
+/// directory, so a plain "assets" would silently resolve to nothing and every
+/// catalog would fall back instead of being read.
+pub const WORKSPACE_ASSETS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
 
 /// A controlled app whose asset reads come from `root`.
 ///

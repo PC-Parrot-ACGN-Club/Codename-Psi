@@ -81,8 +81,21 @@ impl Localization {
         }
     }
 
-    pub fn set_locale(&mut self, locale: impl Into<String>) {
-        self.current_locale = locale.into();
+    /// Switch the current locale, falling back when it has no catalog.
+    ///
+    /// Returns whether the requested locale was available. An unavailable
+    /// locale leaves every lookup falling through to English anyway, so this
+    /// selects the default outright rather than leaving the resource pointing
+    /// at a catalog that does not exist.
+    pub fn set_locale(&mut self, locale: impl Into<String>) -> bool {
+        let locale = locale.into();
+        let available = self.catalogs.contains_key(&locale);
+        self.current_locale = if available {
+            locale
+        } else {
+            DEFAULT_LOCALE.to_string()
+        };
+        available
     }
 
     #[must_use]

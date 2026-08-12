@@ -176,3 +176,24 @@ fn a_fallback_bootstrap_still_reaches_main_menu() {
 
     assert_eq!(current_state(&app), AppState::MainMenu);
 }
+
+/// Guards against the barrier silently passing on fallbacks: with a correct
+/// asset root the real catalogs must actually be read.
+#[test]
+fn a_healthy_bootstrap_reads_the_real_catalogs_without_diagnostics() {
+    let mut app = common::controlled_app();
+    run_until_bootstrap_ready(&mut app);
+
+    let diagnostics = app.world().resource::<BootstrapDiagnostics>();
+    assert!(
+        diagnostics.localization.is_empty(),
+        "the shipped catalogs must load cleanly: {:?}",
+        diagnostics.localization
+    );
+
+    let localization = app.world().resource::<client::i18n::Localization>();
+    assert!(
+        localization.catalogs.contains_key("zh-CN"),
+        "the zh-CN catalog must come from assets/, not a built-in fallback"
+    );
+}
