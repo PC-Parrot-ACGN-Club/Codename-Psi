@@ -90,13 +90,43 @@ impl PlayerInputBindings {
     }
 }
 
-impl Default for PlayerInputBindings {
-    fn default() -> Self {
+impl PlayerInputBindings {
+    /// Built-in bindings for a local player slot.
+    ///
+    /// These are deliberately non-empty: with no settings file the game still
+    /// has to be playable on both keyboard and gamepad. Keyboard keys differ
+    /// per player so two locals never fight over one key; the gamepad column is
+    /// the same for both because players are told apart by which pad they hold.
+    ///
+    /// Fixed bindings (directions, confirm, back, pause) are not listed here --
+    /// they are not user-configurable and live in `client::input`.
+    #[must_use]
+    pub fn for_player(player: usize) -> Self {
+        let keyboard = match player {
+            0 => ["KeyS", "KeyW", "KeyK", "KeyJ"],
+            _ => ["ArrowDown", "ArrowUp", "Numpad2", "Numpad1"],
+        };
+        let gamepad = ["DPadDown", "DPadUp", "South", "West"];
+
         let bindings = GameAction::CONFIGURABLE
             .into_iter()
-            .map(|action| (action, Vec::new()))
+            .zip(keyboard)
+            .zip(gamepad)
+            .map(|((action, key), button)| {
+                (
+                    action,
+                    vec![PhysicalInput::keyboard(key), PhysicalInput::gamepad(button)],
+                )
+            })
             .collect();
         Self { bindings }
+    }
+}
+
+impl Default for PlayerInputBindings {
+    /// Player 0's bindings; use [`PlayerInputBindings::for_player`] for a slot.
+    fn default() -> Self {
+        Self::for_player(0)
     }
 }
 
@@ -129,7 +159,7 @@ impl Default for UserSettings {
             window_mode: WindowModeSetting::Windowed,
             master_volume: 1.0,
             sfx_volume: 1.0,
-            players: std::array::from_fn(|_| PlayerInputBindings::default()),
+            players: std::array::from_fn(PlayerInputBindings::for_player),
             vibration: true,
             character_performance: true,
             animation_intensity: AnimationIntensity::Normal,

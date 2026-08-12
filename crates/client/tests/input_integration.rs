@@ -4,7 +4,7 @@
 mod common;
 
 use client::app_state::AppState;
-use client::input::{LocalInputSampler, PhysicalInput, UIAction, fixed_pause_button};
+use client::input::{LocalInputSampler, PhysicalInput, UIAction, fixed_pause_inputs};
 use client::simulation::CurrentTickInputs;
 use common::{
     advance_to, commit, controlled_app, current_state, install_sampler, press, run_fixed_tick,
@@ -69,7 +69,7 @@ fn the_fixed_start_button_commits_paused_from_match() {
 
     app.world_mut()
         .resource_mut::<LocalInputSampler>()
-        .press_pause(&fixed_pause_button());
+        .press_pause(&fixed_pause_inputs()[0]);
     commit(&mut app);
 
     assert_eq!(current_state(&app), AppState::Paused);
@@ -80,7 +80,7 @@ fn the_fixed_start_button_commits_paused_from_match() {
 fn the_pause_trigger_produces_no_game_action() {
     let mut sampler = LocalInputSampler::new(vec![common::keyboard_bindings(0)]);
 
-    sampler.press_pause(&fixed_pause_button());
+    sampler.press_pause(&fixed_pause_inputs()[0]);
     let sampled = sampler.sample_fixed();
 
     assert_eq!(
@@ -119,7 +119,7 @@ fn the_fixed_start_button_is_ignored_outside_match() {
 
     app.world_mut()
         .resource_mut::<LocalInputSampler>()
-        .press_pause(&fixed_pause_button());
+        .press_pause(&fixed_pause_inputs()[0]);
     commit(&mut app);
 
     assert_eq!(current_state(&app), AppState::MainMenu);

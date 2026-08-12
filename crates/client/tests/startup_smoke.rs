@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use client::GameInfrastructurePlugin;
 use client::app_state::{AppState, AppTransitionCause};
 use client::bootstrap::{BootstrapStatus, BootstrapTaskState};
-use client::input::{LocalInputSampler, fixed_pause_button};
+use client::input::{LocalInputSampler, fixed_pause_inputs};
 use common::{ALL_STATES, commit, controlled_app, current_state, install_sampler, submit};
 
 /// Counts how often each state's gated run phase executed.
@@ -131,7 +131,7 @@ fn the_basic_main_path_keeps_one_current_state_at_every_step() {
     clear_phases(&mut app);
     app.world_mut()
         .resource_mut::<LocalInputSampler>()
-        .press_pause(&fixed_pause_button());
+        .press_pause(&fixed_pause_inputs()[0]);
     commit(&mut app);
     assert_single_current_state(&app, AppState::Paused);
     assert!(phase_ran(&app, AppState::Paused));

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::app_state::{
     AppState, AppTransitionCause, AppTransitionRequest, AppTransitionRequests, AppTransitionSet,
 };
-use crate::settings::PlayerInputBindings;
+use crate::settings::{PlayerInputBindings, UserSettings};
 
 #[derive(Debug, Default)]
 pub struct InputPlugin;
@@ -18,18 +18,292 @@ impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LocalInputSampler>().add_systems(
             Update,
-            submit_pause_request.in_set(AppTransitionSet::Request),
+            (
+                install_settings_bindings,
+                capture_devices,
+                submit_pause_request,
+            )
+                .chain()
+                .in_set(AppTransitionSet::Request),
         );
     }
 }
 
-/// The fixed gamepad button that proposes a pause.
+/// Left-stick deflection past which a direction counts as held.
+pub const STICK_THRESHOLD: f32 = 0.5;
+
+/// The fixed inputs that propose a pause, for any local player.
 ///
 /// `Pause` is not a `UIAction` and not a `GameAction`: `client::input` proposes
-/// the state transition directly.
+/// the state transition directly. `Escape` also means `Back` outside `Match`,
+/// which is why the pause request is gated on the current `AppState` rather
+/// than on the key alone.
 #[must_use]
-pub fn fixed_pause_button() -> PhysicalInput {
-    PhysicalInput::gamepad("Start")
+pub fn fixed_pause_inputs() -> [PhysicalInput; 2] {
+    [
+        PhysicalInput::gamepad("Start"),
+        PhysicalInput::keyboard("Escape"),
+    ]
+}
+
+/// Resolve a persisted input name to a live Bevy key.
+///
+/// Bindings store names rather than Bevy types because the workspace builds
+/// Bevy without its `serialize` feature, so `KeyCode` has no `serde` impl to
+/// persist. Names follow Bevy's own variant spelling. An unknown name resolves
+/// to `None` and simply produces no action, which is the documented handling
+/// for an unbound physical input.
+#[must_use]
+pub fn keyboard_from_name(name: &str) -> Option<KeyCode> {
+    macro_rules! table {
+        ($($variant:ident),* $(,)?) => {
+            match name { $(stringify!($variant) => Some(KeyCode::$variant),)* _ => None }
+        };
+    }
+    table!(
+        KeyA,
+        KeyB,
+        KeyC,
+        KeyD,
+        KeyE,
+        KeyF,
+        KeyG,
+        KeyH,
+        KeyI,
+        KeyJ,
+        KeyK,
+        KeyL,
+        KeyM,
+        KeyN,
+        KeyO,
+        KeyP,
+        KeyQ,
+        KeyR,
+        KeyS,
+        KeyT,
+        KeyU,
+        KeyV,
+        KeyW,
+        KeyX,
+        KeyY,
+        KeyZ,
+        Digit0,
+        Digit1,
+        Digit2,
+        Digit3,
+        Digit4,
+        Digit5,
+        Digit6,
+        Digit7,
+        Digit8,
+        Digit9,
+        ArrowUp,
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        Numpad0,
+        Numpad1,
+        Numpad2,
+        Numpad3,
+        Numpad4,
+        Numpad5,
+        Numpad6,
+        Numpad7,
+        Numpad8,
+        Numpad9,
+        NumpadEnter,
+        Space,
+        Enter,
+        Escape,
+        Tab,
+        Backspace,
+        ShiftLeft,
+        ShiftRight,
+        ControlLeft,
+        ControlRight,
+        AltLeft,
+        AltRight,
+        Comma,
+        Period,
+        Slash,
+        Semicolon,
+        Quote,
+        BracketLeft,
+        BracketRight,
+        Minus,
+        Equal,
+        Backquote,
+    )
+}
+
+/// Resolve a persisted input name to a live Bevy gamepad button.
+#[must_use]
+pub fn gamepad_button_from_name(name: &str) -> Option<GamepadButton> {
+    macro_rules! table {
+        ($($variant:ident),* $(,)?) => {
+            match name { $(stringify!($variant) => Some(GamepadButton::$variant),)* _ => None }
+        };
+    }
+    table!(
+        South,
+        East,
+        North,
+        West,
+        LeftTrigger,
+        LeftTrigger2,
+        RightTrigger,
+        RightTrigger2,
+        Select,
+        Start,
+        Mode,
+        LeftThumb,
+        RightThumb,
+        DPadUp,
+        DPadDown,
+        DPadLeft,
+        DPadRight,
+    )
+}
+
+/// Fixed keyboard direction keys for a local player slot.
+///
+/// These are not user-configurable, and they feed both domains: in gameplay
+/// they become `GameAction::Left`/`Right`, in menus `UIAction` focus moves.
+#[must_use]
+pub fn fixed_keyboard_directions(player: usize) -> Option<[(KeyCode, FixedDirection); 4]> {
+    match player {
+        0 => Some([
+            (KeyCode::KeyA, FixedDirection::Left),
+            (KeyCode::KeyD, FixedDirection::Right),
+            (KeyCode::KeyW, FixedDirection::Up),
+            (KeyCode::KeyS, FixedDirection::Down),
+        ]),
+        1 => Some([
+            (KeyCode::ArrowLeft, FixedDirection::Left),
+            (KeyCode::ArrowRight, FixedDirection::Right),
+            (KeyCode::ArrowUp, FixedDirection::Up),
+            (KeyCode::ArrowDown, FixedDirection::Down),
+        ]),
+        _ => None,
+    }
+}
+
+/// Fixed gamepad D-pad direction buttons.
+const FIXED_DPAD_DIRECTIONS: [(GamepadButton, FixedDirection); 4] = [
+    (GamepadButton::DPadLeft, FixedDirection::Left),
+    (GamepadButton::DPadRight, FixedDirection::Right),
+    (GamepadButton::DPadUp, FixedDirection::Up),
+    (GamepadButton::DPadDown, FixedDirection::Down),
+];
+
+/// Give the sampler the player's bindings once settings are available.
+///
+/// Without this the sampler starts with no bindings and no key would ever
+/// produce an action. It only fills an empty sampler: tests install their own
+/// bindings, and pushing a settings change onto a running sampler belongs to
+/// the settings system rather than here.
+pub fn install_settings_bindings(
+    settings: Res<UserSettings>,
+    mut sampler: ResMut<LocalInputSampler>,
+) {
+    if sampler.bindings.is_empty() {
+        sampler.set_bindings(settings.players.to_vec());
+    }
+}
+
+/// Read real keyboard and gamepad state into the sampler each `Update`.
+///
+/// The sampler owns the fixed-tick semantics; this system only reports what is
+/// physically held or newly pressed right now. Gamepads are matched to local
+/// players by connection order, so the first connected pad drives player 0.
+pub fn capture_devices(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    mut sampler: ResMut<LocalInputSampler>,
+) {
+    let pads: Vec<&Gamepad> = gamepads.iter().collect();
+
+    // Collected first: resolving a binding borrows the sampler that the
+    // press/release calls below need mutably.
+    let mut configurable: Vec<(usize, PhysicalInput, bool)> = Vec::new();
+    for (player, bindings) in sampler.bindings.iter().enumerate() {
+        let pad = pads.get(player).copied();
+        for input in bindings.bindings.values().flatten() {
+            let held = match input {
+                PhysicalInput::Keyboard(name) => {
+                    keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
+                }
+                PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
+                    .zip(pad)
+                    .is_some_and(|(button, pad)| pad.pressed(button)),
+            };
+            configurable.push((player, input.clone(), held));
+        }
+    }
+    for (player, input, held) in configurable {
+        if held {
+            sampler.press(player, input);
+        } else {
+            sampler.release(player, &input);
+        }
+    }
+
+    let players = sampler.bindings.len().max(pads.len());
+    for player in 0..players {
+        let pad = pads.get(player).copied();
+
+        for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
+            let source = PhysicalInput::keyboard(format!("{code:?}"));
+            if keyboard.pressed(code) {
+                sampler.press_fixed_direction(player, source, direction);
+            } else {
+                sampler.release_fixed_direction(player, &source, direction);
+            }
+        }
+
+        let Some(pad) = pad else { continue };
+
+        for (button, direction) in FIXED_DPAD_DIRECTIONS {
+            let source = PhysicalInput::gamepad(format!("{button:?}"));
+            if pad.pressed(button) {
+                sampler.press_fixed_direction(player, source, direction);
+            } else {
+                sampler.release_fixed_direction(player, &source, direction);
+            }
+        }
+
+        // One stick reports two axes, so each axis is its own source: holding
+        // the stick left must not also register as a vertical direction.
+        let stick = pad.left_stick();
+        for (value, negative, positive, axis) in [
+            (stick.x, FixedDirection::Left, FixedDirection::Right, "X"),
+            (stick.y, FixedDirection::Down, FixedDirection::Up, "Y"),
+        ] {
+            let source = PhysicalInput::gamepad(format!("LeftStick{axis}"));
+            for (direction, active) in [
+                (negative, value < -STICK_THRESHOLD),
+                (positive, value > STICK_THRESHOLD),
+            ] {
+                if active {
+                    sampler.press_fixed_direction(player, source.clone(), direction);
+                } else {
+                    sampler.release_fixed_direction(player, &source, direction);
+                }
+            }
+        }
+    }
+
+    // The sampler derives the edge, so holding the key proposes one pause.
+    for input in fixed_pause_inputs() {
+        let held = match &input {
+            PhysicalInput::Keyboard(name) => {
+                keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
+            }
+            PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
+                .is_some_and(|button| pads.iter().any(|pad| pad.pressed(button))),
+        };
+        sampler.update_pause_input(&input, held);
+    }
 }
 
 /// Forward a pending pause press edge straight to the state machine.
@@ -122,6 +396,8 @@ pub struct LocalInputSampler {
     fixed_directions: HashSet<(usize, PhysicalInput, FixedDirection)>,
     pending_edges: Vec<PlayerActions>,
     pause_pending: bool,
+    /// Fixed pause inputs currently held, so a hold proposes exactly one pause.
+    pause_held: HashSet<PhysicalInput>,
 }
 
 impl LocalInputSampler {
@@ -133,6 +409,13 @@ impl LocalInputSampler {
             pending_edges,
             ..Default::default()
         }
+    }
+
+    /// Replace the binding table, resizing the per-player edge buffers with it.
+    pub fn set_bindings(&mut self, bindings: Vec<PlayerInputBindings>) {
+        self.pending_edges
+            .resize(bindings.len(), PlayerActions::EMPTY);
+        self.bindings = bindings;
     }
 
     pub fn press(&mut self, player: usize, input: PhysicalInput) {
@@ -170,10 +453,29 @@ impl LocalInputSampler {
             .remove(&(player, source.clone(), direction));
     }
 
-    /// Record a press edge of the fixed pause button; other inputs are ignored.
+    /// Record a press edge of a fixed pause input; other inputs are ignored.
     pub fn press_pause(&mut self, source: &PhysicalInput) {
-        if *source == fixed_pause_button() {
+        if fixed_pause_inputs().contains(source) {
             self.pause_pending = true;
+        }
+    }
+
+    /// Track a fixed pause input's held state, proposing a pause on the edge.
+    ///
+    /// The edge is derived here rather than read from Bevy's `just_pressed`,
+    /// because that flag is cleared in `PreUpdate` and would depend on the
+    /// device event landing in the same frame the capture system runs. Holding
+    /// the key still proposes exactly one pause.
+    pub fn update_pause_input(&mut self, source: &PhysicalInput, held: bool) {
+        if !fixed_pause_inputs().contains(source) {
+            return;
+        }
+        if held {
+            if self.pause_held.insert(source.clone()) {
+                self.pause_pending = true;
+            }
+        } else {
+            self.pause_held.remove(source);
         }
     }
 
