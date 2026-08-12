@@ -54,19 +54,16 @@ Boot → MainMenu → ModeSelect → CharacterSelect → Match ⇄ Paused → Re
 
 ## Documentation-driven workflow
 
-Design and test-case docs are reviewed and confirmed *before* implementation. When code changes affect documented behavior, update the corresponding doc in the same change so docs, code, config, and acceptance criteria stay consistent.
+Design and test-case docs are written *before* implementation. When code changes affect documented behavior, update the corresponding doc in the same change so docs, code, config, and test cases stay consistent.
 
-- `docs/PRD.md`, `docs/gameplay.md`, `docs/presentation.md`, `docs/TDD.md` are the founding contracts (product scope, gameplay rules, presentation/UI, tech stack + crate boundaries + determinism + CI). Amend in place when reality diverges from them.
-- `docs/development/` holds design docs classified by assembly scope — see `docs/development/README.md`:
-  - **Component** — single module, data model, rule, or local state/behavior.
-  - **Component Integration** — interface/contract/protocol between ≥2 components.
-  - **System** — multi-module architecture, runtime lifecycle, or user-facing flow.
-  - Document types within a category: Spec, Contract, Architecture, Flow, Decision.
-- `docs/test/design/` holds test-case designs, reviewed before implementation, classified along three independent axes (see `docs/test/README.md`):
-  - **Test Level** — Component → Component Integration → System; pick the smallest scope that already proves the behavior.
-  - **Concern** — cross-cutting verification purpose (Smoke, Content Validation, Determinism, ...).
-  - **Domain** — gameplay responsibility area (Rules, Match Flow, Configuration, Client, Input, AI, Network).
-- Every design/test conclusion carries an evidence status: `Confirmed` (direct evidence from files/tests/config/git history), `Inferred` (reasoned from evidence, needs user confirmation), or `Unknown` (characterization test protecting current behavior only, revisit once design is confirmed).
+**Before writing or editing anything under `docs/development/` or `docs/test/`, read `docs/CONVENTIONS.md`** — six writing rules that override default documentation habits. The `psi-doc` skill (`.agents/skills/psi-doc/`) carries the same pointers plus the writing procedure. The rules exist because docs previously accumulated duplicated rules, repeated boundary reminders, and review-process residue.
+
+- `docs/PRD.md`, `docs/gameplay.md`, `docs/presentation.md`, `docs/TDD.md` are the founding contracts (product scope, gameplay rules, presentation/UI, tech stack + crate boundaries + determinism + CI). They are narrative documents and are **not** governed by `CONVENTIONS.md`. Amend in place when reality diverges from them.
+- `docs/development/design/` — one document per subject: data model, behavior, cross-module collaboration, boundaries. A subject spanning several modules is still one document, not a spec plus a contract.
+- `docs/development/system/` — one document per cross-module runtime surface: module responsibilities, dependency direction, main flow.
+- `docs/development/decision/` — only for choices with real alternatives worth preserving.
+- `docs/test/design/` holds test-case designs, classified along three independent axes (see `docs/test/README.md`): **Test Level** (Component → Component Integration → System; pick the smallest scope that already proves the behavior), **Concern** (Smoke, Content Validation, Determinism, ...), **Domain** (Rules, Match Flow, Configuration, Client, Input, AI, Network).
+- Design docs carry no acceptance-criteria section and no status field: decidable assertions live in the test design docs, and committing a doc is what marks it reviewed. Test *cases* still carry an evidence status — `Confirmed`, `Inferred`, or `Unknown` (characterization test protecting current behavior) — because that describes confidence in code behavior, not review state.
 
 Docs are written in Chinese; code, comments, and identifiers are in English.
 
