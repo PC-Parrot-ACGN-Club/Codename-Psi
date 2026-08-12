@@ -1,6 +1,6 @@
 //! Client-side physical input sampling and UI action types.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 use game_core::input::{GameAction, PlayerActions};
@@ -18,6 +18,7 @@ impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LocalInputSampler>()
             .init_resource::<UiInputState>()
+            .init_resource::<GamepadSlots>()
             .add_message::<UIActionEvent>()
             // Sampling must observe this frame's devices *before* this frame's
             // fixed ticks. Bevy's main schedule runs `RunFixedMainLoop` ahead of
@@ -25,7 +26,7 @@ impl Plugin for InputPlugin {
             // previous frame's device state.
             .add_systems(
                 RunFixedMainLoop,
-                (install_settings_bindings, capture_devices)
+                (install_settings_bindings, bind_gamepads, capture_devices)
                     .chain()
                     .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
             )
@@ -47,6 +48,80 @@ impl Plugin for InputPlugin {
 
 /// Left-stick deflection past which a direction counts as held.
 pub const STICK_THRESHOLD: f32 = 0.5;
+
+/// Local player slots that can own a gamepad.
+pub const LOCAL_PLAYERS: usize = 2;
+
+/// Which local player each connected gamepad drives.
+///
+/// The binding is established once, when the pad appears, and holds for as
+/// long as it stays connected. Deriving it from query order instead would let
+/// an unrelated device change reassign a player mid-match.
+#[derive(Debug, Default, Resource)]
+pub struct GamepadSlots {
+    by_pad: HashMap<Entity, usize>,
+}
+
+impl GamepadSlots {
+    /// The local player this pad drives, if it is bound.
+    #[must_use]
+    pub fn slot(&self, pad: Entity) -> Option<usize> {
+        self.by_pad.get(&pad).copied()
+    }
+
+    /// The pad bound to a local player, if any.
+    #[must_use]
+    pub fn pad(&self, player: usize) -> Option<Entity> {
+        self.by_pad
+            .iter()
+            .find_map(|(pad, slot)| (*slot == player).then_some(*pad))
+    }
+
+    fn is_taken(&self, player: usize) -> bool {
+        self.by_pad.values().any(|slot| *slot == player)
+    }
+}
+
+/// Keep gamepad-to-player bindings current, clearing what a lost pad held.
+///
+/// A disconnected pad can never report a release, so anything it held would
+/// otherwise stay pressed forever and keep producing actions.
+pub fn bind_gamepads(
+    gamepads: Query<Entity, With<Gamepad>>,
+    mut slots: ResMut<GamepadSlots>,
+    mut sampler: ResMut<LocalInputSampler>,
+    mut ui: ResMut<UiInputState>,
+) {
+    let live: HashSet<Entity> = gamepads.iter().collect();
+
+    let dropped: Vec<(Entity, usize)> = slots
+        .by_pad
+        .iter()
+        .filter(|(pad, _)| !live.contains(pad))
+        .map(|(pad, slot)| (*pad, *slot))
+        .collect();
+    for (pad, player) in dropped {
+        slots.by_pad.remove(&pad);
+        sampler.clear_gamepad_state(player);
+        ui.clear_gamepad_state(player);
+    }
+
+    // Sorted so that two pads appearing in the same frame get slots in a
+    // reproducible order rather than in whatever order the query yields.
+    // Sorted by index rather than by `Entity`, whose ordering runs off an
+    // opaque bit pattern that does not follow spawn order.
+    let mut arriving: Vec<Entity> = live
+        .into_iter()
+        .filter(|pad| slots.slot(*pad).is_none())
+        .collect();
+    arriving.sort_by_key(|pad| pad.index_u32());
+    for pad in arriving {
+        let Some(player) = (0..LOCAL_PLAYERS).find(|slot| !slots.is_taken(*slot)) else {
+            break;
+        };
+        slots.by_pad.insert(pad, player);
+    }
+}
 
 /// The fixed inputs that propose a pause, for any local player.
 ///
@@ -258,6 +333,16 @@ impl UiInputState {
             false
         }
     }
+
+    /// Forget what a player's gamepad held, so a later pad starts from rest.
+    ///
+    /// A stale entry here would swallow the first press after a reconnect: the
+    /// rising edge is only reported when the source was not already held.
+    fn clear_gamepad_state(&mut self, player: usize) {
+        self.held.retain(|(slot, source, _)| {
+            *slot != player || !matches!(source, PhysicalInput::Gamepad(_))
+        });
+    }
 }
 
 /// Give the sampler the player's bindings once settings are available.
@@ -275,24 +360,39 @@ pub fn install_settings_bindings(
     }
 }
 
+/// Resolve each local player's gamepad through its stable slot binding.
+fn pads_by_player<'a>(
+    gamepads: &'a Query<(Entity, &Gamepad)>,
+    slots: &GamepadSlots,
+) -> [Option<&'a Gamepad>; LOCAL_PLAYERS] {
+    let mut pads = [None; LOCAL_PLAYERS];
+    for (entity, pad) in gamepads.iter() {
+        if let Some(cell) = slots.slot(entity).and_then(|slot| pads.get_mut(slot)) {
+            *cell = Some(pad);
+        }
+    }
+    pads
+}
+
 /// Read real keyboard and gamepad state into the sampler once per frame.
 ///
 /// The sampler owns the fixed-tick semantics; this system only reports what is
 /// physically held right now and which press edges happened this frame.
-/// Gamepads are matched to local players by connection order, so the first
-/// connected pad drives player 0.
+/// Gamepads reach their player through [`GamepadSlots`], not through query
+/// order, so a device change elsewhere cannot move a player's input.
 pub fn capture_devices(
     keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    slots: Res<GamepadSlots>,
     mut sampler: ResMut<LocalInputSampler>,
 ) {
-    let pads: Vec<&Gamepad> = gamepads.iter().collect();
+    let pads = pads_by_player(&gamepads, &slots);
 
     // Collected first: resolving a binding borrows the sampler that the
     // press/release calls below need mutably.
     let mut configurable: Vec<(usize, PhysicalInput, bool, bool)> = Vec::new();
     for (player, bindings) in sampler.bindings.iter().enumerate() {
-        let pad = pads.get(player).copied();
+        let pad = pads.get(player).copied().flatten();
         for input in bindings.bindings.values().flatten() {
             let (held, edge) = match input {
                 PhysicalInput::Keyboard(name) => keyboard_from_name(name)
@@ -323,9 +423,9 @@ pub fn capture_devices(
         }
     }
 
-    let players = sampler.bindings.len().max(pads.len());
+    let players = sampler.bindings.len().max(LOCAL_PLAYERS);
     for player in 0..players {
-        let pad = pads.get(player).copied();
+        let pad = pads.get(player).copied().flatten();
 
         for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
             let source = PhysicalInput::keyboard(format!("{code:?}"));
@@ -375,7 +475,7 @@ pub fn capture_devices(
                 keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
             }
             PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
-                .is_some_and(|button| pads.iter().any(|pad| pad.pressed(button))),
+                .is_some_and(|button| pads.iter().flatten().any(|pad| pad.pressed(button))),
         };
         sampler.update_pause_input(&input, held);
     }
@@ -389,14 +489,15 @@ pub fn capture_devices(
 /// a direction moves focus once rather than every frame.
 pub fn emit_ui_actions(
     keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    slots: Res<GamepadSlots>,
     mut state: ResMut<UiInputState>,
     mut writer: MessageWriter<UIActionEvent>,
 ) {
-    let pads: Vec<&Gamepad> = gamepads.iter().collect();
+    let pads = pads_by_player(&gamepads, &slots);
 
-    for player in 0..2 {
-        let pad = pads.get(player).copied();
+    for player in 0..LOCAL_PLAYERS {
+        let pad = pads.get(player).copied().flatten();
         let mut emit = |source: PhysicalInput, action: UIAction, held: bool| {
             if state.edge(player, source, action, held) {
                 writer.write(UIActionEvent { player, action });
@@ -596,6 +697,19 @@ impl LocalInputSampler {
     ) {
         self.fixed_directions
             .remove(&(player, source.clone(), direction));
+    }
+
+    /// Drop everything a player's gamepad was holding.
+    ///
+    /// Pending press edges survive: those are completed presses the player
+    /// actually made, still owed to the rules layer. Only held state, which
+    /// only means something while the device is there to report it, is lost.
+    pub fn clear_gamepad_state(&mut self, player: usize) {
+        self.pressed
+            .retain(|(slot, input)| *slot != player || !matches!(input, PhysicalInput::Gamepad(_)));
+        self.fixed_directions.retain(|(slot, source, _)| {
+            *slot != player || !matches!(source, PhysicalInput::Gamepad(_))
+        });
     }
 
     /// Record a press edge of a fixed pause input; other inputs are ignored.
