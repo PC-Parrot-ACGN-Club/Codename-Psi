@@ -28,7 +28,13 @@ impl Plugin for GameInfrastructurePlugin {
         if !app.is_plugin_added::<bevy::input::InputPlugin>() {
             app.add_plugins(bevy::input::InputPlugin);
         }
+        // Runtime data is read through Bevy Asset. A test that needs a
+        // different asset root adds `AssetPlugin` itself before this plugin.
+        if !app.is_plugin_added::<bevy::asset::AssetPlugin>() {
+            app.add_plugins(bevy::asset::AssetPlugin::default());
+        }
         app.add_plugins((
+            data::DataPlugin,
             app_state::AppStatePlugin,
             settings::SettingsPlugin,
             i18n::LocalizationPlugin,

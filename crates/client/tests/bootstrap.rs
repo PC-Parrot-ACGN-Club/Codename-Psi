@@ -9,7 +9,9 @@ use client::bootstrap::{
 };
 use client::i18n::Localization;
 use client::settings::UserSettings;
-use common::{controlled_app, current_state, state_only_app};
+use common::{
+    controlled_app_with_asset_root, current_state, run_until_bootstrap_ready, state_only_app,
+};
 
 /// Run only the barrier coordination system and report what it requested.
 fn pending_requests_for(
@@ -110,10 +112,9 @@ fn failing_bootstrap_app() -> (App, tempfile::TempDir) {
     )
     .expect("write unsupported catalog");
 
-    let mut app = controlled_app();
+    let mut app = controlled_app_with_asset_root(root.path().to_string_lossy().into_owned());
     app.insert_resource(BootstrapPaths {
         settings: Some(settings_path),
-        asset_root: root.path().to_path_buf(),
     });
 
     (app, root)
@@ -124,7 +125,7 @@ fn failing_bootstrap_app() -> (App, tempfile::TempDir) {
 fn failed_settings_and_catalog_loads_still_release_the_barrier() {
     let (mut app, _root) = failing_bootstrap_app();
 
-    app.update();
+    run_until_bootstrap_ready(&mut app);
 
     let status = *app.world().resource::<BootstrapStatus>();
     assert_eq!(status.settings, BootstrapTaskState::Resolved);
@@ -137,7 +138,7 @@ fn failed_settings_and_catalog_loads_still_release_the_barrier() {
 fn a_fallback_bootstrap_keeps_its_diagnostics_and_usable_values() {
     let (mut app, _root) = failing_bootstrap_app();
 
-    app.update();
+    run_until_bootstrap_ready(&mut app);
 
     let diagnostics = app.world().resource::<BootstrapDiagnostics>();
     assert!(
@@ -169,7 +170,7 @@ fn a_fallback_bootstrap_keeps_its_diagnostics_and_usable_values() {
 fn a_fallback_bootstrap_still_reaches_main_menu() {
     let (mut app, _root) = failing_bootstrap_app();
 
-    app.update();
+    run_until_bootstrap_ready(&mut app);
     app.update();
     app.update();
 

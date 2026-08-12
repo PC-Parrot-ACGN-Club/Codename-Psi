@@ -36,11 +36,45 @@ pub fn state_only_app() -> App {
 /// The simulation probe is opt-in instrumentation the production plugin does
 /// not register, so tests that observe the fixed schedule insert it here.
 pub fn controlled_app() -> App {
+    controlled_app_with_asset_root("assets")
+}
+
+/// A controlled app whose asset reads come from `root`.
+///
+/// `AssetPlugin` is added before the project plugin, which then leaves it
+/// alone -- the asset root is plugin configuration, not a per-load argument.
+pub fn controlled_app_with_asset_root(root: impl Into<String>) -> App {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, GameInfrastructurePlugin));
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::asset::AssetPlugin {
+            file_path: root.into(),
+            ..default()
+        },
+        GameInfrastructurePlugin,
+    ));
     app.init_resource::<client::simulation::SimulationProbe>();
     app.world_mut().resource_mut::<Time<Virtual>>().pause();
     app
+}
+
+/// Pump frames until the startup barrier resolves.
+///
+/// Asset reads are asynchronous, so a single `update()` is not enough. The cap
+/// only stops a broken build from hanging the suite; the production timeout is
+/// what guarantees the barrier releases.
+pub fn run_until_bootstrap_ready(app: &mut App) {
+    for _ in 0..2000 {
+        app.update();
+        if app
+            .world()
+            .resource::<client::bootstrap::BootstrapStatus>()
+            .is_ready()
+        {
+            return;
+        }
+    }
+    panic!("the startup barrier never resolved");
 }
 
 pub fn current_state(app: &App) -> AppState {
