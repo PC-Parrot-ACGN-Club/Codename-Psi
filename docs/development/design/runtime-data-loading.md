@@ -40,6 +40,15 @@ enum DataResolution<T> {
 | client 专用解析器 | 解析本地化等 client 数据 | 对应 source text/bytes |
 | 功能消费者 | 使用已解析或 fallback 的 typed data | 数据已经 resolved |
 
+### 资产根
+
+Bevy Asset 按 `BEVY_ASSET_ROOT`、`CARGO_MANIFEST_DIR`、可执行文件所在目录的顺序确定 `assets/` 的父目录，工作目录不参与解析。由此得到两条使用约束：
+
+- 发布形态把 `assets/` 与二进制放在同一目录。
+- 经 `cargo run` 启动时 `CARGO_MANIFEST_DIR` 指向 `crates/client`，需要以 `BEVY_ASSET_ROOT` 指向仓库根才能读到项目 `assets/`。
+
+资产根解析失败时全部数据类别进入 fallback，客户端照常运行，因此运行是否真正读到项目数据由加载诊断判定，不由启动成败判定。
+
 ### 协作时序
 
 1. `client::data` 请求目标资源。

@@ -69,13 +69,24 @@ jobs:
           toolchain: "1.97.1"
           targets: x86_64-unknown-linux-gnu
 
-      # A clean exit alone would also pass for a build stuck in `Boot`, so the
-      # run has to show it reached `MainMenu` as well.
+      # A clean exit alone would also pass for a build stuck in `Boot`, and a
+      # run whose assets all fell back exits just as cleanly, so the log has to
+      # show both that `MainMenu` was reached and that nothing was missing.
+      #
+      # BEVY_ASSET_ROOT is what makes the second one achievable: Bevy resolves
+      # the asset root from BEVY_ASSET_ROOT, then CARGO_MANIFEST_DIR, then the
+      # executable directory -- never the working directory -- so a bare
+      # `cargo run` looks under crates/client/ and misses every project asset.
       - name: Run the client to MainMenu and exit
         env:
           CI_TESTING_CONFIG: .github/ci-testing/startup.ron
+          BEVY_ASSET_ROOT: ${{ github.workspace }}
         run: |
           set -o pipefail
           xvfb-run cargo run --locked --features ci_testing \
             --target x86_64-unknown-linux-gnu 2>&1 | tee startup.log
           grep -q "startup-smoke: reached MainMenu" startup.log
+          if grep -q "Path not found" startup.log; then
+            echo "::error::the client ran on fallback data instead of assets/"
+            exit 1
+          fi

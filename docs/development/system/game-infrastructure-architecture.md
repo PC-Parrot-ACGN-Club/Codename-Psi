@@ -96,7 +96,7 @@ minimal Bevy runtime
 
 **真实窗口启动** — 前两项分别在无窗口 runtime 中运行、以及只编译链接不运行，都不覆盖 `DefaultPlugins` 的运行时初始化、窗口后端和平台动态依赖，因此这是独立的验收面。
 
-该项以**有界启动运行**验收：启动真实 `psi` 二进制，在到达 `MainMenu` 后的一个确定帧自动退出，以进程退出码作为结论。有界退出由 Bevy 的 `bevy_ci_testing` 能力提供，经 `client` 的 `ci_testing` feature 开启，退出帧由 `CI_TESTING_CONFIG` 指向的配置决定；该 feature 不进入发布构建。
+该项以**有界启动运行**验收：启动真实 `psi` 二进制，在到达 `MainMenu` 后的一个确定帧自动退出，以进程退出码、到达 `MainMenu` 的可观察标记和运行期无资源缺失诊断三者共同作为结论。缺少后两项时，停留在 `Boot` 的构建与全部数据走 fallback 的运行都会得到相同的成功退出码（资产根解析见[版本化运行数据加载：资产根](../design/runtime-data-loading.md#资产根)）。有界退出由 Bevy 的 `bevy_ci_testing` 能力提供，经 `client` 的 `ci_testing` feature 开启，退出帧由 `CI_TESTING_CONFIG` 指向的配置决定；该 feature 不进入发布构建。
 
 执行环境需要虚拟显示与软件渲染后端（`xvfb` 与 Mesa 的软件 Vulkan 驱动），单次执行的安装与运行开销明显高于其余测试。因此该项只在手动触发的发布工作流中运行，不进入拉取请求门禁，与 [TDD §7.2](../../TDD.md) 的额度取舍一致。
 

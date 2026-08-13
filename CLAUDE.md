@@ -9,7 +9,7 @@ Codename Psi — a local Fever-style (Puyo Puyo-esque) versus game, Rust + Bevy.
 ## Commands
 
 - Build: `cargo build` (builds default member `client` → binary `psi`; explicit form `cargo build -p client --bin psi`)
-- Run: `cargo run` (launches the Bevy window; `assets/` must be reachable from the working directory the binary is launched from — repo root in development)
+- Run: `BEVY_ASSET_ROOT=$PWD cargo run` from the repo root (launches the Bevy window). Bevy resolves the asset root from `BEVY_ASSET_ROOT`, then `CARGO_MANIFEST_DIR`, then the executable's directory — **never** the working directory. A bare `cargo run` therefore looks under `crates/client/assets/`, finds nothing, and runs on fallback data while still reaching `MainMenu`, so a missing asset root shows up only as `Path not found` diagnostics. Same rule for shipping: `assets/` goes next to the binary. See `docs/development/design/runtime-data-loading.md` §资产根.
 - Test all: `cargo test`
 - Test one crate: `cargo test -p game_core`
 - Format check: `cargo fmt --check`
