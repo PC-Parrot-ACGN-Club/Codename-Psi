@@ -56,6 +56,7 @@ R1 **只采用一种固定画布：`1920 × 1080`、`16:9`**。窗口与全屏�
 | Fever 题面全消 | 全消、时间奖励、题面 +2 | 显示 `ALL CLEAR`、`+5 s`、`TARGET +2` 三个独立标签。 |
 | Fever 结束 | 剩余 Fever 队列并回普通队列 | 光带退场；普通棋盘回到前景；合并数量在队列旁显示。 |
 | `RoundOver` | 胜负方、败因、局分 | 冻结规则画面，胜方使用主色边框，进入 1.5 秒结算停留。 |
+| `RoundOver`（同时失败） | 双方败因、局分不变、本局重打 | 冻结规则画面，两侧使用同一中性边框，进入 1.5 秒结算停留。 |
 | 网络断线 | 断线方、超时状态、判负结果 | 将“连接中 / 已连接 / 同步中 / 已断线”写成文字状态与图标。 |
 
 全消与 Fever 的视觉拆分遵循规则效果：普通场全消提供预设 4 连和 Fever 时间奖励；Fever 内全消提升下一题面并提供时间奖励。[All clear](https://puyonexus.com/wiki/All_clear)
@@ -146,6 +147,32 @@ Wiki 能确认 Fever 2 与 15th 的 DS 角色图包含攻击、抵消、受击�
 - 震动按连锁、垃圾落下、Fever 进入和胜负提供短促模式；设置页支持单独关闭。
 - 同屏动效遵守对象上限；大量垃圾和高连锁优先合并粒子、数字和音效事件，保持 60Hz 规则 tick 与 UI 响应。
 
+### 6.1 Resolve 阶段投影
+
+结算节拍由[玩法设计：结算计算与阶段提交](gameplay.md#结算计算与阶段提交)以固定规则 tick 提供。表现层不维护能够阻塞规则的独立结算状态，也不向规则层发送动画完成通知。
+
+```text
+ResolutionView
+├─ phase
+├─ chain_index
+├─ elapsed_ticks
+├─ duration_ticks
+├─ clear_cells[]
+└─ gravity_moves[] { cell, from, to }
+```
+
+| 规则阶段 | 表现行为 |
+| --- | --- |
+| `ClearPreview` | 对 `clear_cells` 播放命中、缩放、闪光与淡出；进度由 `elapsed_ticks / duration_ticks` 决定 |
+| `ClearCommit` | 移除对应渲染实体，触发已确认的本轮消除、连锁、攻击音画事件 |
+| `Gravity` | 按每个 `gravity_move` 的起点、终点和阶段进度插值，不自行决定落地时间 |
+| `ScanNext` | 对齐规则快照并准备下一轮；没有下一轮时结束连锁显示 |
+| `Settlement` | 展示最终连锁、抵消、Fever、垃圾或失败结果 |
+
+渲染落后于规则进度时直接采样最新阶段；跨过阶段边界时以最新规则快照重建盘面，不要求补播所有中间帧。动画强度设置可以减少粒子、镜头、闪光和插值复杂度，但不能改变 `duration_ticks`、规则事件 tick、下一组生成时机、Fever 时间或攻击到达时间。
+
+本地非回滚对局可以在 `ClearCommit` 立即播放声音。网络回滚对局只对确认后的 `(match_tick, ordinal)` 事件播放一次声音与震动；预测阶段的棋盘动画可随最新快照重建。
+
 ## 7. 无障碍与本地化
 
 - 颜色永远搭配图案、形状、边框或文字；垃圾、Fever、危险线和双方身份均提供至少两种线索。
@@ -169,13 +196,14 @@ MatchPresentationSnapshot
   momentum: net_attack, pressure, advantage_side
 
 PresentationEvent
-  DropLocked | ChainResolved | GarbageQueued | GarbageFell
+  DropLocked | ChainLinkStarted | ChainLinkCleared | ChainResolved
+  GravityCompleted | GarbageQueued | GarbageFell
   FeverGaugeFilled | FeverEntered | FeverPuzzleAdvanced
   AllClear | FeverEnded | RoundEnded | ConnectionChanged
   MomentumChanged
 ```
 
-`MatchPresentationSnapshot` 可在任意帧重建 UI；`PresentationEvent` 只驱动可丢弃的动画和已确认的音频/震动。该约束满足回滚同步、开发用确定性验证与无窗口规则测试。
+`MatchPresentationSnapshot` 包含当前 `ResolutionView`，可在任意帧重建 UI；`PresentationEvent` 只驱动可丢弃的动画和已确认的音频/震动。该约束满足回滚同步、开发用确定性验证与无窗口规则测试。
 
 ## 9. 验收清单
 
@@ -185,3 +213,4 @@ PresentationEvent
 4. 低于 5 秒、接近溢出、待接收垃圾和断线状态均同时使用文字与非颜色线索。
 5. 在唯一固定画布 1920 × 1080 的窗口与全屏模式中，两块棋盘、NEXT、Fever 表、垃圾队列和顶部圆框角色图都保持完整可读；非 16:9 显示器仅留边、不重排。
 6. 高连锁、垃圾落下与 Fever 切换期间规则 tick 保持 60Hz，动效不改变规则结论。
+7. Resolve 动画能够只依赖规则快照和阶段进度重建；跳帧、关闭动效或网络回滚均不改变清除提交、攻击到达和下一组生成的 tick。
