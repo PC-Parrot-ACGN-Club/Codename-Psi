@@ -1,6 +1,6 @@
 # Assets
 
-Runtime data for Codename Psi. The game expects this directory next to the working directory used to launch the binary (repository root during development).
+Runtime data for Codename Psi. Bevy resolves this directory's parent from `BEVY_ASSET_ROOT`, then `CARGO_MANIFEST_DIR`, then the executable's directory — never the working directory. See `docs/development/design/runtime-data-loading.md`.
 
 ## Layout
 

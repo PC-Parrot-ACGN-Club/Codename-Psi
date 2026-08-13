@@ -38,7 +38,7 @@
 
 catalog 完成 JSON 反序列化和 schema 版本检查后，解析器验证其中的 `locale` 是否属于客户端支持的 locale 集合（`zh-CN`、`en`）。
 
-属于支持集合时通过该项语义验证；不属于时返回[版本化运行数据加载](runtime-data-loading.md#错误语义)定义的 `InvalidData`，该错误保留违反的约束及实际 locale，资源加载层据此形成带资源上下文的 fallback 结果。
+属于支持集合时通过该项语义验证；不属于时返回[版本化运行数据加载](runtime-data-loading.md#错误语义)定义的 `InvalidData`，该错误保留违反的约束及实际 locale，资源加载层据此形成带资源上下文的 `Failed` resolution。
 
 ## 行为
 
@@ -65,18 +65,18 @@ key
 - 输入：用户设置中的目标 locale。
 - 处理：根据当前语言设置更新当前 locale。
 - 输出：后续文本查询使用新的 current catalog。
-- 错误语义：目标 locale 资源不可用时使用默认/回退 catalog，并保留加载诊断。
+- 错误语义：目标 locale 的 catalog 不可用时该目录视为缺失，查询按替补链继续，并保留加载诊断。
 
 ### 加载文本目录
 
 - 输入：`assets/i18n/zh-CN.json`、`assets/i18n/en.json` 已读取内容。
 - 处理：验证 schema 和 catalog 语义后构建 key/value catalog。
 - 输出：可查询 catalog。
-- 错误语义：解析、schema、语义和读取错误由[版本化运行数据加载](runtime-data-loading.md)处理并提供 fallback 结果；不受支持的 catalog locale 返回 `InvalidData`。
+- 错误语义：解析、schema、语义和读取错误由[版本化运行数据加载](runtime-data-loading.md)处理并形成 `Failed` resolution；不受支持的 catalog locale 返回 `InvalidData`。两个目录都不可用时全部文本呈现为 key，客户端照常运行。
 
 ## 边界
 
-- 本文不定义资源读取、schema 版本检查与 fallback 机制（见[版本化运行数据加载](runtime-data-loading.md)）。
+- 本文不定义资源读取、schema 版本检查与失败分级（见[版本化运行数据加载](runtime-data-loading.md)）。
 - 本文不定义语言设置的持久化（见[本机用户设置](user-settings.md)）。
 - 本地化数据不进入规则确定性状态。
 

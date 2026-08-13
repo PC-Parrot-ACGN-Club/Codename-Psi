@@ -81,9 +81,10 @@ ReturnToMainMenu
 
 迁移请求由掌握对应业务前置条件的 client 侧组件提出：
 
-- `BootstrapReady`：启动协调 system 在 `BootstrapStatus` 的设置与本地化均为 `Resolved` 时提出。启动协调只消费 `Resolved` 状态，加载、fallback 和诊断由对应模块负责。
+- `BootstrapReady`：启动协调 system 在 `BootstrapStatus` 的设置与本地化均为 `Resolved` 时提出。启动协调只消费 `Resolved` 状态，加载、失败分级和诊断由对应模块负责。
 - `PauseRequested`：由 `client::input` 在 `AppState == Match` 时识别固定绑定的暂停输入（手柄 Start 按键、键盘 `Escape`，两者不区分玩家）后直接提出。其它状态下同一输入不提出任何迁移请求，也不产生 `UIAction`；该次按下沿就地丢弃，不滞留到下一次进入 `Match`。
 - `ResumeRequested`：由 `Paused` 页面导航组件提出。
+- `MatchStartRequested`：由角色选择流程在规则数据可用并完成开局规格冻结后提出。规则数据为 `Failed` 时不提出该请求，理由见[版本化运行数据加载 · 失败分级](runtime-data-loading.md#失败分级)。
 
 ### 协作时序
 
