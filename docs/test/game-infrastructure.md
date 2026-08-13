@@ -27,7 +27,7 @@
 - 参数化用例的一行代表一个逻辑用例，实施时每组测试数据都作为独立 case 执行并报告。
 - 诊断以实现可提供的错误、事件或日志等形式观测；测试只核对 Confirmed 文档要求的分类与上下文，不固定错误载体或 API 名称。
 - Production build（TC-049）与真实窗口有界启动（TC-074）由 `release.yml`（`workflow_dispatch` 手动触发）的 Linux runner 执行；自动化 startup smoke（TC-056）与其余测试由 `test.yml`（目标分支为 `main` 的 pull request 触发）的 Linux runner 执行。开发分支的推送不触发 CI，该阶段由本地执行覆盖，见 [TDD](../TDD.md) §7.1、§7.2。
-- 用例编号稳定：移除的用例留下编号空档，既不重新编号也不复用编号。当前空档为 TC-041、TC-050、TC-057。
+- 用例编号稳定：移除的用例留下编号空档，既不重新编号也不复用编号。编号空档为 TC-041、TC-050、TC-057。
 - 除 TC-074 外的全部用例不依赖真实显示环境；TC-074 需要虚拟显示与软件渲染后端，因此不进入拉取请求门禁。
 - 生产客户端与自动化 startup smoke 共用同一项目根插件；smoke 侧不要求真实窗口，production build 侧使用与生产环境一致的 `DefaultPlugins` 配置；自动退出方式由实现选择。
 
@@ -195,16 +195,4 @@
 | Rules 与数值 | 本轮只覆盖规则调用边界；玩法公式由后续规则设计覆盖。 |
 | AI | 统一 `PlayerActions`/`TickInputs` 类型边界已覆盖；AI 动作合法性由 AI 设计覆盖。 |
 | Network | crate 依赖方向与统一输入容量已覆盖；握手、同步、回滚和断线由 R2 设计覆盖。 |
-| CI 环境匹配 | `test.yml`（目标分支为 `main` 的 pull request 触发）的 `test-linux` job 执行 `cargo fmt`、`cargo clippy`、`cargo test --workspace` 与 linux-gnu 构建，自动化 smoke（TC-056）有对应 CI 执行路径；`release.yml`（`workflow_dispatch` 手动触发）以 `--release` 构建 production client（TC-049）。TC-074 需要虚拟显示与软件 Vulkan，规划在 `release.yml` 执行，对应 job 尚未实现，是当前测试设计与 workflow 之间唯一已知的未接通项。开发分支的推送不触发 CI，由本地执行覆盖。 |
-
-## 实施顺序
-
-1. 先实现 TC-013～TC-022 的纯 game_core 输入测试，固定最底层数据与归一化语义。
-2. 实现 TC-001～TC-012、TC-028～TC-033、TC-059 的解析、fallback、持久化与固定/可配置绑定范围测试。
-3. 实现 TC-023～TC-027A、TC-035～TC-036、TC-052 的纯行为测试，以及 TC-027B、TC-034、TC-037～TC-045 的最小 Bevy App 组件集成测试。
-4. 实现 TC-053～TC-055、TC-058 的 `Match`/`Paused` 对局 simulation 生命周期与 `Pause` 直接触发路径测试，复用 TC-042～TC-045 已建立的 fixed tick 观测手段。
-5. 最后接入 TC-046～TC-049、TC-051、TC-056 的启动、主路径、CI 与依赖边界测试；TC-049 在 `release.yml`（手动触发）执行，TC-056 在 `test.yml`（PR→`main` 触发）执行。
-6. 随实现接通设备输入、默认绑定与异步资源加载时补充 TC-060～TC-066：TC-060～TC-061 属纯 game_core 层，随步骤 1 的输入语义一并固定；TC-062～TC-064 随设备采样接入；TC-065 复用步骤 4 的 Pause 观测手段；TC-066 随启动屏障异步化在步骤 5 接入。
-7. 修正采样时序与设备生命周期时接入 TC-067～TC-071。TC-067 需要先建立不手动驱动 fixed schedule 的观测手段，TC-068～TC-069 复用该手段，三者随采样调度位置与 press edge 捕获的同一次改动落地；TC-070～TC-071 随设备绑定与断开清理落地。TC-072 属纯 game_core 层，可独立实现。
-8. 最后接入 TC-073 与 TC-074：TC-073 随生产 `DataPlugin` 接通加载生命周期落地；TC-074 需要 `release.yml` 具备虚拟显示与软件 Vulkan 环境，并提供指定退出帧的运行配置。
-
+| CI 环境匹配 | `test.yml`（目标分支为 `main` 的 pull request 触发）的 `test-linux` job 执行 `cargo fmt`、`cargo clippy`、`cargo test -p game_core`、`cargo test --workspace` 与 linux-gnu 构建，覆盖 TC-049、TC-074 以外的全部用例，其中包含自动化 smoke（TC-056）；`release.yml`（`workflow_dispatch` 手动触发）的 `build-linux` job 以 `--release` 构建 production client（TC-049），`startup-smoke` job 在虚拟显示与软件 Vulkan 环境下运行真实二进制至 `MainMenu` 并有界退出（TC-074）。开发分支的推送不触发 CI，由本地执行覆盖。 |

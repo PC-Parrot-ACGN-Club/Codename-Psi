@@ -7,10 +7,11 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
-# Covers docs/test/game-infrastructure.md TC-049: the production client must
-# compile and link with DefaultPlugins + the project root plugin. Running to
-# MainMenu is covered by TC-056 in test.yml.
+# Covers the two docs/test/game-infrastructure.md rows the pull-request gate
+# cannot run: TC-049 needs the release profile, TC-074 needs a real display.
 jobs:
+  # TC-049: the production client must compile and link with DefaultPlugins +
+  # the project root plugin.
   build-linux:
     name: build --release (linux-gnu)
     runs-on: ubuntu-latest

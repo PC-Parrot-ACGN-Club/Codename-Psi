@@ -52,10 +52,10 @@ fn clear_phases(app: &mut App) {
     app.world_mut().resource_mut::<PhaseRuns>().0.clear();
 }
 
-/// docs/test/game-infrastructure.md TC-056 (Linux runner), TC-057 (Windows runner)
+/// docs/test/game-infrastructure.md TC-056
 ///
 /// The platform axis is supplied by the CI job this test runs in; `test.yml`
-/// executes it on both a Linux and a Windows runner.
+/// executes it on the Linux runner, the sole target platform for R1 and R2.
 #[test]
 fn startup_smoke_reuses_the_root_plugin_and_reaches_main_menu() {
     let mut app = App::new();
