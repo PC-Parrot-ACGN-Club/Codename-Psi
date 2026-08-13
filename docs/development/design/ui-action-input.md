@@ -51,13 +51,9 @@ enum UIAction {
 
 左摇杆的方向判定阈值与连发语义见[本地输入采样：摇杆方向判定](local-input-sampling.md#摇杆方向判定)。
 
-### 全局 `Escape`
-
-`Escape` 是不区分玩家的全局键：在 `AppState::Match` 下触发 `Pause`，在其它可返回页面下等价于 `Back`。两个上下文互斥，因此不产生歧义。
-
 ## 边界
 
-- 本文不定义 `Pause`（见[应用状态机：请求处理](application-state-machine.md#请求处理)）。`Pause` 不是 `UIAction` 的成员。
+- 本文不定义 `Pause`（见[应用状态机：协作](application-state-machine.md#协作)）。`Pause` 不是 `UIAction` 的成员，暂停输入也不产生 `UIAction`。
 - 本文不定义规则领域动作（见[统一游戏动作与 Tick 输入](game-action-input.md)）。`UIAction` 只在 UI 输入上下文中被消费，不进入 `TickInputs` 或规则核心输入；与 `GameAction` 共享物理输入或位位置不改变各自领域类型的消费语义。
 - 本文不定义设置页面键位配置 UI 的交互与展示方式（见[本机用户设置](user-settings.md)）。
 
