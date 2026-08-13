@@ -189,9 +189,9 @@ NL = NP - NC
 
 **Margin time（目标分衰减）：** 小局进行到 margin 时间后，`TP` 按 Wiki 算法递减（首次 ×0.75，之后每 16 秒一次，最多 14 次或降至 1）。Fever 对战初始 `TP = 120` 的迭代表见 [Margin time § Target Points = 120](https://puyonexus.com/wiki/Margin_time)。首版启用该机制；margin 秒数按 Fever 1/2 主机/PC 参考值录入配置。
 
-**软降加分（Drop Bonus）：** 可计入画面分数；是否计入垃圾换算因作品而异。[Scoring § Drop Bonus](https://puyonexus.com/wiki/Scoring) 明确写出「Fever 规则下也计入」的作品为 15th / Puyo Puyo 7。首版按 Fever 1/2 主机/PC：软降加分**只显示、不计入**垃圾换算，除非校准证明参考剖面需要计入。
+**软降加分（Drop Bonus）：** 可计入画面分数；是否计入垃圾换算因作品而异。[Scoring § Drop Bonus](https://puyonexus.com/wiki/Scoring) 列出计入垃圾换算的作品为 Tsu、15th、Puyo Puyo 7 与 Chronicle，Fever 1/2 不在其中。因此软降加分**只显示、不计入**垃圾换算。
 
-**攻击换算不区分对手类型：** 单人、本地双人与局域网对局使用同一套换算，`SC` 直接进入上述公式。
+**攻击换算不区分对手类型：** 单人、本地双人与局域网对局使用同一套换算，`SC` 直接进入上述公式。这是对参考剖面的**有意偏离**：Fever 1/2 主机/PC 在人人对战中按 `666/999` 缩放伤害，本项目不采用该衰减，规则核心也不表达对手类型。[Fever 规则差异表](https://puyonexus.com/wiki/Fever_%28rule%29)
 
 ### 4.2 抵消、入队与落下
 
@@ -209,22 +209,24 @@ NL = NP - NC
 - 量表填满后，在当前结算安全点进入 Fever；进入前保存普通棋盘和普通垃圾队列。
 - Fever 时间范围 **15–30 秒**；具体初值与上下限进 `RuleProfile`。[Fever 规则](https://puyonexus.com/wiki/Fever_%28rule%29)
 - 竞技剖面：4 色、开局量表 **0/7**（Wiki Difficulties · Normal）。[Fever 规则 § Difficulties](https://puyonexus.com/wiki/Fever_%28rule%29)
-- Fever 1/2 主机/PC：对手**抵消**己方攻击时，给对手 Fever 时间 +1 秒；显示秒数向下取整。[Fever 规则差异表](https://puyonexus.com/wiki/Fever_%28rule%29)
+- Fever 1/2 主机/PC：己方连锁被对手**抵消**时，**己方** Fever 时间 +1 秒——奖励归被抵消的攻击方，不归抵消方；显示秒数向下取整。[Fever 规则差异表](https://puyonexus.com/wiki/Fever_%28rule%29) [Offset rule](https://puyonexus.com/wiki/Offset_rule)
+- Fever 时间是玩家级持久值，不处于 Fever 时同样存在并可被奖励累加，取值 clamp 在时间上下限内。
 
 ### 5.2 Fever 对局循环
 
-1. 切换到 Fever 棋盘和 Fever 垃圾队列；普通棋盘与普通垃圾队列保持冻结。
+1. 切换到 Fever 棋盘和 Fever 垃圾队列；普通棋盘与普通垃圾队列保持冻结——冻结的队列在返回普通盘前不落下垃圾，但**仍可被抵消**。抵消先消耗活动通道的队列，溢出部分再消耗另一通道的队列。[Fever 规则](https://puyonexus.com/wiki/Fever_%28rule%29)
 2. 按当前 Fever 等级生成一个预设连锁题面，题面目标连锁长度 **3–15**（主机/PC 最小题面为 3）。[Fever 规则](https://puyonexus.com/wiki/Fever_%28rule%29)
 3. 玩家使用正常球对操作触发或延长题面连锁，并将攻击照常送往对手。
-4. 题面结果分支（原文）— [Fever 规则 § Fever Mode](https://puyonexus.com/wiki/Fever_%28rule%29)：
+4. Fever 中的时间奖励在**最后一个连锁步开始消除动画的 tick** 发放，不等到 `Settlement`。[Fever 规则差异表](https://puyonexus.com/wiki/Fever_%28rule%29)
+5. 题面结果分支（原文）— [Fever 规则 § Fever Mode](https://puyonexus.com/wiki/Fever_%28rule%29)：
    - 达标（含延长后达标）：下一题面目标 = 实际打出连锁 + 1
    - 全消：下一题面目标 = 实际打出连锁 + 2
    - 差 1：维持同等目标；差 2：目标 = 实际打出 − 1；差 ≥3：目标 = 实际打出 − 2
-5. Fever 时间到零：主机/PC 为**存活并翻回普通盘**（部分掌机为直接判负）。若玩家正在 Resolve，按 §3.5 完成已经开始的当前连锁，并在 `Settlement` 安全点翻回普通盘；否则在当前安全点翻回。Fever 队列合并回普通队列；若归零瞬间未抵消且任一队列有垃圾，翻回后垃圾立即落下。[Fever 规则差异表](https://puyonexus.com/wiki/Fever_%28rule%29)
+6. Fever 时间到零：主机/PC 为**存活并翻回普通盘**（部分掌机为直接判负）。若玩家正在 Resolve，按 §3.5 完成已经开始的当前连锁，并在 `Settlement` 安全点翻回普通盘；否则在当前安全点翻回。Fever 队列合并回普通队列；若归零瞬间未抵消且任一队列有垃圾，翻回后立即触发一次落下，该次落下同样遵守单次上限，余量留在队列。[Fever 规则差异表](https://puyonexus.com/wiki/Fever_%28rule%29)
 
 ### 5.3 全消与失败
 
-- 普通场全消：投放预设 4 连题面，Fever 时间 +5 秒。[All clear](https://puyonexus.com/wiki/All_clear) [Fever 规则](https://puyonexus.com/wiki/Fever_%28rule%29)
+- 普通场全消：**立即在普通盘上投放**一个预设 4 连题面，并 Fever 时间 +5 秒。[All clear](https://puyonexus.com/wiki/All_clear) [Fever 规则 § All Clearing](https://puyonexus.com/wiki/Fever_%28rule%29)
 - Fever 中全消：下一题面 +2 连，Fever 时间 +5 秒（时间尚未耗尽时）。
 - 全消同时进入 Fever：首个 Fever 题面 +2 连，并 +5 秒。
 - Fever 内溢出判定格被占据：立即输掉小局。
