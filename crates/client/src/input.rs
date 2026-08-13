@@ -126,9 +126,9 @@ pub fn bind_gamepads(
 /// The fixed inputs that propose a pause, for any local player.
 ///
 /// `Pause` is not a `UIAction` and not a `GameAction`: `client::input` proposes
-/// the state transition directly. `Escape` also means `Back` outside `Match`,
-/// which is why the pause request is gated on the current `AppState` rather
-/// than on the key alone.
+/// the state transition directly. Outside `Match` these inputs mean nothing at
+/// all, so the press edge is taken and dropped rather than held: a key pressed
+/// in a menu must not pause the match the player enters next.
 #[must_use]
 pub fn fixed_pause_inputs() -> [PhysicalInput; 2] {
     [
@@ -738,6 +738,11 @@ impl LocalInputSampler {
         }
     }
 
+    /// Turn a pending pause edge into a request, or discard it.
+    ///
+    /// The edge is taken unconditionally: outside `Match` a pause input means
+    /// nothing, and keeping the edge would pause the next match the player
+    /// enters instead.
     #[must_use]
     pub fn take_pause_request(&mut self, state: AppState) -> Option<AppTransitionRequest> {
         let pending = std::mem::take(&mut self.pause_pending);

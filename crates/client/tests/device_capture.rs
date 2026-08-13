@@ -219,12 +219,26 @@ fn escape_proposes_a_pause_only_inside_match() {
     assert_eq!(
         *app.world().resource::<State<AppState>>().get(),
         AppState::MainMenu,
-        "Escape outside Match means Back, not Pause"
+        "Escape in a menu proposes no transition"
     );
-    release_key(&mut app, KeyCode::Escape);
+    assert!(
+        drain_ui_actions(&mut app).is_empty(),
+        "Escape is bound to no UIAction either, so a menu press produces nothing"
+    );
 
+    // Still held across the walk: the edge was spent where it happened, so the
+    // menu press must not pause the match that follows it.
     advance_to(&mut app, AppState::Match);
     let before = *app.world().resource::<RuleState>();
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<AppState>>().get(),
+        AppState::Match,
+        "a press consumed in a menu does not carry into Match"
+    );
+
+    release_key(&mut app, KeyCode::Escape);
+    app.update();
 
     press_key(&mut app, KeyCode::Escape);
     app.update();
