@@ -70,7 +70,7 @@ fn normal_dependencies(metadata: &Value, package: &str) -> Vec<String> {
         .collect()
 }
 
-// docs/test/game-infrastructure.md TC-051
+// integration-system/build-and-startup::TC-002
 #[test]
 fn client_and_net_depend_on_game_core() {
     let metadata = workspace_metadata();
@@ -83,7 +83,7 @@ fn client_and_net_depend_on_game_core() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-051
+// integration-system/build-and-startup::TC-002
 #[test]
 fn game_core_depends_on_neither_client_nor_net() {
     let dependencies = normal_dependencies(&workspace_metadata(), "game_core");
@@ -96,7 +96,7 @@ fn game_core_depends_on_neither_client_nor_net() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-051
+// integration-system/build-and-startup::TC-002
 #[test]
 fn game_core_stays_isolated_from_platform_runtimes() {
     let dependencies = normal_dependencies(&workspace_metadata(), "game_core");
@@ -109,7 +109,7 @@ fn game_core_stays_isolated_from_platform_runtimes() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-051
+// integration-system/build-and-startup::TC-002
 #[test]
 fn the_dependency_scan_sees_real_package_names_and_skips_dev_only_edges() {
     let metadata = workspace_metadata();

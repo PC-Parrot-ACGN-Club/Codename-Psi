@@ -87,11 +87,11 @@ fn release_action(
     }
 }
 
-/// docs/test/game-infrastructure.md TC-023 — one case per device/action row.
+/// component/client-input::TC-001 — one case per device/action row.
 macro_rules! confirmed_input_cases {
     ($($name:ident => ($device:expr, $action:expr)),+ $(,)?) => {
         $(
-            // docs/test/game-infrastructure.md TC-023
+            // component/client-input::TC-001
             #[test]
             fn $name() {
                 let mut sampler = sampler_for(1);
@@ -126,7 +126,7 @@ confirmed_input_cases! {
         (Device::Gamepad, GameAction::RotateCounterClockwise),
 }
 
-// docs/test/game-infrastructure.md TC-023
+// component/client-input::TC-001
 #[test]
 fn an_unmapped_keyboard_input_produces_no_logical_action() {
     let mut sampler = sampler_for(1);
@@ -137,7 +137,7 @@ fn an_unmapped_keyboard_input_produces_no_logical_action() {
     assert_eq!(sampled[0], PlayerActions::EMPTY);
 }
 
-// docs/test/game-infrastructure.md TC-023
+// component/client-input::TC-001
 #[test]
 fn an_unmapped_gamepad_input_produces_no_logical_action() {
     let mut sampler = sampler_for(1);
@@ -148,7 +148,7 @@ fn an_unmapped_gamepad_input_produces_no_logical_action() {
     assert_eq!(sampled[0], PlayerActions::EMPTY);
 }
 
-// docs/test/game-infrastructure.md TC-023
+// component/client-input::TC-001
 #[test]
 fn horizontal_directions_never_go_through_configurable_bindings() {
     let bindings = bindings_for(0);
@@ -161,7 +161,7 @@ fn horizontal_directions_never_go_through_configurable_bindings() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-024
+// component/client-input::TC-002
 #[test]
 fn only_player_one_pressing_left_fills_only_slot_zero() {
     let mut sampler = sampler_for(2);
@@ -173,7 +173,7 @@ fn only_player_one_pressing_left_fills_only_slot_zero() {
     assert_eq!(sampled[1], PlayerActions::EMPTY);
 }
 
-// docs/test/game-infrastructure.md TC-024
+// component/client-input::TC-002
 #[test]
 fn only_player_two_pressing_left_fills_only_slot_one() {
     let mut sampler = sampler_for(2);
@@ -185,7 +185,7 @@ fn only_player_two_pressing_left_fills_only_slot_one() {
     assert!(sampled[1].contains(GameAction::Left));
 }
 
-// docs/test/game-infrastructure.md TC-024
+// component/client-input::TC-002
 #[test]
 fn both_players_pressing_left_fill_their_own_slots() {
     let mut sampler = sampler_for(2);
@@ -198,7 +198,7 @@ fn both_players_pressing_left_fill_their_own_slots() {
     assert!(sampled[1].contains(GameAction::Left));
 }
 
-// docs/test/game-infrastructure.md TC-024
+// component/client-input::TC-002
 #[test]
 fn neither_player_pressing_leaves_both_slots_empty() {
     let mut sampler = sampler_for(2);
@@ -208,7 +208,7 @@ fn neither_player_pressing_leaves_both_slots_empty() {
     assert_eq!(sampled, vec![PlayerActions::EMPTY, PlayerActions::EMPTY]);
 }
 
-// docs/test/game-infrastructure.md TC-025
+// component/client-input::TC-003
 #[test]
 fn two_physical_sources_of_the_same_direction_merge_into_one_action() {
     let mut sampler = sampler_for(1);
@@ -228,11 +228,11 @@ fn two_physical_sources_of_the_same_direction_merge_into_one_action() {
     );
 }
 
-/// docs/test/game-infrastructure.md TC-026 — one case per continuous action and timing.
+/// component/client-input::TC-004 — one case per continuous action and timing.
 macro_rules! continuous_action_cases {
     ($($held:ident, $between:ident, $released:ident => $action:expr);+ $(;)?) => {
         $(
-            // docs/test/game-infrastructure.md TC-026
+            // component/client-input::TC-004
             #[test]
             fn $held() {
                 let mut sampler = sampler_for(1);
@@ -247,7 +247,7 @@ macro_rules! continuous_action_cases {
                 }
             }
 
-            // docs/test/game-infrastructure.md TC-026
+            // component/client-input::TC-004
             #[test]
             fn $between() {
                 let mut sampler = sampler_for(1);
@@ -263,7 +263,7 @@ macro_rules! continuous_action_cases {
                 );
             }
 
-            // docs/test/game-infrastructure.md TC-026
+            // component/client-input::TC-004
             #[test]
             fn $released() {
                 let mut sampler = sampler_for(1);
@@ -296,11 +296,11 @@ continuous_action_cases! {
     soft_drop_released_before_the_next_tick => GameAction::SoftDrop;
 }
 
-/// docs/test/game-infrastructure.md TC-027A — one case per edge action and timing.
+/// component/client-input::TC-005 — one case per edge action and timing.
 macro_rules! edge_action_cases {
     ($($between:ident, $held:ident, $repeated:ident => $action:expr);+ $(;)?) => {
         $(
-            // docs/test/game-infrastructure.md TC-027A
+            // component/client-input::TC-005
             #[test]
             fn $between() {
                 let mut sampler = sampler_for(1);
@@ -320,7 +320,7 @@ macro_rules! edge_action_cases {
                 );
             }
 
-            // docs/test/game-infrastructure.md TC-027A
+            // component/client-input::TC-005
             #[test]
             fn $held() {
                 let mut sampler = sampler_for(1);
@@ -338,7 +338,7 @@ macro_rules! edge_action_cases {
                 }
             }
 
-            // docs/test/game-infrastructure.md TC-027A
+            // component/client-input::TC-005
             #[test]
             fn $repeated() {
                 let mut sampler = sampler_for(1);
@@ -373,7 +373,7 @@ edge_action_cases! {
     rotate_counter_clockwise_pressed_again_after_release => GameAction::RotateCounterClockwise;
 }
 
-// docs/test/game-infrastructure.md TC-052
+// component/client-input::TC-006
 #[test]
 fn the_same_direction_produces_a_game_action_in_gameplay_context() {
     let action = interpret_direction(FixedDirection::Left, InputContext::Gameplay);
@@ -381,7 +381,7 @@ fn the_same_direction_produces_a_game_action_in_gameplay_context() {
     assert_eq!(action, Some(ContextAction::Game(GameAction::Left)));
 }
 
-// docs/test/game-infrastructure.md TC-052
+// component/client-input::TC-006
 #[test]
 fn the_same_direction_produces_a_ui_action_in_menu_context() {
     let action = interpret_direction(FixedDirection::Left, InputContext::Menu);
@@ -389,7 +389,7 @@ fn the_same_direction_produces_a_ui_action_in_menu_context() {
     assert_eq!(action, Some(ContextAction::Ui(UIAction::Left)));
 }
 
-// docs/test/game-infrastructure.md TC-052
+// component/client-input::TC-006
 #[test]
 fn gameplay_and_menu_directions_stay_in_separate_domains() {
     let gameplay = interpret_direction(FixedDirection::Left, InputContext::Gameplay)

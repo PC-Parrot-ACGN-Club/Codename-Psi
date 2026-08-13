@@ -7,11 +7,12 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
-# Covers the two docs/test/game-infrastructure.md rows the pull-request gate
-# cannot run: TC-049 needs the release profile, TC-074 needs a real display.
+# Covers the two cases the pull-request gate cannot run:
+# integration-system/build-and-startup::TC-001 needs the release profile, and
+# integration-system/build-and-startup::TC-004 needs a real display.
 jobs:
-  # TC-049: the production client must compile and link with DefaultPlugins +
-  # the project root plugin.
+  # integration-system/build-and-startup::TC-001: the production client must
+  # compile and link with DefaultPlugins + the project root plugin.
   build-linux:
     name: build --release (linux-gnu)
     runs-on: ubuntu-latest
@@ -36,7 +37,7 @@ jobs:
       - name: cargo build --release (linux-gnu)
         run: cargo build --locked --release --workspace --target x86_64-unknown-linux-gnu
 
-  # docs/test/game-infrastructure.md TC-074: the only check that exercises
+  # integration-system/build-and-startup::TC-004: the only check that exercises
   # DefaultPlugins' runtime init, the window backend and the platform dynamic
   # libraries. It needs a virtual display and a software Vulkan backend, which
   # is why it lives here and not in the pull-request gate (docs/TDD.md 7.2).

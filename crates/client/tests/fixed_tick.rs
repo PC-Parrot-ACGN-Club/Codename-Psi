@@ -31,7 +31,7 @@ fn tick_with(app: &mut App, marker: GameAction) {
     release(app, 0, marker);
 }
 
-// docs/test/game-infrastructure.md TC-042
+// integration-system/input-and-fixed-tick::TC-002
 #[test]
 fn the_fixed_schedule_is_configured_for_sixty_hertz() {
     let app = match_app();
@@ -46,7 +46,7 @@ fn the_fixed_schedule_is_configured_for_sixty_hertz() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-043
+// integration-system/input-and-fixed-tick::TC-003
 #[test]
 fn every_fixed_tick_runs_input_strictly_before_rules() {
     let mut app = match_app();
@@ -78,7 +78,7 @@ fn every_fixed_tick_runs_input_strictly_before_rules() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-044
+// integration-system/input-and-fixed-tick::TC-004
 #[test]
 fn each_fixed_tick_forms_and_consumes_its_tick_inputs_exactly_once() {
     let mut app = match_app();
@@ -110,7 +110,7 @@ fn each_fixed_tick_forms_and_consumes_its_tick_inputs_exactly_once() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-044
+// integration-system/input-and-fixed-tick::TC-004
 #[test]
 fn a_second_rules_pass_in_the_same_tick_does_not_consume_again() {
     let mut app = match_app();
@@ -154,7 +154,7 @@ fn run_six_tick_sequence(updates_per_tick: usize) -> (RuleState, SimulationProbe
     (rules, probe)
 }
 
-// docs/test/game-infrastructure.md TC-045
+// integration-system/input-and-fixed-tick::TC-005
 #[test]
 fn identical_inputs_produce_identical_rule_results_under_different_update_counts() {
     let (sparse_rules, sparse_probe) = run_six_tick_sequence(1);
@@ -170,7 +170,7 @@ fn identical_inputs_produce_identical_rule_results_under_different_update_counts
     assert_eq!(sparse_probe.produced, dense_probe.produced);
 }
 
-// docs/test/game-infrastructure.md TC-045
+// integration-system/input-and-fixed-tick::TC-005
 #[test]
 fn ordinary_updates_alone_never_advance_the_rule_state() {
     let mut app = match_app();

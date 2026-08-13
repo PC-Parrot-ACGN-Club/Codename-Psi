@@ -20,7 +20,7 @@ fn app_with_settings_path() -> (App, tempfile::TempDir) {
     (app, dir)
 }
 
-// docs/test/game-infrastructure.md TC-004
+// component/user-settings::TC-004
 #[test]
 fn a_save_request_writes_the_current_settings_to_disk() {
     let (mut app, dir) = app_with_settings_path();
@@ -69,7 +69,7 @@ fn a_failed_save_is_reported_without_touching_the_in_memory_value() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-008
+// component/localization::TC-002
 #[test]
 fn changing_the_language_setting_switches_the_current_catalog() {
     let mut app = controlled_app();

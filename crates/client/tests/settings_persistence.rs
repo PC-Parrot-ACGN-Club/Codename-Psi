@@ -2,7 +2,7 @@
 
 use client::settings::{SettingsLoad, SettingsStore, UserSettings};
 
-// docs/test/game-infrastructure.md TC-033
+// integration-system/runtime-data::TC-002
 #[test]
 fn the_official_settings_path_lives_in_the_platform_config_root() {
     let store = SettingsStore::platform_default().expect("the platform exposes a config root");
@@ -17,7 +17,7 @@ fn the_official_settings_path_lives_in_the_platform_config_root() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-033
+// integration-system/runtime-data::TC-002
 #[test]
 fn a_successful_save_is_reloadable_and_leaves_no_partial_file() {
     let root = tempfile::tempdir().expect("temporary config root");
@@ -44,7 +44,7 @@ fn a_successful_save_is_reloadable_and_leaves_no_partial_file() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-033
+// integration-system/runtime-data::TC-002
 #[test]
 fn a_failed_replace_keeps_the_official_file_and_the_in_memory_value() {
     let root = tempfile::tempdir().expect("temporary config root");

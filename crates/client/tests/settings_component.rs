@@ -43,7 +43,7 @@ fn assert_only_configurable_bindings(settings: &UserSettings) {
     );
 }
 
-// docs/test/game-infrastructure.md TC-001
+// component/user-settings::TC-001
 #[test]
 fn default_settings_are_complete_and_safe() {
     let settings = UserSettings::default();
@@ -57,7 +57,7 @@ fn default_settings_are_complete_and_safe() {
     assert_only_configurable_bindings(&settings);
 }
 
-// docs/test/game-infrastructure.md TC-002
+// component/user-settings::TC-002
 #[test]
 fn a_missing_settings_file_falls_back_to_defaults_without_an_error() {
     let root = tempfile::tempdir().expect("temporary config root");
@@ -72,7 +72,7 @@ fn a_missing_settings_file_falls_back_to_defaults_without_an_error() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-002
+// component/user-settings::TC-002
 #[test]
 fn a_malformed_settings_file_falls_back_to_defaults_with_a_parse_diagnostic() {
     let root = tempfile::tempdir().expect("temporary config root");
@@ -92,7 +92,7 @@ fn a_malformed_settings_file_falls_back_to_defaults_with_a_parse_diagnostic() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-002
+// component/user-settings::TC-002
 #[test]
 fn an_unsupported_settings_schema_falls_back_to_defaults_with_a_version_diagnostic() {
     let root = tempfile::tempdir().expect("temporary config root");
@@ -146,7 +146,7 @@ const FULL_SETTINGS_RON: &str = r#"(
 )
 "#;
 
-// docs/test/game-infrastructure.md TC-003
+// component/user-settings::TC-003
 #[test]
 fn a_supported_settings_document_restores_every_persisted_field() {
     let settings = parse_settings(FULL_SETTINGS_RON).expect("supported schema parses");
@@ -182,7 +182,7 @@ fn a_supported_settings_document_restores_every_persisted_field() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-004
+// component/user-settings::TC-004
 #[test]
 fn serializing_and_reloading_settings_preserves_every_value() {
     let original = parse_settings(FULL_SETTINGS_RON).expect("fixture parses");
@@ -199,7 +199,7 @@ fn serializing_and_reloading_settings_preserves_every_value() {
     assert_only_configurable_bindings(&restored);
 }
 
-// docs/test/game-infrastructure.md TC-005
+// component/user-settings::TC-005
 #[test]
 fn both_players_keep_independent_keyboard_and_gamepad_bindings() {
     let original = parse_settings(FULL_SETTINGS_RON).expect("fixture parses");
@@ -244,7 +244,7 @@ fn settings_with_key_a_on_soft_drop() -> UserSettings {
     settings
 }
 
-// docs/test/game-infrastructure.md TC-006
+// component/user-settings::TC-006
 #[test]
 fn rebinding_an_occupied_input_to_hard_drop_reports_a_named_conflict() {
     let settings = settings_with_key_a_on_soft_drop();
@@ -263,7 +263,7 @@ fn rebinding_an_occupied_input_to_hard_drop_reports_a_named_conflict() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-006
+// component/user-settings::TC-006
 #[test]
 fn rebinding_an_occupied_input_to_rotate_clockwise_reports_a_named_conflict() {
     let settings = settings_with_key_a_on_soft_drop();
@@ -279,7 +279,7 @@ fn rebinding_an_occupied_input_to_rotate_clockwise_reports_a_named_conflict() {
     assert_eq!(conflict.existing, GameAction::SoftDrop);
 }
 
-// docs/test/game-infrastructure.md TC-006
+// component/user-settings::TC-006
 #[test]
 fn the_other_player_may_reuse_the_same_physical_input() {
     let settings = settings_with_key_a_on_soft_drop();
@@ -293,7 +293,7 @@ fn the_other_player_may_reuse_the_same_physical_input() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-059
+// component/user-settings::TC-007
 #[test]
 fn fixed_binding_actions_stay_out_of_persisted_bindings() {
     let settings = parse_settings(FULL_SETTINGS_RON).expect("fixture parses");
@@ -310,7 +310,7 @@ fn fixed_binding_actions_stay_out_of_persisted_bindings() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-059
+// component/user-settings::TC-007
 #[test]
 fn fixed_binding_actions_are_excluded_from_conflict_detection() {
     let settings = settings_with_key_a_on_soft_drop();
@@ -365,19 +365,19 @@ fn assert_fixed_binding_is_rejected(fixed: GameAction, name: &str) {
     }
 }
 
-// docs/test/game-infrastructure.md TC-003
+// component/user-settings::TC-003
 #[test]
 fn a_document_binding_the_fixed_left_action_is_rejected() {
     assert_fixed_binding_is_rejected(GameAction::Left, "Left");
 }
 
-// docs/test/game-infrastructure.md TC-003
+// component/user-settings::TC-003
 #[test]
 fn a_document_binding_the_fixed_right_action_is_rejected() {
     assert_fixed_binding_is_rejected(GameAction::Right, "Right");
 }
 
-// docs/test/game-infrastructure.md TC-004
+// component/user-settings::TC-004
 #[test]
 fn a_settings_value_carrying_a_fixed_binding_cannot_be_serialized_back() {
     for fixed in FIXED_GAME_ACTIONS {
@@ -393,7 +393,7 @@ fn a_settings_value_carrying_a_fixed_binding_cannot_be_serialized_back() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-059
+// component/user-settings::TC-007
 #[test]
 fn a_document_with_a_fixed_binding_defaults_and_is_never_written_back() {
     let root = tempfile::tempdir().expect("temporary config root");

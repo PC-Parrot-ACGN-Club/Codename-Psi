@@ -36,7 +36,7 @@ fn ticks_run(app: &App) -> usize {
         .len()
 }
 
-// docs/test/game-infrastructure.md TC-067
+// integration-system/input-and-fixed-tick::TC-011
 #[test]
 fn input_from_a_frame_reaches_that_frames_fixed_tick() {
     let mut app = production_schedule_app();
@@ -59,7 +59,7 @@ fn input_from_a_frame_reaches_that_frames_fixed_tick() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-068
+// integration-system/input-and-fixed-tick::TC-012
 #[test]
 fn several_fixed_ticks_in_one_frame_share_that_frames_sample() {
     let mut app = production_schedule_app();
@@ -101,7 +101,7 @@ fn several_fixed_ticks_in_one_frame_share_that_frames_sample() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-069
+// integration-system/input-and-fixed-tick::TC-013
 #[test]
 fn a_press_that_ends_in_the_same_frame_still_reaches_the_rules_layer() {
     // Every one-shot action, through its P1 default binding.

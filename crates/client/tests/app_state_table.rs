@@ -2,11 +2,11 @@
 
 use client::app_state::{AppState, is_valid_transition};
 
-/// docs/test/game-infrastructure.md TC-035 — one case per basic edge.
+/// component/application-state-table::TC-001 — one case per basic edge.
 macro_rules! valid_edge_cases {
     ($($name:ident => ($from:expr, $to:expr)),+ $(,)?) => {
         $(
-            // docs/test/game-infrastructure.md TC-035
+            // component/application-state-table::TC-001
             #[test]
             fn $name() {
                 assert!(
@@ -31,11 +31,11 @@ valid_edge_cases! {
     result_to_main_menu_is_valid => (AppState::Result, AppState::MainMenu),
 }
 
-/// docs/test/game-infrastructure.md TC-036 — one out-of-table target per source state.
+/// component/application-state-table::TC-002 — one out-of-table target per source state.
 macro_rules! invalid_edge_cases {
     ($($name:ident => ($from:expr, $to:expr)),+ $(,)?) => {
         $(
-            // docs/test/game-infrastructure.md TC-036
+            // component/application-state-table::TC-002
             #[test]
             fn $name() {
                 assert!(

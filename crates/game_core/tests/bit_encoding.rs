@@ -6,7 +6,7 @@
 
 use game_core::input::{GameAction, PlayerActions, TickInputs};
 
-// docs/test/game-infrastructure.md TC-060
+// component/game-actions::TC-011
 #[test]
 fn each_action_occupies_its_documented_bit() {
     let expected = [
@@ -27,7 +27,7 @@ fn each_action_occupies_its_documented_bit() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-060
+// component/game-actions::TC-011
 #[test]
 fn reserved_bits_stay_zero_for_every_action_combination() {
     let all = PlayerActions::from_actions([
@@ -44,7 +44,7 @@ fn reserved_bits_stay_zero_for_every_action_combination() {
     assert_eq!(PlayerActions::EMPTY.bits(), 0);
 }
 
-// docs/test/game-infrastructure.md TC-060
+// component/game-actions::TC-011
 #[test]
 fn decoding_rejects_payloads_that_set_reserved_bits() {
     assert_eq!(PlayerActions::from_bits(0b0011_1111), {
@@ -68,7 +68,7 @@ fn decoding_rejects_payloads_that_set_reserved_bits() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-061
+// component/game-actions::TC-012
 #[test]
 fn an_absent_participant_is_distinct_from_one_that_did_nothing() {
     let inputs = TickInputs::new([
@@ -89,7 +89,7 @@ fn an_absent_participant_is_distinct_from_one_that_did_nothing() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-072
+// component/game-actions::TC-013
 #[test]
 fn every_public_decode_entry_rejects_the_reserved_bits() {
     for bits in [0u8, 63] {
@@ -121,7 +121,7 @@ fn every_public_decode_entry_rejects_the_reserved_bits() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-072
+// component/game-actions::TC-013
 #[test]
 fn a_decoded_set_round_trips_through_serialization() {
     let actions = PlayerActions::from_actions([GameAction::Left, GameAction::HardDrop]);

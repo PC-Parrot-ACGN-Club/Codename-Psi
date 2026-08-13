@@ -2,7 +2,7 @@
 
 use game_core::config::{ConfigError, STUB_SCHEMA_VERSION, parse_i18n_stub, parse_rules_stub};
 
-// docs/test/game-infrastructure.md TC-028
+// component/runtime-data-parsing::TC-001
 #[test]
 fn a_supported_ron_document_parses_into_typed_data() {
     let source = r#"(
@@ -17,7 +17,7 @@ fn a_supported_ron_document_parses_into_typed_data() {
     assert_eq!(parsed.id, "stub");
 }
 
-// docs/test/game-infrastructure.md TC-029
+// component/runtime-data-parsing::TC-002
 #[test]
 fn a_truncated_ron_document_returns_a_parse_error_with_its_cause() {
     let error = parse_rules_stub("(schema_version: 1, id: ").expect_err("truncated RON fails");
@@ -31,7 +31,7 @@ fn a_truncated_ron_document_returns_a_parse_error_with_its_cause() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-029
+// component/runtime-data-parsing::TC-002
 #[test]
 fn a_truncated_json_document_returns_a_parse_error_with_its_cause() {
     let error = parse_i18n_stub(r#"{"schema_version": 1, "messages": {"#)
@@ -46,7 +46,7 @@ fn a_truncated_json_document_returns_a_parse_error_with_its_cause() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-030
+// component/runtime-data-parsing::TC-003
 #[test]
 fn an_unsupported_ron_schema_reports_the_actual_version() {
     let error = parse_rules_stub(r#"(schema_version: 255, id: "stub")"#)
@@ -61,7 +61,7 @@ fn an_unsupported_ron_schema_reports_the_actual_version() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-030
+// component/runtime-data-parsing::TC-003
 #[test]
 fn an_unsupported_json_schema_reports_the_actual_version() {
     let error = parse_i18n_stub(r#"{"schema_version": 255, "messages": {}}"#)

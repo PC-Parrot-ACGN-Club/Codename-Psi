@@ -48,7 +48,7 @@ fn probe_counts(app: &App) -> (u64, u64) {
     (probe.produced, probe.consumed)
 }
 
-// docs/test/game-infrastructure.md TC-053
+// integration-system/input-and-fixed-tick::TC-006
 #[test]
 fn no_non_match_state_runs_the_input_or_rules_stage() {
     for state in NON_MATCH_STATES {
@@ -65,7 +65,7 @@ fn no_non_match_state_runs_the_input_or_rules_stage() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-053
+// integration-system/input-and-fixed-tick::TC-006
 #[test]
 fn the_match_state_runs_both_stages_once_per_controlled_tick() {
     let mut app = app_in(AppState::Match);
@@ -75,7 +75,7 @@ fn the_match_state_runs_both_stages_once_per_controlled_tick() {
     assert_eq!(probe_counts(&app), (3, 3));
 }
 
-// docs/test/game-infrastructure.md TC-054
+// integration-system/input-and-fixed-tick::TC-007
 #[test]
 fn entering_paused_stops_the_match_simulation_immediately() {
     let mut app = app_in(AppState::Match);
@@ -99,7 +99,7 @@ fn entering_paused_stops_the_match_simulation_immediately() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-055
+// integration-system/input-and-fixed-tick::TC-008
 #[test]
 fn resuming_continues_the_rule_state_from_before_the_pause() {
     let mut app = app_in(AppState::Match);

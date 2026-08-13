@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | Test Basis 分析 | 确认被测行为、证据来源和可判定结果。 | 需求理解摘要、范围、假设与待确认问题。 |
 | 测试点与用例设计 | 将行为拆成可验证测试点，并形成具体用例。 | 测试点清单、分类、设计方法、风险覆盖与用例表。 |
-| 文档汇总 | 组织为可审阅的 Markdown 文档。 | `docs/test/design/<功能名>.md` |
+| 文档汇总 | 组织为可审阅的 Markdown 文档。 | `docs/test/<分类>/<功能名>.md` |
 
 ### 1.1 Test Basis 分析
 
@@ -73,7 +73,7 @@ Test Level、Concern、Domain 与优先级各自服务不同决策。分类用�
 
 ## 2. 文档模板
 
-每个功能创建 `docs/test/design/<功能名>.md`，并保留所有假设、待确认问题与证据状态。用例编号与跨文件引用遵循[用例编号](#21-用例编号)。
+只包含 Component 用例的功能在 `docs/test/component/<功能名>.md` 建稿；包含 Component Integration 或 System 用例的功能在 `docs/test/integration-system/<功能名>.md` 建稿。同一功能的 Component Integration 与 System 用例可以保留在同一份文档中。每份文档保留所有假设、待确认问题与证据状态；用例编号与跨文件引用遵循[用例编号](#21-用例编号)。
 
 ```markdown
 # 测试用例设计：<功能名>
@@ -120,8 +120,8 @@ Test Level、Concern、Domain 与优先级各自服务不同决策。分类用�
 例如：
 
 ```text
-game-infrastructure::TC-001
 component/game-actions::TC-001
+integration-system/build-and-startup::TC-004
 ```
 
 完整标识不带 `docs/test/`、`.md`、`./` 或前导 `/`，并保留文档在 `docs/test/` 下的目录层级。测试代码中的引用写作：

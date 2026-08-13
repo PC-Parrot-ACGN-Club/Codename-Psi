@@ -28,7 +28,7 @@ fn canonical_actions_after_pressing(actions: &[GameAction]) -> PlayerActions {
         .expect("slot 0 is active")
 }
 
-// docs/test/game-infrastructure.md TC-027B
+// integration-system/input-and-fixed-tick::TC-001
 #[test]
 fn simultaneous_rotations_reach_game_core_and_normalize_to_no_rotation() {
     let canonical = canonical_actions_after_pressing(&[
@@ -41,7 +41,7 @@ fn simultaneous_rotations_reach_game_core_and_normalize_to_no_rotation() {
     assert_eq!(canonical, PlayerActions::EMPTY);
 }
 
-// docs/test/game-infrastructure.md TC-027B
+// integration-system/input-and-fixed-tick::TC-001
 #[test]
 fn soft_and_hard_drop_reach_game_core_and_normalize_to_hard_drop() {
     let canonical = canonical_actions_after_pressing(&[GameAction::SoftDrop, GameAction::HardDrop]);
@@ -60,7 +60,7 @@ const UI_ACTIONS: [UIAction; 6] = [
     UIAction::Back,
 ];
 
-// docs/test/game-infrastructure.md TC-058
+// integration-system/input-and-fixed-tick::TC-009
 #[test]
 fn the_fixed_start_button_commits_paused_from_match() {
     let mut app = controlled_app();
@@ -75,7 +75,7 @@ fn the_fixed_start_button_commits_paused_from_match() {
     assert_eq!(current_state(&app), AppState::Paused);
 }
 
-// docs/test/game-infrastructure.md TC-058
+// integration-system/input-and-fixed-tick::TC-009
 #[test]
 fn the_pause_trigger_produces_no_game_action() {
     let mut sampler = LocalInputSampler::new(vec![common::keyboard_bindings(0)]);
@@ -95,7 +95,7 @@ fn the_pause_trigger_produces_no_game_action() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-058
+// integration-system/input-and-fixed-tick::TC-009
 #[test]
 fn a_button_other_than_the_fixed_start_button_does_not_propose_a_pause() {
     let mut app = controlled_app();
@@ -110,7 +110,7 @@ fn a_button_other_than_the_fixed_start_button_does_not_propose_a_pause() {
     assert_eq!(current_state(&app), AppState::Match);
 }
 
-// docs/test/game-infrastructure.md TC-058
+// integration-system/input-and-fixed-tick::TC-009
 #[test]
 fn the_fixed_start_button_is_ignored_outside_match() {
     let mut app = controlled_app();

@@ -47,7 +47,7 @@ fn pending_requests_for(
         .collect()
 }
 
-// docs/test/game-infrastructure.md TC-046
+// integration-system/application-lifecycle::TC-006
 #[test]
 fn both_tasks_pending_keeps_boot() {
     assert_eq!(
@@ -56,7 +56,7 @@ fn both_tasks_pending_keeps_boot() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-046
+// integration-system/application-lifecycle::TC-006
 #[test]
 fn only_localization_resolved_keeps_boot() {
     assert_eq!(
@@ -65,7 +65,7 @@ fn only_localization_resolved_keeps_boot() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-046
+// integration-system/application-lifecycle::TC-006
 #[test]
 fn only_settings_resolved_keeps_boot() {
     assert_eq!(
@@ -74,7 +74,7 @@ fn only_settings_resolved_keeps_boot() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-046
+// integration-system/application-lifecycle::TC-006
 #[test]
 fn both_tasks_resolved_requests_main_menu_exactly_once() {
     assert_eq!(
@@ -83,7 +83,7 @@ fn both_tasks_resolved_requests_main_menu_exactly_once() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-046
+// integration-system/application-lifecycle::TC-006
 #[test]
 fn a_resolved_barrier_does_not_re_request_on_later_frames() {
     let mut app = state_only_app();
@@ -131,7 +131,7 @@ fn failing_bootstrap_app() -> (App, tempfile::TempDir) {
     (app, root)
 }
 
-// docs/test/game-infrastructure.md TC-047
+// integration-system/application-lifecycle::TC-007
 #[test]
 fn failed_settings_and_catalog_loads_still_release_the_barrier() {
     let (mut app, _root) = failing_bootstrap_app();
@@ -144,7 +144,7 @@ fn failed_settings_and_catalog_loads_still_release_the_barrier() {
     assert!(status.is_ready());
 }
 
-// docs/test/game-infrastructure.md TC-047
+// integration-system/application-lifecycle::TC-007
 #[test]
 fn a_fallback_bootstrap_keeps_its_diagnostics_and_usable_values() {
     let (mut app, _root) = failing_bootstrap_app();
@@ -176,7 +176,7 @@ fn a_fallback_bootstrap_keeps_its_diagnostics_and_usable_values() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-047
+// integration-system/application-lifecycle::TC-007
 #[test]
 fn a_fallback_bootstrap_still_reaches_main_menu() {
     let (mut app, _root) = failing_bootstrap_app();
@@ -268,7 +268,7 @@ fn stalled_bootstrap_app() -> (App, tempfile::TempDir) {
     (app, root)
 }
 
-// docs/test/game-infrastructure.md TC-066
+// integration-system/application-lifecycle::TC-009
 #[test]
 fn a_startup_read_that_never_returns_resolves_on_the_timeout() {
     let (mut app, _root) = stalled_bootstrap_app();
@@ -281,7 +281,7 @@ fn a_startup_read_that_never_returns_resolves_on_the_timeout() {
     assert!(status.is_ready(), "the timeout must release the barrier");
 }
 
-// docs/test/game-infrastructure.md TC-066
+// integration-system/application-lifecycle::TC-009
 #[test]
 fn a_timed_out_bootstrap_keeps_its_diagnostics_and_built_in_defaults() {
     let (mut app, _root) = stalled_bootstrap_app();
@@ -321,7 +321,7 @@ fn a_timed_out_bootstrap_keeps_its_diagnostics_and_built_in_defaults() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-066
+// integration-system/application-lifecycle::TC-009
 #[test]
 fn a_timed_out_bootstrap_still_reaches_main_menu() {
     let (mut app, _root) = stalled_bootstrap_app();

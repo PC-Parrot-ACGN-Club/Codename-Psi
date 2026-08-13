@@ -27,7 +27,7 @@ fn run_until_rules_resolved(app: &mut App) {
     panic!("the rules load never resolved");
 }
 
-// docs/test/game-infrastructure.md TC-073
+// integration-system/runtime-data::TC-003
 #[test]
 fn the_root_plugin_publishes_typed_rules_from_the_repository_assets() {
     let mut app = controlled_app();
@@ -47,7 +47,7 @@ fn the_root_plugin_publishes_typed_rules_from_the_repository_assets() {
     assert_eq!(data.rules().schema_version, 1);
 }
 
-// docs/test/game-infrastructure.md TC-073
+// integration-system/runtime-data::TC-003
 #[test]
 fn a_missing_rules_file_still_leaves_the_consumer_with_typed_data() {
     let root = tempfile::tempdir().expect("a temporary asset root");
@@ -77,7 +77,7 @@ fn a_missing_rules_file_still_leaves_the_consumer_with_typed_data() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-073
+// integration-system/runtime-data::TC-003
 #[test]
 fn the_plugin_owns_the_path_so_consumers_never_name_it() {
     // The asset root is plugin configuration; pointing it at the workspace

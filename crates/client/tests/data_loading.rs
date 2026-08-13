@@ -157,7 +157,7 @@ fn rules_resolution(app: &App, name: &str) -> DataResolution<RulesStub> {
         .unwrap_or_else(|| panic!("fixture {name} was resolved"))
 }
 
-// docs/test/game-infrastructure.md TC-032
+// integration-system/runtime-data::TC-001
 #[test]
 fn a_valid_resource_resolves_to_loaded_typed_data() {
     let (app, _root) = app_with_fixtures();
@@ -169,7 +169,7 @@ fn a_valid_resource_resolves_to_loaded_typed_data() {
     assert!(matches!(resolution, DataResolution::Loaded(_)));
 }
 
-// docs/test/game-infrastructure.md TC-032
+// integration-system/runtime-data::TC-001
 #[test]
 fn a_missing_resource_falls_back_with_io_context() {
     let (app, _root) = app_with_fixtures();
@@ -183,7 +183,7 @@ fn a_missing_resource_falls_back_with_io_context() {
     assert_eq!(resolution.value(), &builtin_rules_default());
 }
 
-// docs/test/game-infrastructure.md TC-032
+// integration-system/runtime-data::TC-001
 #[test]
 fn a_malformed_resource_falls_back_with_a_parse_cause() {
     let (app, _root) = app_with_fixtures();
@@ -199,7 +199,7 @@ fn a_malformed_resource_falls_back_with_a_parse_cause() {
     assert_eq!(resolution.value(), &builtin_rules_default());
 }
 
-// docs/test/game-infrastructure.md TC-032
+// integration-system/runtime-data::TC-001
 #[test]
 fn an_unsupported_resource_falls_back_while_keeping_the_version() {
     let (app, _root) = app_with_fixtures();
@@ -219,7 +219,7 @@ fn an_unsupported_resource_falls_back_while_keeping_the_version() {
     assert_eq!(resolution.value(), &builtin_rules_default());
 }
 
-// docs/test/game-infrastructure.md TC-032
+// integration-system/runtime-data::TC-001
 #[test]
 fn a_semantically_invalid_catalog_falls_back_with_an_invalid_data_cause() {
     let (app, _root) = app_with_fixtures();

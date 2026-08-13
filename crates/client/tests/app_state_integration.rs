@@ -57,7 +57,7 @@ fn clear_log(app: &mut App) {
     app.world_mut().resource_mut::<LifecycleLog>().clear();
 }
 
-// docs/test/game-infrastructure.md TC-034
+// integration-system/application-lifecycle::TC-001
 #[test]
 fn registering_the_state_machine_starts_in_boot() {
     let mut app = state_only_app();
@@ -73,7 +73,7 @@ fn registering_the_state_machine_starts_in_boot() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-037
+// integration-system/application-lifecycle::TC-002
 #[test]
 fn requesting_the_current_state_is_a_no_op_for_every_state() {
     for state in ALL_STATES {
@@ -101,7 +101,7 @@ fn requesting_the_current_state_is_a_no_op_for_every_state() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-037
+// integration-system/application-lifecycle::TC-002
 #[test]
 fn a_same_state_request_leaves_no_invalid_edge_diagnostic() {
     let mut app = observed_app();
@@ -119,7 +119,7 @@ fn a_same_state_request_leaves_no_invalid_edge_diagnostic() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-038
+// integration-system/application-lifecycle::TC-003
 #[test]
 fn a_committed_transition_fires_one_exit_and_one_enter() {
     let mut app = observed_app();
@@ -144,7 +144,7 @@ fn a_committed_transition_fires_one_exit_and_one_enter() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-039
+// integration-system/application-lifecycle::TC-004
 #[test]
 fn two_identical_requests_in_one_cycle_merge_into_one_transition() {
     let mut app = observed_app();
@@ -170,7 +170,7 @@ fn two_identical_requests_in_one_cycle_merge_into_one_transition() {
     assert_eq!(log.entered.len(), 1);
 }
 
-// docs/test/game-infrastructure.md TC-040
+// integration-system/application-lifecycle::TC-005
 #[test]
 fn match_completed_wins_over_pause_requested_when_result_is_submitted_first() {
     let mut app = observed_app();
@@ -191,7 +191,7 @@ fn match_completed_wins_over_pause_requested_when_result_is_submitted_first() {
     assert_eq!(current_state(&app), AppState::Result);
 }
 
-// docs/test/game-infrastructure.md TC-040
+// integration-system/application-lifecycle::TC-005
 #[test]
 fn match_completed_wins_over_pause_requested_when_pause_is_submitted_first() {
     let mut app = observed_app();

@@ -21,7 +21,7 @@ fn catalog(locale: &str, entries: &[(&str, &str)]) -> Catalog {
     }
 }
 
-// docs/test/game-infrastructure.md TC-007
+// component/localization::TC-001
 #[test]
 fn localization_defaults_to_english_without_a_valid_language_setting() {
     let localization = Localization::default();
@@ -30,7 +30,7 @@ fn localization_defaults_to_english_without_a_valid_language_setting() {
     assert_eq!(localization.text("main_menu.start"), "Start");
 }
 
-// docs/test/game-infrastructure.md TC-008
+// component/localization::TC-002
 #[test]
 fn a_key_present_in_the_current_locale_is_returned_directly() {
     let localization = Localization::new(
@@ -50,7 +50,7 @@ fn a_key_present_in_the_current_locale_is_returned_directly() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-009
+// component/localization::TC-003
 #[test]
 fn a_key_missing_from_the_current_locale_falls_back_to_english_with_a_diagnostic() {
     let localization = Localization::new(
@@ -97,7 +97,7 @@ fn repeated_lookups_of_one_missing_key_record_a_single_diagnostic() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-010
+// component/localization::TC-004
 #[test]
 fn a_key_missing_everywhere_is_returned_as_its_own_placeholder() {
     let localization = Localization::new("zh-CN", [catalog("zh-CN", &[]), catalog("en", &[])]);
@@ -114,7 +114,7 @@ fn a_key_missing_everywhere_is_returned_as_its_own_placeholder() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-011
+// component/localization::TC-005
 #[test]
 fn switching_the_locale_redirects_later_queries_to_the_new_catalog() {
     let mut localization = Localization::new(
@@ -134,7 +134,7 @@ fn switching_the_locale_redirects_later_queries_to_the_new_catalog() {
     assert!(read_only.diagnostics().is_empty());
 }
 
-// docs/test/game-infrastructure.md TC-012
+// component/localization::TC-006
 #[test]
 fn a_valid_catalog_parses_into_a_locale_and_messages() {
     let source = r#"{
@@ -153,7 +153,7 @@ fn a_valid_catalog_parses_into_a_locale_and_messages() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-012
+// component/localization::TC-006
 #[test]
 fn the_project_catalogs_build_from_their_json_assets() {
     let en = parse_catalog(ASSET_EN).expect("assets/i18n/en.json parses");
@@ -165,7 +165,7 @@ fn the_project_catalogs_build_from_their_json_assets() {
     assert_eq!(zh.messages.get("main_menu.start").unwrap(), "开始");
 }
 
-// docs/test/game-infrastructure.md TC-012, TC-029
+// component/localization::TC-006, component/runtime-data-parsing::TC-002
 #[test]
 fn a_truncated_catalog_returns_a_parse_error() {
     let error = parse_catalog(r#"{"schema_version": 1, "locale": "en", "messages": {"#)
@@ -180,7 +180,7 @@ fn a_truncated_catalog_returns_a_parse_error() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-012, TC-030
+// component/localization::TC-006, component/runtime-data-parsing::TC-003
 #[test]
 fn an_unsupported_catalog_schema_reports_the_actual_version() {
     let source = r#"{ "schema_version": 255, "locale": "en", "messages": {} }"#;
@@ -196,7 +196,7 @@ fn an_unsupported_catalog_schema_reports_the_actual_version() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-031
+// component/localization::TC-007
 #[test]
 fn a_catalog_locale_outside_the_supported_set_returns_invalid_data() {
     let source = r#"{ "schema_version": 1, "locale": "fr", "messages": {} }"#;

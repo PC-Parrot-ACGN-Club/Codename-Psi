@@ -48,7 +48,7 @@ fn spawn_gamepad(app: &mut App) -> Entity {
     app.world_mut().spawn(Gamepad::default()).id()
 }
 
-// docs/test/game-infrastructure.md TC-062
+// component/user-settings::TC-008
 #[test]
 fn default_bindings_let_the_keyboard_drive_every_rule_action() {
     let mut app = controlled_app();
@@ -74,7 +74,7 @@ fn default_bindings_let_the_keyboard_drive_every_rule_action() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-062
+// component/user-settings::TC-008
 #[test]
 fn default_bindings_let_a_gamepad_drive_every_rule_action() {
     let mut app = controlled_app();
@@ -114,7 +114,7 @@ fn default_bindings_let_a_gamepad_drive_every_rule_action() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-062
+// component/user-settings::TC-008
 #[test]
 fn the_two_local_players_use_their_own_default_keys() {
     let mut app = controlled_app();
@@ -144,7 +144,7 @@ fn the_two_local_players_use_their_own_default_keys() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-064
+// component/client-input::TC-008
 #[test]
 fn holding_a_direction_produces_one_action_per_tick_without_repeat() {
     let mut app = controlled_app();
@@ -161,7 +161,7 @@ fn holding_a_direction_produces_one_action_per_tick_without_repeat() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-063
+// component/client-input::TC-007
 #[test]
 fn the_left_stick_only_reports_a_direction_past_the_threshold() {
     for (value, expected) in [
@@ -190,7 +190,7 @@ fn the_left_stick_only_reports_a_direction_past_the_threshold() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-063
+// component/client-input::TC-007
 #[test]
 fn a_horizontal_stick_hold_does_not_leak_into_a_vertical_direction() {
     let mut app = controlled_app();
@@ -208,7 +208,7 @@ fn a_horizontal_stick_hold_does_not_leak_into_a_vertical_direction() {
     assert_eq!(actions, PlayerActions::from_action(GameAction::Left));
 }
 
-// docs/test/game-infrastructure.md TC-065
+// integration-system/input-and-fixed-tick::TC-010
 #[test]
 fn escape_proposes_a_pause_only_inside_match() {
     let mut app = controlled_app();
@@ -263,7 +263,7 @@ fn drain_ui_actions(app: &mut App) -> Vec<UIActionEvent> {
     cursor.read(messages).copied().collect()
 }
 
-// docs/test/game-infrastructure.md TC-052
+// component/client-input::TC-006
 #[test]
 fn menu_context_turns_fixed_directions_into_ui_actions() {
     let mut app = controlled_app();
@@ -290,7 +290,7 @@ fn menu_context_turns_fixed_directions_into_ui_actions() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-052
+// component/client-input::TC-006
 #[test]
 fn the_same_physical_direction_does_not_produce_ui_actions_inside_match() {
     let mut app = controlled_app();
@@ -309,7 +309,7 @@ fn the_same_physical_direction_does_not_produce_ui_actions_inside_match() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-064
+// component/client-input::TC-008
 #[test]
 fn holding_a_menu_direction_moves_focus_once() {
     let mut app = controlled_app();
@@ -330,7 +330,7 @@ fn holding_a_menu_direction_moves_focus_once() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-052
+// component/client-input::TC-006
 #[test]
 fn the_two_local_players_emit_their_own_ui_actions() {
     let mut app = controlled_app();

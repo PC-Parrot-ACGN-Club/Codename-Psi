@@ -52,7 +52,7 @@ fn clear_phases(app: &mut App) {
     app.world_mut().resource_mut::<PhaseRuns>().0.clear();
 }
 
-/// docs/test/game-infrastructure.md TC-056
+/// integration-system/build-and-startup::TC-003
 ///
 /// The platform axis is supplied by the CI job this test runs in; `test.yml`
 /// executes it on the Linux runner, the sole target platform for R1 and R2.
@@ -89,7 +89,7 @@ fn startup_smoke_reuses_the_root_plugin_and_reaches_main_menu() {
     assert_eq!(current_state(&app), AppState::MainMenu);
 }
 
-// docs/test/game-infrastructure.md TC-048
+// integration-system/application-lifecycle::TC-008
 #[test]
 fn the_basic_main_path_keeps_one_current_state_at_every_step() {
     let mut app = observed_client_app();

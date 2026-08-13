@@ -17,7 +17,7 @@ fn normalize_once_and_check_idempotence(input: PlayerActions) -> PlayerActions {
     normalized
 }
 
-// docs/test/game-infrastructure.md TC-017
+// component/game-actions::TC-005
 #[test]
 fn simultaneous_left_and_right_normalize_to_no_horizontal_direction() {
     let normalized =
@@ -28,7 +28,7 @@ fn simultaneous_left_and_right_normalize_to_no_horizontal_direction() {
     assert!(normalized.is_empty());
 }
 
-// docs/test/game-infrastructure.md TC-018
+// component/game-actions::TC-006
 #[test]
 fn simultaneous_rotations_normalize_to_no_rotation() {
     let normalized = normalize_once_and_check_idempotence(raw([
@@ -41,7 +41,7 @@ fn simultaneous_rotations_normalize_to_no_rotation() {
     assert!(normalized.is_empty());
 }
 
-// docs/test/game-infrastructure.md TC-019
+// component/game-actions::TC-007
 #[test]
 fn hard_drop_wins_over_soft_drop() {
     let normalized =
@@ -51,11 +51,11 @@ fn hard_drop_wins_over_soft_drop() {
     assert!(!normalized.contains(GameAction::SoftDrop));
 }
 
-/// docs/test/game-infrastructure.md TC-020 — one case per single-action row.
+/// component/game-actions::TC-008 — one case per single-action row.
 macro_rules! single_action_is_preserved {
     ($($name:ident => $action:expr),+ $(,)?) => {
         $(
-            // docs/test/game-infrastructure.md TC-020
+            // component/game-actions::TC-008
             #[test]
             fn $name() {
                 let input = raw([$action]);
@@ -80,7 +80,7 @@ single_action_is_preserved! {
     lone_rotate_counter_clockwise_is_preserved => GameAction::RotateCounterClockwise,
 }
 
-// docs/test/game-infrastructure.md TC-020
+// component/game-actions::TC-008
 #[test]
 fn conflict_free_combination_is_preserved() {
     let input = raw([
@@ -94,7 +94,7 @@ fn conflict_free_combination_is_preserved() {
     assert_eq!(normalized, input);
 }
 
-// docs/test/game-infrastructure.md TC-020
+// component/game-actions::TC-008
 #[test]
 fn unrelated_action_survives_a_conflicting_pair() {
     let input = raw([GameAction::Left, GameAction::Right, GameAction::SoftDrop]);
@@ -108,7 +108,7 @@ fn unrelated_action_survives_a_conflicting_pair() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-020
+// component/game-actions::TC-008
 #[test]
 fn all_three_conflicts_resolve_independently_in_one_tick() {
     let input = raw([

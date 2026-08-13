@@ -20,7 +20,7 @@ fn distinct_slot_actions() -> [PlayerActions; MAX_PLAYERS] {
     ]
 }
 
-// docs/test/game-infrastructure.md TC-013
+// component/game-actions::TC-001
 #[test]
 fn zero_participants_construct_empty_tick_inputs() {
     let inputs = TickInputs::new(Vec::<PlayerActions>::new()).expect("zero participants fit");
@@ -37,7 +37,7 @@ fn zero_participants_construct_empty_tick_inputs() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-014
+// component/game-actions::TC-002
 #[test]
 fn two_participants_keep_slot_order_and_clear_the_tail() {
     let slot0 = actions([GameAction::Left]);
@@ -57,7 +57,7 @@ fn two_participants_keep_slot_order_and_clear_the_tail() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-015
+// component/game-actions::TC-003
 #[test]
 fn eight_participants_reach_capacity_without_error() {
     let expected = distinct_slot_actions();
@@ -75,7 +75,7 @@ fn eight_participants_reach_capacity_without_error() {
     }
 }
 
-// docs/test/game-infrastructure.md TC-016
+// component/game-actions::TC-004
 #[test]
 fn nine_participants_are_rejected_without_truncation() {
     let mut too_many = distinct_slot_actions().to_vec();
@@ -94,7 +94,7 @@ fn nine_participants_are_rejected_without_truncation() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-021
+// component/game-actions::TC-009
 #[test]
 fn repeating_an_action_across_ticks_yields_the_same_logical_value() {
     let held = actions([GameAction::SoftDrop]);
@@ -119,7 +119,7 @@ fn repeating_an_action_across_ticks_yields_the_same_logical_value() {
     assert_eq!(ticks[1], ticks[2]);
 }
 
-// docs/test/game-infrastructure.md TC-022
+// component/game-actions::TC-010
 #[test]
 fn player_actions_support_copy_and_equality() {
     let original = actions([GameAction::Left, GameAction::SoftDrop]);

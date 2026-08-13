@@ -54,7 +54,7 @@ fn slot_of(app: &App, pad: Entity) -> Option<usize> {
     app.world().resource::<GamepadSlots>().slot(pad)
 }
 
-// docs/test/game-infrastructure.md TC-070
+// integration-system/input-and-fixed-tick::TC-014
 #[test]
 fn a_disconnect_clears_what_that_pad_was_holding() {
     let mut app = controlled_app();
@@ -76,7 +76,7 @@ fn a_disconnect_clears_what_that_pad_was_holding() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-070
+// integration-system/input-and-fixed-tick::TC-014
 #[test]
 fn an_idle_disconnect_leaves_the_other_player_untouched() {
     let mut app = controlled_app();
@@ -109,7 +109,7 @@ fn an_idle_disconnect_leaves_the_other_player_untouched() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-070
+// integration-system/input-and-fixed-tick::TC-014
 #[test]
 fn a_reconnected_pad_can_move_the_focus_again() {
     // The UI edge state is where a disconnect really bites: a stale held entry
@@ -152,7 +152,7 @@ fn a_reconnected_pad_can_move_the_focus_again() {
     );
 }
 
-// docs/test/game-infrastructure.md TC-071
+// integration-system/input-and-fixed-tick::TC-015
 #[test]
 fn a_disconnect_does_not_move_another_players_pad() {
     let mut app = controlled_app();
