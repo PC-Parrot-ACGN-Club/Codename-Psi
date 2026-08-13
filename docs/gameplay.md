@@ -34,11 +34,11 @@ Fever 系列的角色选择包含可影响对局的掉落组与连锁强度。�
 
 ### 3.1 棋盘与失败
 
-- 每名玩家使用独立的 6 列 × 12 行棋盘；顶部出生区含一个溢出判定格。
-- 球对首次生成在出生区。某次结算后溢出判定格被占据时，该玩家立即输掉小局。
+- 每名玩家使用独立的 6 列 × 12 行可见棋盘，其上方另有隐藏行用于出生与缓冲；隐藏行中的球不计入连锁，落入可见区后才参与结算。
+- 活动组生成于出生列的隐藏行。生成下一组时若出生列上格已被占据，该玩家立即输掉小局；失败判定只在生成时刻发生。
 - 棋盘只保存规则格子。渲染球体、缩放、粒子和 UI 指示由客户端从规则快照生成。
 
-Wiki 的通用规则采用 6 × 12 格棋盘，且以标记的出生/失败格作为失败判定。[Basic rules](https://puyonexus.com/wiki/Basic_rules)
+Wiki 的通用规则采用 6 × 12 格棋盘，且以标记的出生/失败格作为失败判定；该格即出生点。[Basic rules](https://puyonexus.com/wiki/Basic_rules) 生成失败即判负的判定时机来自逆向工程记录。[Falling Pair Spawning Process](https://puyonexus.com/wiki/Puyo_Puyo_Tsu/Falling_Pair_Spawning_Process)
 
 ### 3.2 角色掉落组（DropSet）
 
@@ -66,7 +66,7 @@ Fever 1/2 的 L/J 数量与落点位置属于角色序列的一部分；部分�
 
 两个原创角色各自配置一个原创 16 手序列并以 `drop_set_id` 关联；不复刻既有角色名称、完整序列或颜色种子。每个序列记录 2/3/4 球数量、三球颜色布局和单色/双色 O。
 
-两个序列的 16 手总球量相同。L/J 周期不是独立配置项：翻转发生在每个 4 球单色手之后，该手数为奇数的角色实际序列周期为 32 手，为偶数则为 16 手，由校验器从序列本身推导。
+两个序列的 16 手总球量相同。L/J 周期不是独立配置项：每跨过 16 手边界，4 球单色手数为奇数的角色在下一个 16 手内互换 L 与 J，因此实际序列周期为 32 手；该手数为偶数时周期为 16 手。周期由校验器从序列本身推导。
 
 ### 3.3 角色连锁强度（ChainPowerProfile）
 
@@ -97,9 +97,9 @@ CharacterRuleDefinition
 - 每个回合按当前角色 `DropSet` 生成一组 2、3 或 4 球的下落组；颜色来自本局锁定的确定性随机序列和该手的颜色布局。
 - 玩家可执行左移、右移、软降、硬降、顺时针旋转和逆时针旋转。
 - 左右移动、旋转和下落只在目标格有效时生效；硬降将球对落到当前列可达的最低合法位置并进入锁定流程。
-- 旋转以配置的轴心为中心。地面空间不足时应用上抬旋转；靠墙旋转时应用横向平移；双球组夹在两列之间时，连续旋转可完成 180° 翻转。具体尝试顺序写入 `rotation` 规则配置并以表驱动测试覆盖。
+- 旋转以形状的轴心为中心。目标格被占时检查其对侧格：对侧为空则把整组推向对侧——触底上推、贴墙或贴列侧推；两侧都被占时由双旋转计数器决定是否放行 180° 翻转。判定顺序见[盘面与活动组操控](development/design/board-and-falling-group.md)。
 
-地面旋转、墙边旋转与双旋转属于系列通用旋转机制。[Rotation](https://puyonexus.com/wiki/Rotation)
+地面旋转、墙边旋转与双旋转属于系列通用旋转机制。[Rotation](https://puyonexus.com/wiki/Rotation) 完整判定顺序与推回方向来自逆向工程记录。[Rotation, collision and push back](https://puyonexus.com/wiki/Puyo_Puyo_Tsu/Rotation,_collision_and_push_back)
 
 ### 3.5 锁定与连锁结算
 
@@ -136,7 +136,7 @@ Lock
 | `ScanNext` | 盘面为已提交的稳定盘面 | 本轮重力完成 | 扫描下一可消组，或形成完整连锁报告 |
 | `Settlement` | 连锁报告已经完整，等待攻防、Fever、垃圾与失败安全点结算 | 最终连锁数与结算结果 | 进入下一规则阶段或生成下一掉落组 |
 
-`ClearPreview` 和 `Gravity` 的持续时间来自开局锁定的 `RuleProfile`，使用整数 tick 表达并进入规则配置摘要、快照和状态校验值。重力持续时间可以由固定基础 tick 与本轮最大下落格数共同计算；同一规则配置与盘面必须得到相同持续时间。玩家自身处于任一 Resolve 阶段时，其落子动作输入不修改盘面；输入按正常 tick 消费，不延迟到下一活动组。
+`ClearPreview` 和 `Gravity` 的持续时间来自开局锁定的 `RuleProfile`，使用整数 tick 表达并进入规则配置摘要、快照和状态校验值。重力持续时间按本轮最大下落格数查配置中的下落时长表；同一规则配置与盘面必须得到相同持续时间。玩家自身处于任一 Resolve 阶段时，其落子动作输入不修改盘面；输入按正常 tick 消费，不延迟到下一活动组。
 
 表现层只读取当前阶段、起终状态、`elapsed_ticks` 和 `duration_ticks`；不得以“动画播放完成”回调推进规则。表现帧率不足时跳到规则指定的最新阶段进度，关闭或降低动画强度时也不能缩短规则阶段。无窗口模拟、AI、本地对局与网络对局均按同一 tick 状态机推进。
 
@@ -198,7 +198,7 @@ NL = NP - NC
 - 同一结算帧先计算双方的总攻击，再各自抵消自己的待接收垃圾；余量进入对手的待接收垃圾队列。
 - 玩家完成任意连锁且队列中有待接收垃圾时，连锁攻击优先用于抵消该队列。
 - Fever 规则采用连续抵消：本回合触发连锁时，尚未抵消的垃圾继续留在队列，玩家获得下一球对；本回合未触发连锁时，待接收垃圾落入棋盘。[Fever 规则](https://puyonexus.com/wiki/Fever_%28rule%29) [Offset rule](https://puyonexus.com/wiki/Offset_rule)
-- 单次落下上限默认 **30**（一整块 Rock = 五整行）；列序采用 Fever 系固定顺序（非整随机），「上一落点后续 / 下一列」分支按 Fever 1/2 主机/PC 写入配置并单测。[Nuisance queue](https://puyonexus.com/wiki/Nuisance_queue) [Fever 规则 § Nuisance Order](https://puyonexus.com/wiki/Fever_%28rule%29)
+- 单次落下上限默认 **30**（一整块 Rock = 五整行）；列序采用 Fever 系固定顺序（非整随机）。凑满整行后余 **1** 颗时，下一次落下的首颗从下一列开始；余 **2 颗及以上**时，下一次落下的首颗从上一颗所在列开始。[Nuisance queue](https://puyonexus.com/wiki/Nuisance_queue) [Fever 规则 § Nuisance Order](https://puyonexus.com/wiki/Fever_%28rule%29)
 - 垃圾 UI 同时展示精确数量和分级图标。图标单位取系列标准：1 / 6 / 30 / 180 / 360 / 720；Fever / Fever 2 符号上限为 Crown（720）。数字是准确来源。[Nuisance queue](https://puyonexus.com/wiki/Nuisance_queue)
 
 ## 5. Fever 系统
@@ -256,8 +256,8 @@ AI、开发用确定性验证与联机复用 `MatchState.step([P1Input, P2Input]
 
 规则剖面带 schema 版本、规则版本和 `reference_profile = "fever1_2_console_pc"`，至少覆盖：
 
-- 棋盘尺寸、出生格、溢出格、落下速度、锁定延迟、旋转尝试表、颜色数、颜色种子。
-- 结算阶段的消除预览时长、清除提交边界、重力基础时长和每下落一格的附加时长。
+- 棋盘尺寸与隐藏行数、出生列与出生姿态、自然下落与软降速度、横移输入重复、锁定宽限、上抬次数上限、颜色数、颜色种子。
+- 结算阶段的消除预览时长、清除提交边界，以及按下落格数查表的重力时长与分裂延迟。
 - 共享的 `CB` / `GB` 表、目标分 120、margin time 的目标分衰减表、攻击余数、单次落下上限 30、列顺序。
 - Fever 量表容量、初始/上限时间、时间奖励、题面目标等级域、等级升降表、普通/Fever 队列合并时机、Cover-X 与归零落垃圾分支。
 - 各常数的 Wiki URL、录入日期和**确定性验证样本 ID**（固定种子 + 输入日志 → checksum；非玩家回放功能）。
@@ -283,4 +283,5 @@ AI、开发用确定性验证与联机复用 `MatchState.step([P1Input, P2Input]
 | 连续抵消语义 | [Offset rule](https://puyonexus.com/wiki/Offset_rule) | Fever 连续抵消 vs 经典一次抵消 |
 | 掉落组 | [Dropset](https://puyonexus.com/wiki/Dropset) | 16 手；I/L/J/O；Fever 1/2 L/J 周期 |
 | 旋转 | [Rotation](https://puyonexus.com/wiki/Rotation) | 墙踢、上抬、双旋转 |
+| 活动组操控与帧数据 | [Puyo Puyo Tsu 逆向工程](https://puyonexus.com/wiki/Puyo_Puyo_Tsu/Frame_Data_Tables) | 输入优先级、旋转与推回判定、下落/软降/锁定宽限/自由落体帧数；来源为 Tsu 而非 Fever，标注见 DEC-002 |
 | 全消 | [All clear](https://puyonexus.com/wiki/All_clear) | 普通场 4 连题面 +5s；Fever 内 +2 题面 +5s |
