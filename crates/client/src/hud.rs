@@ -4,6 +4,8 @@
 //! events. Entities are spawned once per match instance and then only have
 //! their values written, so a high-feedback tick does not churn the ECS.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy::text::FontSource;
 use game_core::board::{Cell, Coord};
@@ -149,9 +151,19 @@ fn refresh_hud(
         return;
     };
 
+    let overlays: [SlotOverlay; 2] =
+        std::array::from_fn(|slot| slot_overlay(&snapshot.players[slot]));
+
     for (cell, mut background, mut border, children) in &mut cells {
         let player = &snapshot.players[cell.slot];
-        let occupant = cell_occupant(player, cell);
+        let overlay = &overlays[cell.slot];
+        let y = player.board.geometry().hidden_rows() + cell.row;
+        let key = (cell.column, y);
+
+        let occupant = overlay.active.get(&key).map_or_else(
+            || Coord::new(cell.column, y).map_or(Cell::Empty, |coord| player.board.get(coord)),
+            |color| Cell::Color(*color),
+        );
         let (color, glyph) = match occupant {
             Cell::Empty => (GRID, ""),
             Cell::Color(id) => {
@@ -161,10 +173,11 @@ fn refresh_hud(
             Cell::Nuisance => (NUISANCE_COLOR, NUISANCE_GLYPH),
         };
         background.0 = color;
-        // The top visible row is the overflow line; marking it keeps the danger
-        // readable without relying on the ball colours.
+        // Priority: danger line, then the landing outline, then plain grid.
         *border = BorderColor::all(if cell.row == 0 && player.overflow_risk {
             DANGER
+        } else if let Some(color) = overlay.landing.get(&key) {
+            BALL_COLORS[usize::from(*color) % BALL_COLORS.len()]
         } else {
             GRID
         });
@@ -185,23 +198,38 @@ fn refresh_hud(
     }
 }
 
-/// What occupies one visible cell: the settled board, or the active group.
-fn cell_occupant(
-    player: &crate::presentation::PlayerPresentationSnapshot,
-    cell: &BoardCell,
-) -> Cell {
-    let geometry = player.board.geometry();
-    let y = geometry.hidden_rows() + cell.row;
-    let Some(coord) = Coord::new(cell.column, y) else {
-        return Cell::Empty;
+/// The active group's cells and where it would come to rest.
+///
+/// Computed once per slot per frame rather than once per cell, and kept out of
+/// the rules entirely: the landing outline is an operating aid, so it never
+/// reaches the rule state, the checksum or a screenshot baseline.
+#[derive(Debug, Default)]
+struct SlotOverlay {
+    active: HashMap<(u8, u8), u8>,
+    landing: HashMap<(u8, u8), u8>,
+}
+
+fn slot_overlay(player: &crate::presentation::PlayerPresentationSnapshot) -> SlotOverlay {
+    let mut overlay = SlotOverlay::default();
+    let Some(group) = player.active_drop.as_ref() else {
+        return overlay;
     };
-    if let Some(group) = player.active_drop.as_ref()
-        && let Some(cells) = group.cells(&player.board)
-        && let Some((_, color)) = cells.iter().find(|(at, _)| *at == coord)
-    {
-        return Cell::Color(*color);
+    if let Some(cells) = group.cells(&player.board) {
+        for (coord, color) in cells {
+            overlay.active.insert((coord.x(), coord.y()), color);
+        }
     }
-    player.board.get(coord)
+    let mut ghost = *group;
+    while ghost.try_translate(&player.board, 0, 1) {}
+    if let Some(cells) = ghost.cells(&player.board) {
+        for (coord, color) in cells {
+            let key = (coord.x(), coord.y());
+            if !overlay.active.contains_key(&key) {
+                overlay.landing.insert(key, color);
+            }
+        }
+    }
+    overlay
 }
 
 fn hud_value(field: &HudText, snapshot: &MatchPresentationSnapshot) -> String {
