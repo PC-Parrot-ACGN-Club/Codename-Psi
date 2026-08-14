@@ -1577,6 +1577,11 @@ impl ValidatedRuleLibrary {
         &self.roster
     }
 
+    /// Every profile id in the library, in id order.
+    pub fn profile_ids(&self) -> impl Iterator<Item = &RuleProfileId> {
+        self.profiles.keys()
+    }
+
     /// Returns validated gameplay data for a character under a profile.
     #[must_use]
     pub fn character_play(

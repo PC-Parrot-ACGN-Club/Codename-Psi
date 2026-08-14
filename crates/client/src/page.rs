@@ -285,6 +285,12 @@ impl PageModel {
         self.ring.items()
     }
 
+    /// The state this page belongs to.
+    #[must_use]
+    pub const fn state(&self) -> AppState {
+        self.state
+    }
+
     #[must_use]
     pub const fn focused_index(&self) -> usize {
         self.ring.focused_index()
@@ -353,6 +359,12 @@ impl CharacterSelectPage {
     #[must_use]
     pub fn focused_index(&self, player: usize) -> Option<usize> {
         self.focused.get(player).copied()
+    }
+
+    /// The roster this page offers, in display order.
+    #[must_use]
+    pub fn characters(&self) -> &[CharacterId] {
+        &self.characters
     }
 
     #[must_use]

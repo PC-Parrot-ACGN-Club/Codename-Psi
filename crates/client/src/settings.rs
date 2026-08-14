@@ -25,11 +25,14 @@ impl Plugin for SettingsPlugin {
                 (
                     save_settings_on_request,
                     // Applying a locale before the catalogs have resolved would
-                    // report every language as missing, so this waits for the
-                    // startup barrier. Change detection is per-system: the
-                    // settings loaded during bootstrap still count as changed
-                    // the first time this runs.
+                    // report every language as missing. The barrier alone is
+                    // not enough: the resolver marks itself resolved but
+                    // inserts the catalogs through a command, so this also
+                    // orders after it to pick up the flush. Change detection is
+                    // per-system, so the settings loaded during bootstrap still
+                    // count as changed the first time this runs.
                     apply_settings
+                        .after(crate::bootstrap::poll_localization)
                         .run_if(|status: Res<crate::bootstrap::BootstrapStatus>| status.is_ready()),
                 ),
             );

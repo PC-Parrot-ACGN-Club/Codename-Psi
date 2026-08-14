@@ -10,9 +10,11 @@ use bevy::text::FontSource;
 use bevy::window::PrimaryWindow;
 
 use crate::app_state::{AppState, AppTransitionRequests, AppTransitionSet, SettingsOrigin};
+use crate::data::RulesData;
 use crate::i18n::Localization;
-use crate::input::UIActionEvent;
-use crate::page::{PageCommand, PageItem, PageModel};
+use crate::input::{UIAction, UIActionEvent};
+use crate::match_flow::{MatchResultSummary, MatchSeedSource, MatchSelection};
+use crate::page::{CharacterSelectPage, MatchMode, PageCommand, PageItem, PageModel};
 use crate::presentation::VirtualCanvas;
 
 /// States that own a focusable page.
@@ -46,14 +48,25 @@ impl Plugin for UiPlugin {
         }
 
         app.init_resource::<UiFont>()
+            .init_resource::<SelectedMode>()
             .add_systems(Startup, load_ui_font)
             .add_systems(Update, apply_virtual_canvas)
-            .add_systems(Update, drive_focused_page.in_set(AppTransitionSet::Request))
-            .add_systems(PostUpdate, refresh_focus_visuals);
+            .add_systems(
+                Update,
+                (drive_focused_page, drive_character_select).in_set(AppTransitionSet::Request),
+            )
+            .add_systems(PostUpdate, (refresh_focus_visuals, refresh_slot_visuals));
 
         for state in PAGE_STATES {
             app.add_systems(OnEnter(state), move |world: &mut World| {
                 spawn_page(world, state);
+            });
+            // The page entities are state-scoped; the models mirroring them
+            // have to leave with them, or a later page would drive a ring that
+            // is no longer on screen.
+            app.add_systems(OnExit(state), |mut commands: Commands| {
+                commands.remove_resource::<ActivePage>();
+                commands.remove_resource::<ActiveCharacterSelect>();
             });
         }
     }
@@ -199,6 +212,12 @@ fn spawn_page(world: &mut World, state: AppState) {
         .id();
     world.entity_mut(root).add_child(heading);
 
+    match state {
+        AppState::CharacterSelect => spawn_character_slots(world, root, &font),
+        AppState::Result => spawn_scoreline(world, root, &font),
+        _ => {}
+    }
+
     for (id, label, enabled) in rows {
         let mut row = world.spawn((
             PageItemNode(id),
@@ -238,29 +257,208 @@ fn spawn_page(world: &mut World, state: AppState) {
     world.insert_resource(ActivePage(model));
 }
 
+/// Mode the player picked on the mode page.
+///
+/// It decides how many locals the character page gives a slot to, so it is
+/// recorded when the mode item is confirmed rather than inferred later.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct SelectedMode(pub MatchMode);
+
+impl Default for SelectedMode {
+    fn default() -> Self {
+        Self(MatchMode::SinglePlayer)
+    }
+}
+
+/// The character page's two-slot model while it is on screen.
+#[derive(Debug, Resource)]
+pub struct ActiveCharacterSelect(pub CharacterSelectPage);
+
+/// One character cell, tagged with the slot and roster index it shows.
+#[derive(Debug, Component)]
+struct CharacterCell {
+    slot: usize,
+    index: usize,
+}
+
+/// Characters this library can actually start a match with.
+///
+/// A character whose gameplay data failed to load narrows selection without
+/// blocking the others, so the roster is filtered by whether play data exists.
+fn selectable_characters(rules: &RulesData) -> Vec<game_core::config::CharacterId> {
+    let Some(library) = rules.rules() else {
+        return Vec::new();
+    };
+    let Some(profile) = library.profile_ids().next().cloned() else {
+        return Vec::new();
+    };
+    library
+        .roster()
+        .characters
+        .iter()
+        .map(|identity| identity.id.clone())
+        .filter(|id| library.character_play(&profile, id).is_some())
+        .collect()
+}
+
+fn spawn_character_slots(world: &mut World, root: Entity, font: &Handle<Font>) {
+    let characters = world
+        .get_resource::<RulesData>()
+        .map(selectable_characters)
+        .unwrap_or_default();
+    if characters.is_empty() {
+        return;
+    }
+    let mode = world.resource::<SelectedMode>().0;
+
+    let columns = world
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: px(120),
+                margin: UiRect::bottom(px(40)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+    world.entity_mut(root).add_child(columns);
+
+    for slot in 0..2 {
+        let column = world
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(12),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+            ))
+            .id();
+        world.entity_mut(columns).add_child(column);
+
+        let heading = world
+            .spawn((
+                Text::new(if slot == 0 { "P1" } else { "P2" }),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(28.0),
+                    ..default()
+                },
+                TextColor(TEXT),
+            ))
+            .id();
+        world.entity_mut(column).add_child(heading);
+
+        for (index, id) in characters.iter().enumerate() {
+            let cell = world
+                .spawn((
+                    CharacterCell { slot, index },
+                    Node {
+                        width: px(320),
+                        height: px(64),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border: UiRect::all(px(2)),
+                        border_radius: BorderRadius::all(px(10)),
+                        ..default()
+                    },
+                    BorderColor::all(CHIP),
+                    BackgroundColor(CHIP),
+                ))
+                .id();
+            let label = world
+                .spawn((
+                    Text::new(id.0.clone()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(26.0),
+                        ..default()
+                    },
+                    TextColor(TEXT),
+                ))
+                .id();
+            world.entity_mut(cell).add_child(label);
+            world.entity_mut(column).add_child(cell);
+        }
+    }
+
+    world.insert_resource(ActiveCharacterSelect(CharacterSelectPage::new(
+        mode, characters,
+    )));
+}
+
+/// Final score and winner under the result heading.
+fn spawn_scoreline(world: &mut World, root: Entity, font: &Handle<Font>) {
+    let Some(summary) = world.get_resource::<MatchResultSummary>().copied() else {
+        return;
+    };
+    let winner = match summary.winner {
+        Some(0) => "P1",
+        Some(_) => "P2",
+        None => "--",
+    };
+    let text = format!("{}  {} : {}", winner, summary.wins[0], summary.wins[1]);
+
+    let scoreline = world
+        .spawn((
+            Text::new(text),
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(48.0),
+                ..default()
+            },
+            TextColor(TEXT),
+            Node {
+                margin: UiRect::bottom(px(40)),
+                ..default()
+            },
+        ))
+        .id();
+    world.entity_mut(root).add_child(scoreline);
+}
+
 /// Feed player input into the page model and act on what it decides.
 fn drive_focused_page(
     mut actions: MessageReader<UIActionEvent>,
     page: Option<ResMut<ActivePage>>,
+    character_select: Option<Res<ActiveCharacterSelect>>,
     mut requests: ResMut<AppTransitionRequests>,
     mut origin: ResMut<SettingsOrigin>,
     mut exit: MessageWriter<AppExit>,
-    state: Res<State<AppState>>,
+    mut mode: ResMut<SelectedMode>,
 ) {
     let Some(mut page) = page else {
         actions.clear();
         return;
     };
     for event in actions.read() {
+        // On the character page the slots own direction and confirm: the row
+        // ring must not also fire its confirm, or the page would leave for
+        // `Match` before anyone had picked a character. Back still belongs to
+        // the ring, which is what leaves the page.
+        if character_select.is_some() && event.action != UIAction::Back {
+            continue;
+        }
+        // The mode has to be read off the item that was confirmed: both mode
+        // items lead to the same state, so the transition alone cannot say
+        // which one the player chose.
+        let confirmed = page.0.focused().id;
         let Some(command) = page.0.handle_player(event.player, event.action) else {
             continue;
         };
         match command {
             PageCommand::Transition(request) => {
+                match confirmed {
+                    PageItem::SinglePlayer => *mode = SelectedMode(MatchMode::SinglePlayer),
+                    PageItem::LocalVersus => *mode = SelectedMode(MatchMode::LocalVersus),
+                    _ => {}
+                }
                 // Recorded before the request so the settings page knows where
                 // to return, whichever entry opened it.
                 if request.target == AppState::Settings {
-                    *origin = SettingsOrigin(*state.get());
+                    *origin = SettingsOrigin(page.0.state());
                 }
                 requests.submit(request.target, request.cause);
             }
@@ -271,20 +469,106 @@ fn drive_focused_page(
     }
 }
 
+/// Feed input into the character page's two slots.
+///
+/// The page's own `Confirm` picks a character for the acting slot. Only once
+/// both slots hold one does a further `Confirm` commit the selection, which is
+/// what makes the confirm item unavailable until then.
+fn drive_character_select(
+    mut actions: MessageReader<UIActionEvent>,
+    page: Option<ResMut<ActiveCharacterSelect>>,
+    rules: Option<Res<RulesData>>,
+    mut seeds: ResMut<MatchSeedSource>,
+    mut commands: Commands,
+    mut selection_written: Local<bool>,
+) {
+    // The model exists only while its page is on screen, so its presence is
+    // the page check.
+    let Some(mut page) = page else {
+        *selection_written = false;
+        return;
+    };
+    for event in actions.read() {
+        if event.action == UIAction::Confirm && page.0.confirm_enabled() && !*selection_written {
+            let selected = page.0.selected();
+            let (Some(first), Some(second)) = (selected[0], selected[1]) else {
+                continue;
+            };
+            let Some(profile) = rules
+                .as_deref()
+                .and_then(RulesData::rules)
+                .and_then(|library| library.profile_ids().next().cloned())
+            else {
+                continue;
+            };
+            // Only the selection is written here. Freezing it and requesting
+            // the transition stay with `match_flow`, which owns both.
+            commands.insert_resource(MatchSelection {
+                rule_profile_id: profile,
+                root_seed: seeds.next_seed(),
+                characters: [first.clone(), second.clone()],
+                confirmed: true,
+            });
+            *selection_written = true;
+            continue;
+        }
+        if event.action == UIAction::Back {
+            // Back leaves the page, which is the row ring's job.
+            continue;
+        }
+        page.0.handle_player(event.player, event.action);
+    }
+}
+
+/// Mirror each slot's focus and selection onto its cells.
+fn refresh_slot_visuals(
+    page: Option<Res<ActiveCharacterSelect>>,
+    mut cells: Query<(&CharacterCell, &mut BackgroundColor, &mut BorderColor)>,
+) {
+    let Some(page) = page else {
+        return;
+    };
+    let selected = page.0.selected();
+    for (cell, mut background, mut border) in &mut cells {
+        let focused = page.0.focused_index(cell.slot) == Some(cell.index);
+        background.0 = if focused { CHIP_FOCUSED } else { CHIP };
+        // A confirmed slot keeps a lit border, so focus and commitment stay
+        // distinguishable after the cursor moves on.
+        let committed = selected
+            .get(cell.slot)
+            .and_then(Option::as_ref)
+            .is_some_and(|id| page.0.characters().get(cell.index) == Some(id));
+        *border = BorderColor::all(if committed { CHIP_FOCUSED } else { CHIP });
+    }
+}
+
 /// Mirror the model's focus onto the rows.
 fn refresh_focus_visuals(
     page: Option<Res<ActivePage>>,
-    mut rows: Query<(&PageItemNode, &mut BackgroundColor)>,
+    character_select: Option<Res<ActiveCharacterSelect>>,
+    mut rows: Query<(&PageItemNode, &mut BackgroundColor, &Children)>,
+    mut text_colors: Query<&mut TextColor>,
 ) {
     let Some(page) = page else {
         return;
     };
     let focused = page.0.focused().id;
-    for (item, mut background) in &mut rows {
-        background.0 = if item.0 == focused {
-            CHIP_FOCUSED
-        } else {
-            CHIP
+    // The confirm row stays unavailable until both slots hold a character.
+    let awaiting_slots = character_select
+        .as_deref()
+        .is_some_and(|select| !select.0.confirm_enabled());
+
+    for (item, mut background, children) in &mut rows {
+        let enabled = !(item.0 == PageItem::ConfirmCharacters && awaiting_slots);
+        background.0 = match (enabled, item.0 == focused) {
+            (false, _) => CHIP,
+            (true, true) => CHIP_FOCUSED,
+            (true, false) => CHIP,
         };
+        for child in children.iter() {
+            if let Ok(mut color) = text_colors.get_mut(child) {
+                color.0 = if enabled { TEXT } else { TEXT_DISABLED };
+            }
+        }
     }
 }

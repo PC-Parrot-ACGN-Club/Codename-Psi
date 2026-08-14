@@ -297,12 +297,39 @@ fn release_match_scoped(commands: &mut Commands) {
     commands.remove_resource::<MatchPresentationResources>();
 }
 
-fn exit_match(transition: Option<Res<CommittedTransition>>, mut commands: Commands) {
+/// What the result page shows about the match that just ended.
+///
+/// Captured before the instance is released, because by design the rules
+/// instance does not survive leaving `Match` -- and the result page is exactly
+/// the screen that has to outlive it.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct MatchResultSummary {
+    /// Rounds won per participant slot.
+    pub wins: [u8; 2],
+    /// Participant that reached two wins, when the match ran to completion.
+    pub winner: Option<usize>,
+}
+
+fn exit_match(
+    transition: Option<Res<CommittedTransition>>,
+    simulation: Option<Res<RulesSimulation>>,
+    mut commands: Commands,
+) {
     if transition
         .as_ref()
         .is_some_and(|transition| transition.to == AppState::Paused)
     {
         return;
+    }
+    if let Some(simulation) = simulation {
+        let view = simulation.0.view();
+        commands.insert_resource(MatchResultSummary {
+            wins: view.wins,
+            winner: match view.phase {
+                game_core::match_state::MatchPhase::Completed(outcome) => Some(outcome.winner),
+                _ => None,
+            },
+        });
     }
     release_match_scoped(&mut commands);
 }
