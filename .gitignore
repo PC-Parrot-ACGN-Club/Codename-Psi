@@ -30,3 +30,5 @@ rust-project.json
 
 tmp
 tmp/*
+.cargo
+.claude/worktrees
