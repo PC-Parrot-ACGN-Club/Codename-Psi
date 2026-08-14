@@ -19,6 +19,7 @@ pub mod input;
 pub mod match_spec;
 pub mod match_state;
 pub mod nuisance;
+pub mod player;
 pub mod resolution;
 pub mod rules;
 pub mod safety_point;

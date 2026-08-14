@@ -13,6 +13,11 @@
         spawn_column: 2,
         color_count: 4,
     ),
+    round: (
+        // 3 s of countdown, then 1.5 s on the result before the next round.
+        intro_ticks: 180,
+        outro_ticks: 90,
+    ),
     // Frame data transcribed from the Puyo Puyo Tsu reverse-engineering
     // tables; see docs/development/decision/timing-parameter-source.md.
     drop: (

@@ -138,6 +138,8 @@ pub struct RuleProfile {
     pub reference_profile: String,
     /// Board geometry and color count.
     pub field: FieldConfig,
+    /// Durations of the two non-gameplay round phases.
+    pub round: RoundConfig,
     /// Supply and falling-group timing.
     pub drop: DropConfig,
     /// Rotation timing and push-back parameters.
@@ -181,6 +183,15 @@ impl FieldConfig {
     pub const fn visible_cells(&self) -> u32 {
         (self.width as u32) * ((self.height - self.hidden_rows) as u32)
     }
+}
+
+/// Durations of the phases that bracket a round, in ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct RoundConfig {
+    /// Countdown before the first controllable tick.
+    pub intro_ticks: u16,
+    /// How long the result stays on screen before the next round.
+    pub outro_ticks: u16,
 }
 
 /// Supply and falling-group timing, all in ticks.
@@ -752,6 +763,13 @@ impl Digestible for FieldConfig {
     }
 }
 
+impl Digestible for RoundConfig {
+    fn digest_into(&self, writer: &mut DigestWriter) {
+        writer.u16(self.intro_ticks);
+        writer.u16(self.outro_ticks);
+    }
+}
+
 impl Digestible for DropConfig {
     fn digest_into(&self, writer: &mut DigestWriter) {
         writer.u8(self.next_queue_len);
@@ -853,6 +871,7 @@ impl Digestible for RuleProfile {
         writer.str(&self.rule_version);
         writer.str(&self.reference_profile);
         self.field.digest_into(writer);
+        self.round.digest_into(writer);
         self.drop.digest_into(writer);
         self.rotation.digest_into(writer);
         self.resolve.digest_into(writer);
@@ -938,6 +957,19 @@ fn validate_profile_integrity(profile: &RuleProfile) -> Result<(), ConfigError> 
     }
     if field.color_count < 2 {
         return Err(integrity("profile.field.color_count", "must be at least 2"));
+    }
+
+    if profile.round.intro_ticks == 0 {
+        return Err(integrity(
+            "profile.round.intro_ticks",
+            "tick duration must be positive",
+        ));
+    }
+    if profile.round.outro_ticks == 0 {
+        return Err(integrity(
+            "profile.round.outro_ticks",
+            "tick duration must be positive",
+        ));
     }
 
     let drop = &profile.drop;

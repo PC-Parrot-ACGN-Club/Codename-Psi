@@ -417,13 +417,18 @@ fn a_blocked_spawn_column_only_decides_the_round_at_the_next_spawn() {
     let mut state = game_core::MatchState::new(spec.clone());
     let idle = game_core::input::TickInputs::new([PlayerActions::EMPTY, PlayerActions::EMPTY])
         .expect("two slots");
-    state.step(&idle).expect("leave the intro");
+    for _ in 0..spec.round_intro_ticks {
+        state.step(&idle).expect("leave the intro");
+    }
 
     // Sixty ticks of ordinary control decide nothing.
     for _ in 0..60 {
         let report = state.step(&idle).expect("a tick advances");
         assert!(
-            report.spawn_failures.is_empty(),
+            !report.events.iter().any(|event| matches!(
+                event,
+                game_core::match_state::MatchEvent::PlayerDefeated(_)
+            )),
             "defeat is judged at spawn, not while a group is controllable"
         );
     }

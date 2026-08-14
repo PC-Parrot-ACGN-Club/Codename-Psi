@@ -180,6 +180,10 @@ pub struct LockedMatchSpec {
     pub board_geometry: BoardGeometry,
     /// Number of distinct ball colors.
     pub color_count: u8,
+    /// Countdown before a round's first controllable tick.
+    pub round_intro_ticks: u16,
+    /// How long a round result stays before the next round.
+    pub round_outro_ticks: u16,
     /// Falling-group and rotation timing.
     pub drop: DropTiming,
     /// Chain resolution phase timing.
@@ -287,6 +291,8 @@ impl LockedMatchSpec {
             root_seed: request.root_seed,
             board_geometry,
             color_count: profile.field.color_count,
+            round_intro_ticks: profile.round.intro_ticks,
+            round_outro_ticks: profile.round.outro_ticks,
             drop: drop_timing(profile),
             resolution: resolution_rules(profile),
             scoring: ScoringRules::new(
