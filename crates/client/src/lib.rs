@@ -5,11 +5,13 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
+pub mod ai;
 pub mod app_state;
 pub mod bootstrap;
 pub mod data;
 pub mod i18n;
 pub mod input;
+pub mod match_flow;
 pub mod settings;
 pub mod simulation;
 
@@ -40,6 +42,7 @@ impl Plugin for GameInfrastructurePlugin {
             i18n::LocalizationPlugin,
             bootstrap::BootstrapPlugin,
             input::InputPlugin,
+            match_flow::MatchFlowPlugin,
             simulation::SimulationPlugin,
         ));
     }

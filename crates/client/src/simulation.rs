@@ -5,6 +5,8 @@ use std::time::Duration;
 use bevy::prelude::*;
 use game_core::input::{PlayerActions, TickInputs};
 
+use game_core::MatchState;
+
 use crate::app_state::AppState;
 use crate::input::LocalInputSampler;
 
@@ -39,11 +41,18 @@ impl CurrentTickInputs {
     }
 }
 
+/// The running match, present only once a specification has been frozen.
+///
+/// `client::simulation` is a thin bridge: it forms the tick's canonical inputs
+/// and calls `MatchState::step`. It holds no rule judgement of its own.
+#[derive(Debug, Resource)]
+pub struct RulesSimulation(pub MatchState);
+
 /// Rule facts advanced only by `FixedGameSet::Rules`.
 ///
-/// The checksum stands in for the deterministic match state until the rules
-/// kernel lands: it folds every consumed tick's inputs, so an identical initial
-/// state plus an identical input sequence yields an identical value.
+/// When a match is running these mirror `MatchState`; with no match frozen yet
+/// the checksum folds the consumed inputs instead, which keeps the fixed
+/// schedule observable before a specification exists.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 pub struct RuleState {
     pub tick: u64,
@@ -130,6 +139,7 @@ pub fn prepare_tick_inputs(
 pub fn advance_rules(
     mut current: ResMut<CurrentTickInputs>,
     mut rules: ResMut<RuleState>,
+    simulation: Option<ResMut<RulesSimulation>>,
     probe: Option<ResMut<SimulationProbe>>,
 ) {
     if current.consumed {
@@ -137,7 +147,16 @@ pub fn advance_rules(
     }
     current.consumed = true;
 
-    rules.advance(&current.inputs);
+    match simulation {
+        Some(mut simulation) => {
+            if let Err(error) = simulation.0.step(&current.inputs) {
+                warn!("rules refused this tick: {error}");
+            }
+            rules.tick = simulation.0.match_tick();
+            rules.checksum = simulation.0.checksum().0;
+        }
+        None => rules.advance(&current.inputs),
+    }
 
     if let Some(mut probe) = probe {
         probe.consumed += 1;

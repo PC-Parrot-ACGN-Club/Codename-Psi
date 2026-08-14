@@ -52,6 +52,7 @@ pub enum AppTransitionCause {
     StartGame,
     ModeConfirmed,
     CharacterConfirmed,
+    MatchStartRequested,
     PauseRequested,
     ResumeRequested,
     MatchCompleted,
