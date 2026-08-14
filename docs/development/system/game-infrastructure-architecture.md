@@ -1,7 +1,7 @@
 # 游戏基础设施运行架构
 
 **相关模块：** `game_core`、`client`、`net`、Bevy 应用运行时
-**关联文档：** [PRD](../../PRD.md)、[TDD](../../TDD.md)、[应用状态机](../design/application-state-machine.md)、[固定频率规则调度](../design/fixed-tick-simulation.md)
+**关联文档：** [PRD](../../PRD.md)、[TDD](../../TDD.md)、[应用状态机](../design/application-state-machine.md)、[固定频率规则调度](../design/fixed-tick-simulation.md)、[页面导航与焦点](../design/page-navigation.md)、[表现运行时](../design/presentation-runtime.md)
 
 ## 目标与范围
 
@@ -13,6 +13,8 @@
 | --- | --- | --- | --- |
 | `game_core` | 保存纯规则领域类型、配置模型、统一游戏动作与确定性验证能力 | 无 Bevy、文件系统、窗口或网络依赖 | 规则数据模型、游戏动作、`MatchState` |
 | `client::app_state` | 保存顶层应用状态与合法迁移语义 | 依赖 Bevy `States` | `AppState`、状态迁移入口、当前状态 |
+| `client::page` | 组织页面焦点、导航与页面实体生命周期 | 依赖 `client::app_state`、`client::input` | 页面动作与状态迁移请求 |
+| `client::presentation` | 把规则事实投影为画面、音频与震动 | 依赖 `game_core::view`、Bevy 渲染/UI/音频 | 表现快照、表现事件与固定虚拟画布 |
 | `client` | 组织 Bevy 应用、输入、资源加载、本地化、设置、表现和本地功能 | `client → game_core`；需要时接入 `net` | Bevy App、运行时资源和调度 |
 | `net` | 承载局域网会话、输入同步、状态校验和断线处理 | `net → game_core` | R2 网络会话能力 |
 | Bevy | 提供窗口、主循环、调度、States、设备输入、资源、渲染、UI 和音频 | 由 `client` 组合 | 应用运行时能力 |
@@ -26,7 +28,7 @@
 5. 后续 client 侧流程组件按[应用状态机](../design/application-state-machine.md)请求顶层状态迁移。
 6. 进入 `Match` 后，普通 `Update` 负责设备输入采集和表现更新。
 7. Bevy 固定调度以 60Hz 消费量化后的 tick 输入并驱动规则状态。
-8. 表现系统读取最近规则状态提供的可观察数据更新画面、UI 和音频。
+8. 表现系统按[表现运行时](../design/presentation-runtime.md)读取最近规则状态提供的可观察数据更新画面、UI、音频和震动。
 9. 进入 `Paused` 后对局 simulation 停止；恢复 `Match` 后从暂停前已有的规则状态继续推进。
 
 ## 启动准备
@@ -105,6 +107,8 @@ minimal Bevy runtime
 - 本文不定义有效状态边与状态机语义（见[应用状态机](../design/application-state-machine.md)）。
 - 本文不定义 fixed schedule 的阶段划分与运行条件（见[固定频率规则调度](../design/fixed-tick-simulation.md)）。
 - 本文不定义资源解析、失败分级与诊断的具体语义（见[版本化运行数据加载](../design/runtime-data-loading.md)）。
+- 本文不定义页面焦点与页面实体生命周期（见[页面导航与焦点](../design/page-navigation.md)）。
+- 本文不定义表现快照、表现事件与降级语义（见[表现运行时](../design/presentation-runtime.md)）。
 - `main.rs` 保持薄入口，由项目根插件组合基础设施能力。
 - `client::app_state` 是顶层应用阶段的单一状态所有者；其它 client 侧组件通过状态迁移入口提出请求。
 - `game_core` 可在无窗口、无渲染、无网络、无文件系统环境中独立运行；`client` 负责设备输入、文件/资源路径、Bevy ECS 和本机设置；`net` 通过 `game_core` 的规则状态和游戏输入语义接入同步。

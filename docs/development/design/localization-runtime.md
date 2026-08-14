@@ -19,6 +19,8 @@
 
 `Localization` 作为客户端 Resource 提供只读查询能力。默认 locale 为 `en`。
 
+localization key 使用 `<域>.<条目>` 形式的稳定标识：页面文本的域是页面名（`main_menu`、`mode_select`、`character_select`、`settings`、`pause`、`result`），对局内文本的域是 `hud`，角色文本的域是 `character.<character_id>`。key 只由代码与数据文件引用，不随语言变化。
+
 ## 存储格式
 
 本地化 catalog 使用 JSON：

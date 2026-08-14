@@ -15,9 +15,18 @@
 | settings path | 平台标准应用配置目录中的文件 | 通过平台目录能力解析 |
 | `PlayerInputBindings` | P1/P2 的键盘与手柄绑定 | 两名玩家独立保存 |
 
-设置字段至少覆盖：language、window mode、master volume、sfx volume、P1 keyboard mapping、P2 keyboard mapping、P1/P2 gamepad mapping、vibration。
+设置字段至少覆盖：language、window mode、master volume、sfx volume、P1 keyboard mapping、P2 keyboard mapping、P1/P2 gamepad mapping、vibration、animation intensity。
 
 `PlayerInputBindings` 只保存可配置绑定。
+
+```rust
+enum AnimationIntensity {
+    Reduced,
+    Full,
+}
+```
+
+`AnimationIntensity` 的表现语义见[表现运行时：动画强度](presentation-runtime.md#动画强度)。
 
 ## 默认值
 
@@ -30,6 +39,7 @@
 | master volume | `1.0` |
 | sfx volume | `1.0` |
 | vibration | `true` |
+| animation intensity | `Full` |
 
 ### 默认输入绑定
 
@@ -74,20 +84,58 @@ South           Gameplay: RotateClockwise        Menu: Confirm
 - 输出：重启后可恢复的新设置。
 - 错误语义：写入失败时保留当前内存值并返回可观察错误，已有正式设置文件不受破坏。
 
+### schema 演进
+
+设置文件的 `schema_version` 只在不兼容改动时提升：
+
+| 改动 | `schema_version` | 已有设置文件 |
+| --- | --- | --- |
+| 增加字段 | 不变 | 缺失字段取该字段默认值，其余用户选择全部保留 |
+| 删除字段 | 不变 | 忽略未知字段 |
+| 改变已有字段的含义或取值域 | 提升 | 整体回到内置默认设置并记录诊断 |
+
+不提供逐字段迁移：加字段由默认值补齐，不兼容改动由整体回默认处置。
+
+### 绑定捕获
+
+- 输入：待重绑定的可配置动作、目标玩家、目标设备类别，以及捕获期间的一次物理输入。
+- 处理：
+  1. 进入捕获态，暂停该设备类别的常规输入消费；
+  2. 记录首个属于目标设备类别的物理输入作为候选绑定；
+  3. 对候选绑定执行下节的冲突判断；
+  4. 无冲突时写入，有冲突时把冲突结果交给设置 UI，由玩家选择覆盖或取消。
+- 输出：更新后的 `PlayerInputBindings`，或一次被取消的捕获。
+- 错误语义：捕获期间的返回输入取消本次捕获并保留原绑定；捕获态不产生 `UIAction`，也不产生规则动作。
+
+覆盖生效后立即用于运行时采样，不等待下一次进入对局。
+
 ### 输入绑定冲突
 
 - 输入：设置页面准备写入的新绑定（仅 `SoftDrop` / `HardDrop` / `RotateClockwise` / `RotateCounterClockwise` 四个可配置动作）。
-- 处理：判断新绑定是否与同一配置范围内已有绑定冲突。
-- 输出：可供设置 UI 判断的冲突结果。
-- 错误语义：冲突属于可处理业务结果，由设置 UI 决定覆盖或重新绑定。
+- 处理：判断新绑定是否与同一配置范围内已有绑定冲突。配置范围是**同一玩家的同一设备类别**：P1 键盘与 P2 键盘互不冲突，同一玩家的键盘与手柄绑定也互不冲突。
+- 输出：可供设置 UI 判断的冲突结果，包含被占用的动作。
+- 错误语义：冲突属于可处理业务结果，由设置 UI 决定覆盖或重新绑定。覆盖使原先占用该物理位的动作变为未绑定，该动作在重新绑定前不产生输入。
 
 ## 平台目录
 
 设置文件使用 workspace 已引入的 `directories` 能力定位平台标准应用配置目录。
 
+## 协作
+
+| 设置 | 消费方 | 应用时机 |
+| --- | --- | --- |
+| language | [本地化运行时](localization-runtime.md#切换语言) | 立即 |
+| window mode | 客户端窗口 | 立即 |
+| master volume、sfx volume | 客户端音频输出 | 立即 |
+| `PlayerInputBindings` | [本地输入采样](local-input-sampling.md) | 立即 |
+| vibration、animation intensity | [表现运行时](presentation-runtime.md) | 立即 |
+
+全部设置在玩家确认修改后立即生效，不需要重启，也不需要离开设置页。持久化与生效相互独立：写盘失败不回退已经生效的内存值。
+
 ## 边界
 
 - 本文不定义固定绑定的键位（见[UI 交互动作：物理绑定关系](ui-action-input.md#物理绑定关系)）。固定绑定动作不进入绑定冲突检测范围。
+- 本文不定义设置页面的焦点顺序与控件布局（见[页面导航与焦点](page-navigation.md)）。
 - 本文不定义运行时采样中的逻辑动作冲突（见[统一游戏动作与 Tick 输入：逻辑动作归一化](game-action-input.md#逻辑动作归一化)），它与绑定编辑冲突无关。
 - `UserSettings` 只保存用户偏好，不进入规则 fixed tick 的确定性状态。
 
@@ -98,3 +146,5 @@ South           Gameplay: RotateClockwise        Menu: Confirm
 - [PRD §7](../../PRD.md)：定义需要持久化的用户设置。
 - [TDD §4](../../TDD.md)：客户端维护可序列化输入映射。
 - [TDD §5](../../TDD.md)：设置使用 RON，保存到平台标准应用配置目录；解析错误使用安全默认值并给出诊断。
+- [Issue #13](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/13)：要求设置页可修改语言、窗口模式、音量、键盘/手柄映射、震动与动画强度，按规定时机生效并在重启后恢复。
+- [PRD §5.1](../../PRD.md)：设置页必需内容包含动画强度。

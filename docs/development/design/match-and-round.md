@@ -103,7 +103,7 @@ RoundState
 | `LockedMatchSpec` | [开局规格冻结](rule-configuration.md) | 本主题 | 整场不可变 |
 | `TickInputs` | `client::simulation` | 本主题 | 每个固定 tick 恰好一次 |
 | `MatchStepReport` | 本主题 | `client::simulation` | 缓存最新一份供表现读取 |
-| `MatchView` | 本主题 | 表现层 | 两块盘、活动组与 NEXT、精确垃圾、Fever、分数、角色与胜场的只读投影，不是平行状态 |
+| `MatchView` | 本主题 | 表现层 | 两块盘、活动组与 NEXT、精确垃圾、Fever、分数、角色与胜场的只读投影，不是平行状态；同时携带[结算阶段与进度](chain-resolution.md#表现协议)和[题面目标等级](fever-mode.md#协作) |
 | `MatchEnded` | 本主题 | `client::app_state` | 由 client 转换为既有的比赛完成迁移原因 |
 
 `client::simulation` 在固定调度的规则阶段调用 `MatchState::step`，是一层薄桥接，不持有规则判定。

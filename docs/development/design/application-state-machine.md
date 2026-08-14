@@ -1,7 +1,7 @@
 # 应用状态机
 
 **相关模块：** `client::app_state`、状态迁移请求方
-**关联文档：** [游戏基础设施运行架构](../system/game-infrastructure-architecture.md)、[UI 交互动作](ui-action-input.md)、[固定频率规则调度](fixed-tick-simulation.md)、[TDD §4](../../TDD.md)
+**关联文档：** [游戏基础设施运行架构](../system/game-infrastructure-architecture.md)、[UI 交互动作](ui-action-input.md)、[页面导航与焦点](page-navigation.md)、[固定频率规则调度](fixed-tick-simulation.md)、[TDD §4](../../TDD.md)
 
 ## 目标
 
@@ -15,6 +15,7 @@ enum AppState {
     MainMenu,
     ModeSelect,
     CharacterSelect,
+    Settings,
     Match,
     Paused,
     Result,
@@ -30,30 +31,55 @@ struct AppTransitionRequest {
 }
 ```
 
-`cause` 表达迁移原因，用于诊断和冲突仲裁，随已确认状态边扩展：
+`cause` 表达迁移原因，用于诊断、冲突仲裁和消费者区分同一状态边上的不同语义，随已确认状态边扩展：
 
 ```text
 BootstrapReady
 StartGame
 ModeConfirmed
 CharacterConfirmed
+BackRequested
+SettingsOpened
+SettingsClosed
 PauseRequested
 ResumeRequested
+RestartRequested
 MatchCompleted
+RematchRequested
+MatchAbandoned
 ReturnToMainMenu
 ```
 
+```rust
+struct CommittedTransition {
+    from: AppState,
+    to: AppState,
+    cause: AppTransitionCause,
+}
+```
+
+`CommittedTransition` 由 Arbiter 在写入 `NextState<AppState>` 的同时记录，保存本次提交的迁移。同一状态边可以承载不同语义，消费者据此区分：`Paused → Match` 在 `ResumeRequested` 下继续既有对局，在 `RestartRequested` 下重建对局。消费者只读该记录，不据此推断尚未提交的迁移。
+
+### 设置返回上下文
+
+```rust
+struct SettingsOrigin(AppState);
+```
+
+`Settings` 从 `MainMenu` 与 `Paused` 两处进入，返回目标不由状态边唯一决定。请求方在提出 `SettingsOpened` 前把来源状态写入 `SettingsOrigin`；`SettingsClosed` 的目标取自该值。来源状态只有 `MainMenu` 与 `Paused` 两种取值。
+
 ## 有效状态转移
 
-| 当前状态 | 允许目标 |
-| --- | --- |
-| `Boot` | `MainMenu` |
-| `MainMenu` | `ModeSelect` |
-| `ModeSelect` | `CharacterSelect` |
-| `CharacterSelect` | `Match` |
-| `Match` | `Paused`、`Result` |
-| `Paused` | `Match` |
-| `Result` | `MainMenu` |
+| 当前状态 | 允许目标 | 对应 cause |
+| --- | --- | --- |
+| `Boot` | `MainMenu` | `BootstrapReady` |
+| `MainMenu` | `ModeSelect`、`Settings` | `StartGame`、`SettingsOpened` |
+| `ModeSelect` | `CharacterSelect`、`MainMenu` | `ModeConfirmed`、`BackRequested` |
+| `CharacterSelect` | `Match`、`ModeSelect` | `CharacterConfirmed`、`BackRequested` |
+| `Settings` | `MainMenu`、`Paused` | `SettingsClosed` |
+| `Match` | `Paused`、`Result` | `PauseRequested`、`MatchCompleted` |
+| `Paused` | `Match`、`Settings`、`MainMenu` | `ResumeRequested`、`RestartRequested`、`SettingsOpened`、`MatchAbandoned` |
+| `Result` | `Match`、`MainMenu` | `RematchRequested`、`ReturnToMainMenu` |
 
 增加有效状态边时同步增加状态迁移测试。
 
@@ -83,8 +109,9 @@ ReturnToMainMenu
 
 - `BootstrapReady`：启动协调 system 在 `BootstrapStatus` 的设置与本地化均为 `Resolved` 时提出。启动协调只消费 `Resolved` 状态，加载、失败分级和诊断由对应模块负责。
 - `PauseRequested`：由 `client::input` 在 `AppState == Match` 时识别固定绑定的暂停输入（手柄 Start 按键、键盘 `Escape`，两者不区分玩家）后直接提出。其它状态下同一输入不提出任何迁移请求，也不产生 `UIAction`；该次按下沿就地丢弃，不滞留到下一次进入 `Match`。
-- `ResumeRequested`：由 `Paused` 页面导航组件提出。
-- `MatchStartRequested`：由角色选择流程在规则数据可用并完成开局规格冻结后提出。规则数据为 `Failed` 时不提出该请求，理由见[版本化运行数据加载 · 失败分级](runtime-data-loading.md#失败分级)。
+- `CharacterConfirmed`：由角色选择流程在规则数据可用并完成开局规格冻结后提出。规则数据为 `Failed` 时不提出该请求，理由见[版本化运行数据加载 · 失败分级](runtime-data-loading.md#失败分级)。
+- `RematchRequested`：由赛果页面在完成同配置新开局规格冻结后提出，冻结要求与 `CharacterConfirmed` 相同。
+- `StartGame`、`BackRequested`、`SettingsOpened`、`SettingsClosed`、`ResumeRequested`、`RestartRequested`、`MatchAbandoned`、`ReturnToMainMenu`：由对应页面的导航组件在玩家确认该页面动作后提出（见[页面导航与焦点](page-navigation.md)）。
 
 ### 协作时序
 
@@ -128,6 +155,8 @@ MatchCompleted > PauseRequested
 ## 边界
 
 - 本文不定义资源加载、设置修改、比赛结果生成与规则推进。
+- 本文不定义页面内部的焦点顺序、控件导航与页面实体清理（见[页面导航与焦点](page-navigation.md)）。
+- 本文不定义各 cause 下对局实例如何创建、保留或重建（见[固定频率规则调度：对局实例生命周期](fixed-tick-simulation.md#对局实例生命周期)）。
 - 本文不定义对局内部规则状态（见[固定频率规则调度](fixed-tick-simulation.md)），它独立于 `AppState`。
 - 本文不定义网络连接生命周期（见[游戏基础设施运行架构](../system/game-infrastructure-architecture.md)）。网络连接使用独立状态类型，不向 `AppState` 平铺连接状态。
 - 本文不定义页面、对局、联机等功能的内部模块结构；只要求其状态迁移出口遵守统一请求协议。
@@ -137,3 +166,5 @@ MatchCompleted > PauseRequested
 - [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)：要求启动、菜单、模式选择、角色选择、对局、暂停和赛果应用状态，并能通过 Bevy 调度切换。
 - [TDD §4](../../TDD.md)：使用 Bevy `States` 管理顶层应用阶段。
 - [TDD §5](../../TDD.md)：设置和文本解析失败时使用安全默认值并提供诊断。
+- [Issue #13](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/13)：要求设置页、暂停、重开、退出与再来一局可由玩家操作完成。
+- [表现与 UI 设计 §5](../../presentation.md)：定义主菜单、模式选择、角色选择、设置、暂停与赛果各自的主操作。

@@ -35,8 +35,8 @@
 
 | ID | 标题 | Priority | Test Level | Concern | Domain | 前置条件 | 操作/刺激 | 测试数据 | 预期结果 | Test Basis / 证据状态 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TC-001 | 基础状态表的每条合法边均被判为有效 | P1 | Component | — | Client | 可对纯状态表执行合法边判断 | 参数化判断每条基础状态边 | Boot→MainMenu；MainMenu→ModeSelect；ModeSelect→CharacterSelect；CharacterSelect→Match；Match→Paused；Paused→Match；Match→Result；Result→MainMenu | 每组均被判为有效边 | [Confirmed] [应用状态机：有效状态转移](../../development/design/application-state-machine.md#有效状态转移) |
-| TC-002 | 表外状态边均被判为非法 | P2 | Component | — | Client | 可对纯状态表执行合法边判断 | 参数化判断未列入对应源状态允许目标的边 | 至少每个源状态一个表外目标，含 Boot→Match、Paused→Result、Result→Match | 每组均被判为非法边 | [Confirmed] [应用状态机：有效状态转移](../../development/design/application-state-machine.md#有效状态转移) |
+| TC-001 | 基础状态表的每条合法边均被判为有效 | P1 | Component | — | Client | 可对纯状态表执行合法边判断 | 参数化判断每条基础状态边 | Boot→MainMenu；MainMenu→ModeSelect；MainMenu→Settings；ModeSelect→CharacterSelect；ModeSelect→MainMenu；CharacterSelect→Match；CharacterSelect→ModeSelect；Settings→MainMenu；Settings→Paused；Match→Paused；Match→Result；Paused→Match；Paused→Settings；Paused→MainMenu；Result→Match；Result→MainMenu | 每组均被判为有效边 | [Confirmed] [应用状态机：有效状态转移](../../development/design/application-state-machine.md#有效状态转移) |
+| TC-002 | 表外状态边均被判为非法 | P2 | Component | — | Client | 可对纯状态表执行合法边判断 | 参数化判断未列入对应源状态允许目标的边 | 至少每个源状态一个表外目标，含 Boot→Match、MainMenu→Match、ModeSelect→Settings、CharacterSelect→Result、Settings→Match、Match→MainMenu、Paused→Result、Result→CharacterSelect | 每组均被判为非法边 | [Confirmed] [应用状态机：有效状态转移](../../development/design/application-state-machine.md#有效状态转移) |
 
 ## 风险查漏
 

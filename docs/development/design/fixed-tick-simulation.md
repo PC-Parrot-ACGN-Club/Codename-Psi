@@ -59,6 +59,26 @@ fixed schedule 的规则频率配置为 60Hz。
 
 实现可以使用 Bevy 的 run condition、状态调度或其它等价机制表达上述运行边界，只需满足该可观察语义。
 
+## 对局实例生命周期
+
+规则实例在进入 `AppState::Match` 时按本次迁移的 cause 处置，cause 取自[应用状态机](application-state-machine.md#数据模型)记录的 `CommittedTransition`：
+
+| cause | 规则实例 | 种子 | 比分 |
+| --- | --- | --- | --- |
+| `CharacterConfirmed` | 由本次冻结的 `LockedMatchSpec` 新建 | 本次冻结的种子 | 0:0 |
+| `RestartRequested` | 用当前 `LockedMatchSpec` 重建 | 保持不变 | 0:0 |
+| `RematchRequested` | 由重新冻结的 `LockedMatchSpec` 新建 | 新的本地种子 | 0:0 |
+| `ResumeRequested` | 保留既有实例 | 保持不变 | 保持不变 |
+
+- 输入：进入 `Match` 时的 `CommittedTransition` 与当前 `LockedMatchSpec`。
+- 处理：按上表新建、重建或保留实例；新建与重建同时重置 AI 计划状态和随对局存在的表现资源。
+- 输出：`FixedGameSet::Rules` 可推进的规则实例。
+- 错误语义：新建或重建未能完成时不保留半初始化实例，不进入可推进状态，并产生诊断；此时 `Match` 不提供可继续的对局。
+
+退出 `AppState::Match` 且目标不是 `Paused` 时释放规则实例、AI 计划状态和随对局存在的表现资源。`Match → Paused → Match` 不触发释放。
+
+`RestartRequested` 与 `RematchRequested` 的区别只在种子与规格是否重新冻结：前者复现同一场对局的初始条件，后者产生一场新的对局。
+
 ## 边界
 
 - 本文不定义规则输入的采样方式（见[本地输入采样](local-input-sampling.md)）。普通 `Update` 不承担规则输入采样。
@@ -70,4 +90,5 @@ fixed schedule 的规则频率配置为 60Hz。
 - [Issue #11](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/11)：要求建立 60Hz 游戏规则固定更新路径，使渲染帧率与规则推进独立。
 - [TDD §3](../../TDD.md)：规则以 60Hz fixed tick 运行，规则核心消费已经量化到 tick 的动作。
 - [TDD §4](../../TDD.md)：对局模拟使用固定调度；设备输入采集排在引擎输入更新之后、固定调度之前；UI、音频和渲染使用普通更新调度。
-- [应用状态机](application-state-machine.md)：`AppState` 包含 `Match` 与 `Paused`，`Match ⇄ Paused` 为有效状态边。
+- [应用状态机](application-state-machine.md)：`AppState` 包含 `Match` 与 `Paused`，`Match ⇄ Paused` 为有效状态边，`CommittedTransition` 记录本次迁移的 cause。
+- [Issue #13](https://github.com/PC-Parrot-ACGN-Club/Codename-Psi/issues/13)：要求本地对局可以暂停、重开、退出与再来一局，且不留下旧对局资源。

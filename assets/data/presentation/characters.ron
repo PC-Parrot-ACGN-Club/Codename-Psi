@@ -1,0 +1,56 @@
+// Client-side character presentation. Never enters the frozen match spec or
+// the determinism checksum. Gameplay data for the same ids lives under
+// data/rules/. See docs/development/design/character-presentation.md.
+(
+    schema_version: 1,
+    characters: [
+        (
+            id: ("psi-a"),
+            primary_color: (r: 64, g: 208, b: 255),
+            secondary_color: (r: 16, g: 64, b: 96),
+            badge: (shape: Hexagon, stroke_width: 4, glyph: "A"),
+            poses: (
+                idle: (offset: 0, scale: 100, frame: Neutral),
+                attacking: (offset: 24, scale: 106, frame: Charged),
+                offsetting: (offset: 8, scale: 100, frame: Charged),
+                defending: (offset: -16, scale: 96, frame: Guard),
+                strained: (offset: -24, scale: 94, frame: Alert),
+                fever: (offset: 12, scale: 108, frame: Charged),
+                winning: (offset: 16, scale: 104, frame: Neutral),
+                losing: (offset: -28, scale: 92, frame: Alert),
+            ),
+            audio: (
+                round_start: "voice.psi_a.round_start",
+                clear: "voice.psi_a.clear",
+                chain: "voice.psi_a.chain",
+                fever_enter: "voice.psi_a.fever_enter",
+                win: "voice.psi_a.win",
+                lose: "voice.psi_a.lose",
+            ),
+        ),
+        (
+            id: ("psi-b"),
+            primary_color: (r: 255, g: 148, b: 64),
+            secondary_color: (r: 96, g: 40, b: 16),
+            badge: (shape: Triangle, stroke_width: 4, glyph: "B"),
+            poses: (
+                idle: (offset: 0, scale: 100, frame: Neutral),
+                attacking: (offset: 24, scale: 106, frame: Charged),
+                offsetting: (offset: 8, scale: 100, frame: Charged),
+                defending: (offset: -16, scale: 96, frame: Guard),
+                strained: (offset: -24, scale: 94, frame: Alert),
+                fever: (offset: 12, scale: 108, frame: Charged),
+                winning: (offset: 16, scale: 104, frame: Neutral),
+                losing: (offset: -28, scale: 92, frame: Alert),
+            ),
+            audio: (
+                round_start: "voice.psi_b.round_start",
+                clear: "voice.psi_b.clear",
+                chain: "voice.psi_b.chain",
+                fever_enter: "voice.psi_b.fever_enter",
+                win: "voice.psi_b.win",
+                lose: "voice.psi_b.lose",
+            ),
+        ),
+    ],
+)
