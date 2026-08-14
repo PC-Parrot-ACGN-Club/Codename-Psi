@@ -20,7 +20,7 @@ play/<profile_id>/*.ron     该剖面下的角色玩法数据与素材
 | 名称 | 含义 | 约束 |
 | --- | --- | --- |
 | `RuleProfileId` | 剖面的稳定标识 | 与 `rule_version`、内容摘要并列，三者互不合并 |
-| `RuleProfile` | 一套完整竞技规则的数值与语义 | 分为 `field`、`drop`、`rotation`、`resolve`、`scoring`、`offense`、`nuisance`、`fever` 八节；一个文件一个剖面，并携带 `reference_profile` |
+| `RuleProfile` | 一套完整竞技规则的数值与语义 | 分为 `field`、`round`、`drop`、`rotation`、`resolve`、`scoring`、`offense`、`nuisance`、`fever` 九节；一个文件一个剖面，并携带 `reference_profile` |
 | `CharacterIdentity` | 角色在规则核心中的身份 | ID 唯一 |
 | 角色玩法数据 | 某剖面下某角色引用的 `DropSet` 与 `ChainPowerProfile` | 按剖面分区；某剖面不使用的玩法概念在该分区内不存在 |
 | `DropSet` | 16 手循环掉落序列 | 每手形状与颜色布局有效；L/J 周期由 4 球单色手数的奇偶推导，不是独立字段 |

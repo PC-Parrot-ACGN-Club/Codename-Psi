@@ -45,7 +45,7 @@ PlayerBattleState
 ### 进入 Fever
 
 - 输入：安全点上的量表、玩家级 `fever_time_ticks`。
-- 处理：量表满时把 `active_channel` 切为 Fever 并重置量表，冻结普通通道，以 `fever_time_ticks` 起算会话并确定初始目标等级，再从对应等级的袋中取出题面装载到 Fever 盘。
+- 处理：量表满时把 `active_channel` 切为 Fever 并重置量表，冻结普通通道，以 `fever_time_ticks` 起算会话，按剖面声明的基准等级确定初始目标等级，再从对应等级的袋中取出题面装载到 Fever 盘。
 - 输出：`FeverEntered` 与已装载的 Fever 盘。
 - 错误语义：只在当前落子完整结算后的安全点检查量表。
 
