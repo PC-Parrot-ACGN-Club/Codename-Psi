@@ -466,8 +466,10 @@ fn a_fever_clock_reaching_zero_mid_chain_does_not_disturb_the_phase_sequence() {
         // Two ticks of Fever time, so the clock can be driven to zero on the
         // tick the caller asks for.
         let mut fever = FeverState::new(1, 2, 0, 600);
+        fever.begin_safety_point();
         fever.record_offset(true);
-        assert!(fever.enter_if_full());
+        assert!(fever.is_full());
+        fever.enter();
 
         let mut trace = Vec::new();
         let mut exit_marked_at = None;

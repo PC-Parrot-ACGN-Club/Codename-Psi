@@ -79,6 +79,10 @@ pub enum MatchEvent {
         /// What was sent to the opponent.
         sent: u32,
     },
+    /// A participant switched to the Fever channel.
+    FeverEntered(usize),
+    /// A participant returned to the normal channel.
+    FeverExited(usize),
     /// A nuisance batch landed.
     NuisanceDropped {
         /// Participant slot.
@@ -101,16 +105,21 @@ impl MatchEvent {
             Self::GroupLocked(_) => 0,
             Self::ChainSettled { .. } => 1,
             Self::AttackArbitrated { .. } => 2,
-            Self::NuisanceDropped { .. } => 3,
-            Self::PlayerDefeated(_) => 4,
-            Self::RoundEnded(_) => 5,
-            Self::MatchEnded(_) => 6,
+            Self::FeverEntered(_) => 3,
+            Self::FeverExited(_) => 4,
+            Self::NuisanceDropped { .. } => 5,
+            Self::PlayerDefeated(_) => 6,
+            Self::RoundEnded(_) => 7,
+            Self::MatchEnded(_) => 8,
         }
     }
 
     const fn slot(&self) -> usize {
         match self {
-            Self::GroupLocked(slot) | Self::PlayerDefeated(slot) => *slot,
+            Self::GroupLocked(slot)
+            | Self::PlayerDefeated(slot)
+            | Self::FeverEntered(slot)
+            | Self::FeverExited(slot) => *slot,
             Self::ChainSettled { slot, .. }
             | Self::AttackArbitrated { slot, .. }
             | Self::NuisanceDropped { slot, .. } => *slot,
@@ -415,26 +424,60 @@ impl MatchState {
             }
         }
 
-        // 3. Apply all-clear and Fever transition intents.
+        // The attacker whose chain was offset is the one rewarded time. Inside
+        // Fever the reward is held until the last link's preview tick.
+        for slot in 0..PARTICIPANT_SLOTS {
+            if offsets[slot].offset > 0 && attacks[slot] > 0 {
+                let reward = self.spec.fever.offset_reward_ticks;
+                let player = &mut self.round.players[slot];
+                if player.fever().active() {
+                    player.fever_mut().defer_reward(reward);
+                } else {
+                    player.fever_mut().reward_time(reward);
+                }
+            }
+        }
+
+        // 3. Apply all-clear and Fever transition intents. One priority table,
+        //    applied once, so no system ordering can change the result.
+        let mut exited = [false; PARTICIPANT_SLOTS];
         for (slot, settlement) in settlements.iter().enumerate() {
             let Some(settlement) = settlement else {
                 continue;
             };
-            // A qualifying offset is one an effective chain produced.
-            let qualifying = offsets[slot].offset > 0 && settlement.triggered_chain();
+            let all_clear = settlement.report.field.all_clear;
+            let achieved = settlement.report.links.len() as u8;
             let player = &mut self.round.players[slot];
-            player.fever_mut().record_offset(qualifying);
-            if settlement.report.field.all_clear {
+
+            player.fever_mut().begin_safety_point();
+            // A qualifying offset is one an effective chain produced.
+            player
+                .fever_mut()
+                .record_offset(offsets[slot].offset > 0 && settlement.triggered_chain());
+            if all_clear {
                 let reward = self.spec.fever.all_clear_reward_ticks;
                 player.fever_mut().reward_time(reward);
             }
-        }
-        // The attacker whose chain was offset is the one rewarded time.
-        for slot in 0..PARTICIPANT_SLOTS {
-            let opponent = (slot + 1) % PARTICIPANT_SLOTS;
-            if offsets[opponent].offset > 0 && attacks[opponent] > 0 {
-                let reward = self.spec.fever.offset_reward_ticks;
-                self.round.players[opponent].fever_mut().reward_time(reward);
+
+            let in_fever = player.fever().active();
+            if in_fever && player.fever().exit_pending() {
+                player.exit_fever(&self.spec);
+                exited[slot] = true;
+                events.push(MatchEvent::FeverExited(slot));
+            } else if in_fever {
+                player.advance_fever_puzzle(&self.spec, achieved, all_clear);
+            } else if player.fever().is_full() {
+                let bonus = if all_clear {
+                    self.spec.fever.level_ladder.on_all_clear
+                } else {
+                    0
+                };
+                if player.enter_fever(&self.spec, bonus) {
+                    events.push(MatchEvent::FeverEntered(slot));
+                }
+            } else if all_clear {
+                // A normal-board all clear immediately loads the preset puzzle.
+                player.load_all_clear_puzzle(&self.spec);
             }
         }
 
@@ -443,7 +486,10 @@ impl MatchState {
             let Some(settlement) = settlement else {
                 continue;
             };
-            let triggered = settlement.triggered_chain();
+            // Flipping back with nothing offset triggers one release right
+            // away, which still obeys the single-batch limit.
+            let force_release = exited[slot] && offsets[slot].offset == 0;
+            let triggered = settlement.triggered_chain() && !force_release;
             if let Some(landing) = self.round.players[slot].release(&self.spec, triggered) {
                 events.push(MatchEvent::NuisanceDropped {
                     slot,

@@ -10,7 +10,7 @@ use crate::{
     determinism::{MatchRng, StreamName},
     drop_stream::{DropStream, spawn_group},
     falling::FallingGroup,
-    fever::FeverState,
+    fever::{FeverSession, FeverState, PuzzleBags, load_puzzle, next_target_level, puzzle_by_id},
     input::PlayerActions,
     match_spec::LockedMatchSpec,
     nuisance::{NuisanceDropState, NuisanceLanding, release_nuisance},
@@ -59,8 +59,12 @@ pub struct PlayerBattleState {
     fraction: AttackFraction,
     margin: MarginState,
     fever: FeverState,
+    session: Option<FeverSession>,
+    bags: PuzzleBags,
     color_rng: MatchRng,
     nuisance_rng: MatchRng,
+    fever_rng: MatchRng,
+    chain_total_links: u8,
     pending_attack: u32,
     settlement: Option<PlayerSettlement>,
     defeated: bool,
@@ -99,8 +103,12 @@ impl PlayerBattleState {
                 spec.fever.min_time_ticks,
                 spec.fever.max_time_ticks,
             ),
+            session: None,
+            bags: PuzzleBags::new(),
             color_rng,
             nuisance_rng: stream_for(StreamName::Nuisance),
+            fever_rng: stream_for(StreamName::FeverPuzzle),
+            chain_total_links: 0,
             pending_attack: 0,
             settlement: None,
             defeated: false,
@@ -214,6 +222,103 @@ impl PlayerBattleState {
         &mut self.fever
     }
 
+    /// The open Fever session, if any.
+    #[must_use]
+    pub const fn session(&self) -> Option<&FeverSession> {
+        self.session.as_ref()
+    }
+
+    /// The per-level puzzle bags, which are rules state.
+    #[must_use]
+    pub const fn bags(&self) -> &PuzzleBags {
+        &self.bags
+    }
+
+    /// Switches to the Fever channel and loads the session's first puzzle.
+    ///
+    /// The normal channel is frozen rather than cleared: it keeps its board and
+    /// its queue, and only stops receiving drops.
+    pub fn enter_fever(&mut self, spec: &LockedMatchSpec, level_bonus: i8) -> bool {
+        let book = &spec.fever.puzzles;
+        // The session opens at the profile's baseline level; entering on an
+        // all clear starts the first puzzle that much higher.
+        let level = (i32::from(spec.fever.initial_level) + i32::from(level_bonus)).clamp(
+            i32::from(spec.fever.min_level),
+            i32::from(spec.fever.max_level),
+        ) as u8;
+
+        let bags = std::mem::take(&mut self.bags);
+        let Some(session) = FeverSession::open(book, level, bags, &mut self.fever_rng) else {
+            return false;
+        };
+        let Some(puzzle) = puzzle_by_id(book, session.current_puzzle_id()) else {
+            return false;
+        };
+        load_puzzle(&mut self.boards[FEVER_CHANNEL], puzzle);
+        self.session = Some(session);
+        self.fever.enter();
+        self.active_channel = FEVER_CHANNEL;
+        self.active = None;
+        self.split = None;
+        self.resolution = None;
+        true
+    }
+
+    /// Applies the level ladder and loads the next puzzle.
+    pub fn advance_fever_puzzle(&mut self, spec: &LockedMatchSpec, achieved: u8, all_clear: bool) {
+        let Some(session) = &mut self.session else {
+            return;
+        };
+        let next = next_target_level(
+            spec.fever.level_ladder,
+            session.target_level(),
+            achieved,
+            all_clear,
+            spec.fever.min_level,
+            spec.fever.max_level,
+        );
+        if session
+            .advance(&spec.fever.puzzles, next, &mut self.fever_rng)
+            .is_some()
+            && let Some(puzzle) = puzzle_by_id(&spec.fever.puzzles, session.current_puzzle_id())
+        {
+            let puzzle = puzzle.clone();
+            load_puzzle(&mut self.boards[FEVER_CHANNEL], &puzzle);
+        }
+    }
+
+    /// Leaves Fever, merging the frozen queue back into the normal channel.
+    ///
+    /// The Fever board, its session and its column order are all discarded;
+    /// only the exact queue count survives.
+    pub fn exit_fever(&mut self, spec: &LockedMatchSpec) {
+        let merged = self.pending[FEVER_CHANNEL];
+        self.pending[FEVER_CHANNEL] = 0;
+        crate::nuisance::enqueue(
+            &mut self.pending[NORMAL_CHANNEL],
+            merged,
+            spec.nuisance.queue_limit,
+        );
+        self.drop_state[FEVER_CHANNEL] = NuisanceDropState::default();
+        self.boards[FEVER_CHANNEL] = Board::with_geometry(spec.board_geometry);
+        if let Some(session) = self.session.take() {
+            self.bags = session.bags().clone();
+        }
+        self.fever.exit();
+        self.active_channel = NORMAL_CHANNEL;
+        self.active = None;
+        self.split = None;
+        self.resolution = None;
+    }
+
+    /// Loads the preset puzzle a normal-board all clear awards.
+    pub fn load_all_clear_puzzle(&mut self, spec: &LockedMatchSpec) {
+        if let Some(puzzle) = puzzle_by_id(&spec.fever.puzzles, &spec.fever.all_clear_puzzle_id) {
+            let puzzle = puzzle.clone();
+            load_puzzle(&mut self.boards[NORMAL_CHANNEL], &puzzle);
+        }
+    }
+
     /// Whether this player has lost the round.
     #[must_use]
     pub const fn is_defeated(&self) -> bool {
@@ -300,10 +405,16 @@ impl PlayerBattleState {
 
     fn begin_resolution(&mut self, spec: &LockedMatchSpec) {
         self.pending_attack = 0;
-        self.resolution = Some(ResolutionState::new(
+        let resolution = ResolutionState::new(
             self.boards[self.active_channel].clone(),
             spec.resolution.clone(),
-        ));
+        );
+        // The rules layer may compute the whole chain up front; only the
+        // committed phases are ever exposed. Knowing the length here is what
+        // lets a Fever reward land on the last link's preview tick.
+        let mut preview = resolution.clone();
+        self.chain_total_links = preview.settle().links.len() as u8;
+        self.resolution = Some(resolution);
     }
 
     /// Advances resolution, converting each link on the tick it commits.
@@ -322,6 +433,19 @@ impl PlayerBattleState {
         } else {
             BoardMode::Normal
         };
+        // Inside Fever a held reward is paid when the last link starts its
+        // clear animation, not at settlement.
+        if let ResolutionPhase::ClearPreview {
+            facts,
+            elapsed_ticks,
+            ..
+        } = resolution.phase()
+            && *elapsed_ticks == 1
+            && facts.chain_index == self.chain_total_links
+            && self.fever.active()
+        {
+            self.fever.release_deferred_reward();
+        }
         if let ResolutionPhase::ClearCommit { facts } = resolution.phase() {
             let link_score =
                 spec.scoring

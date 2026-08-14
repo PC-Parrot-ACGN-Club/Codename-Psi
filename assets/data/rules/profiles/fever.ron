@@ -78,6 +78,7 @@
         max_time_ticks: 1800,
         min_level: 3,
         max_level: 15,
+        initial_level: 6,
         // +1 s to the attacker whose chain was offset.
         offset_reward_ticks: 60,
         // +5 s for an all clear.

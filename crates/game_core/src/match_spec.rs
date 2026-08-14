@@ -155,6 +155,8 @@ pub struct FeverRules {
     pub min_level: u8,
     /// Highest selectable puzzle level.
     pub max_level: u8,
+    /// Target level the first puzzle of a session starts from.
+    pub initial_level: u8,
     /// Time granted to the attacker whose chain was offset.
     pub offset_reward_ticks: u32,
     /// Time granted by an all clear.
@@ -321,6 +323,7 @@ impl LockedMatchSpec {
                 max_time_ticks: profile.fever.max_time_ticks,
                 min_level: profile.fever.min_level,
                 max_level: profile.fever.max_level,
+                initial_level: profile.fever.initial_level,
                 offset_reward_ticks: profile.fever.offset_reward_ticks,
                 all_clear_reward_ticks: profile.fever.all_clear_reward_ticks,
                 all_clear_puzzle_id: profile.fever.all_clear_puzzle_id.clone(),

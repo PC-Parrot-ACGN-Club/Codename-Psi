@@ -312,6 +312,8 @@ pub struct FeverConfig {
     pub min_level: u8,
     /// Highest selectable puzzle level.
     pub max_level: u8,
+    /// Target level the first puzzle of a session starts from.
+    pub initial_level: u8,
     /// Time granted to the attacker whose chain was offset.
     pub offset_reward_ticks: u32,
     /// Time granted by an all clear.
@@ -857,6 +859,7 @@ impl Digestible for FeverConfig {
         writer.u32(self.max_time_ticks);
         writer.u8(self.min_level);
         writer.u8(self.max_level);
+        writer.u8(self.initial_level);
         writer.u32(self.offset_reward_ticks);
         writer.u32(self.all_clear_reward_ticks);
         writer.str(&self.all_clear_puzzle_id);
@@ -1147,6 +1150,12 @@ fn validate_profile_integrity(profile: &RuleProfile) -> Result<(), ConfigError> 
     }
     if fever.min_level == 0 {
         return Err(integrity("profile.fever.min_level", "must be at least 1"));
+    }
+    if fever.initial_level < fever.min_level || fever.initial_level > fever.max_level {
+        return Err(integrity(
+            "profile.fever.initial_level",
+            "must sit inside the declared level domain",
+        ));
     }
     if fever.all_clear_puzzle_id.is_empty() {
         return Err(integrity(
