@@ -62,15 +62,18 @@ impl ScoringRules {
         mode: BoardMode,
     ) -> u64 {
         let color = self.lookup(&self.color_bonus, link.color_count);
-        let groups: u16 = link
+        // Accumulate in the wider type: a link can clear many groups, and
+        // profile validation only bounds the sum in `u32`, not in `u16`.
+        let groups: u32 = link
             .group_sizes
             .iter()
-            .map(|size| self.lookup(&self.group_bonus, *size))
+            .map(|size| u32::from(self.lookup(&self.group_bonus, *size)))
             .sum();
-        let multiplier = (u32::from(powers.power(mode, link.chain_index))
-            + u32::from(color)
-            + u32::from(groups))
-        .clamp(1, 999);
+        let multiplier =
+            (u32::from(powers.power(mode, link.chain_index)) + u32::from(color) + groups).clamp(
+                u32::from(crate::rules::CHAIN_POWER_MIN),
+                u32::from(crate::rules::CHAIN_POWER_MAX),
+            );
         10 * u64::from(link.cleared_colored) * u64::from(multiplier)
     }
 

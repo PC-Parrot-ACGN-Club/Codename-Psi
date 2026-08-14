@@ -3,6 +3,15 @@
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
+/// Version of the random stream derivation.
+///
+/// Upgrading the derivation must bump this: two runs are only comparable when
+/// their streams were derived the same way.
+pub const RNG_ALGORITHM_VERSION: u32 = 1;
+
+/// Version of the canonical state encoding behind [`StateChecksum`].
+pub const STATE_CODEC_VERSION: u32 = 1;
+
 /// Stable names for independent match random streams.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamName {
@@ -14,7 +23,7 @@ pub enum StreamName {
 impl StreamName {
     const fn tag(self) -> u64 {
         match self {
-            Self::Color => 0x636f_6c6f_72,
+            Self::Color => 0x0000_0063_6f6c_6f72,
             Self::Nuisance => 0x6e75_6973_616e_6365,
             Self::FeverPuzzle => 0x6665_7665_722d_7075,
         }

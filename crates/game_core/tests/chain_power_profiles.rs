@@ -46,6 +46,51 @@ fn the_cross_check_tiers_regenerate_point_by_point_including_the_saturated_tail(
 
 // component/rule-configuration::TC-013
 #[test]
+fn the_shipped_content_regenerates_from_its_own_stored_parameters() {
+    // The design keeps the integer table authoritative and the parameters as
+    // provenance. This is the offline check that the two agree, run against
+    // the shipped files rather than a transcribed copy of them.
+    for (name, source) in [("A", common::PLAY_A_SRC), ("B", common::PLAY_B_SRC)] {
+        let play = game_core::config::parse_character_play(source).expect("shipped play parses");
+        let stored = play
+            .chain_power_profile()
+            .expect("shipped curves are in domain");
+        let parameters = play.chain_power.source.parameters();
+        assert_eq!(
+            verify_chain_power_profile(&stored, parameters),
+            Ok(()),
+            "character {name} tables must regenerate from their stored parameters"
+        );
+    }
+}
+
+// component/rule-configuration::TC-013
+#[test]
+fn the_shipped_margin_table_regenerates_from_its_own_stored_parameters() {
+    let profile =
+        game_core::config::parse_rule_profile(common::PROFILE_SRC).expect("shipped profile parses");
+    let margin = &profile.scoring.margin;
+    let parameters = game_core::rules::MarginParameters {
+        initial_target_points: profile.scoring.target_points,
+        ratio_numerator: margin.source.ratio_numerator,
+        ratio_denominator: margin.source.ratio_denominator,
+        max_steps: margin.source.max_steps,
+    };
+    assert_eq!(
+        game_core::rules::verify_margin_table(&margin.target_points_by_step, parameters),
+        Ok(())
+    );
+    assert_eq!(margin.target_points_by_step[0], 120);
+    assert_eq!(margin.target_points_by_step[1], 90);
+    assert_eq!(
+        *margin.target_points_by_step.last().unwrap(),
+        1,
+        "decay stops once one point buys a nuisance ball"
+    );
+}
+
+// component/rule-configuration::TC-013
+#[test]
 fn both_characters_regenerate_their_published_tables_point_by_point() {
     for (name, parameters, normal, fever) in [
         ("A", CHARACTER_A, A_NORMAL, A_FEVER),

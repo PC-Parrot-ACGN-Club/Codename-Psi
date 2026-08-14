@@ -115,3 +115,65 @@ fn the_plugin_owns_the_path_so_consumers_never_name_it() {
         "fever-r1"
     );
 }
+
+/// Blocking scope: a profile failure stops every match, one character's
+/// unusable gameplay data only removes that character.
+///
+/// Exercised through `build_library` rather than the asset server, so the
+/// scope rule is tested independently of read timing.
+// integration-system/runtime-data::TC-001
+#[test]
+fn a_blocking_failure_stops_the_match_while_a_character_failure_only_narrows_selection() {
+    const PROFILE: &str = include_str!("../../../assets/data/rules/profiles/fever.ron");
+    const ROSTER: &str = include_str!("../../../assets/data/rules/roster.ron");
+    const BOOK: &str = include_str!("../../../assets/data/rules/puzzles/fever-r1.ron");
+    const PLAY_A: &str = include_str!("../../../assets/data/rules/play/fever-r1/psi-a.ron");
+    const PLAY_B: &str = include_str!("../../../assets/data/rules/play/fever-r1/psi-b.ron");
+
+    let paths = client::data::rules_paths();
+
+    // One unusable character file: the library still resolves, and the other
+    // character stays selectable.
+    let mut excluded = Vec::new();
+    let library = client::data::build_library(
+        &[
+            Ok(PROFILE),
+            Ok(ROSTER),
+            Ok(BOOK),
+            Ok(PLAY_A),
+            Err(DataErrorCause::Parse("truncated".into())),
+        ],
+        &paths,
+        &mut excluded,
+    )
+    .expect("one bad character must not block the profile");
+    assert_eq!(excluded.len(), 1, "the failure is recorded, not swallowed");
+    assert!(excluded[0].path.ends_with("psi-b.ron"));
+    assert_eq!(excluded[0].category, DataCategory::Rules);
+    assert!(
+        library
+            .character_play(
+                &RuleProfileId("fever-r1".into()),
+                &game_core::config::CharacterId("psi-a".into()),
+            )
+            .is_some(),
+        "the healthy character is still playable"
+    );
+
+    // An unusable profile blocks everything, whatever the character files say.
+    let mut excluded = Vec::new();
+    let error = client::data::build_library(
+        &[
+            Err(DataErrorCause::Io("missing".into())),
+            Ok(ROSTER),
+            Ok(BOOK),
+            Ok(PLAY_A),
+            Ok(PLAY_B),
+        ],
+        &paths,
+        &mut excluded,
+    )
+    .expect_err("a missing profile leaves no authority to play under");
+    assert!(error.path.ends_with("fever.ron"));
+    assert!(matches!(error.cause, DataErrorCause::Io(_)));
+}

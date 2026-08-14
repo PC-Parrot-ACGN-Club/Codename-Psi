@@ -14,7 +14,8 @@ use bevy::asset::io::Reader;
 use bevy::asset::{Asset, AssetLoader, LoadContext, LoadState};
 use bevy::prelude::*;
 use game_core::config::{
-    ConfigError, ValidatedRuleLibrary, parse_character_play, parse_rule_profile,
+    ConfigError, ValidatedRuleLibrary, parse_character_play, parse_fever_puzzle_book, parse_roster,
+    parse_rule_profile,
 };
 
 use crate::i18n::CatalogError;
@@ -47,6 +48,11 @@ impl From<ConfigError> for DataErrorCause {
                 Self::UnsupportedSchema { found, supported }
             }
             ConfigError::InvalidData(reason) => Self::InvalidData(reason),
+            // A violated semantic constraint is invalid data with a located
+            // cause; the field path and layer stay in the message.
+            validation @ ConfigError::Validation { .. } => {
+                Self::InvalidData(validation.to_string())
+            }
         }
     }
 }
@@ -134,15 +140,32 @@ impl AssetLoader for SourceTextLoader {
     }
 }
 
-/// Where the rules document lives under `assets/`.
+/// Where the rule profile lives under `assets/`.
 ///
-/// The path belongs here rather than to any consumer: `client::data` owns the
+/// The paths belong here rather than to any consumer: `client::data` owns the
 /// asset root and the load lifecycle, and consumers only read the resolution.
-pub const RULES_PATHS: [&str; 3] = [
-    "data/rules/profiles/fever.ron",
+pub const RULES_PROFILE_PATH: &str = "data/rules/profiles/fever.ron";
+/// Where the character roster lives under `assets/`.
+pub const RULES_ROSTER_PATH: &str = "data/rules/roster.ron";
+/// Where the Fever puzzle book lives under `assets/`.
+pub const RULES_PUZZLE_BOOK_PATH: &str = "data/rules/puzzles/fever-r1.ron";
+/// Where each character's gameplay data lives under `assets/`.
+pub const RULES_PLAY_PATHS: [&str; 2] = [
     "data/rules/play/fever-r1/psi-a.ron",
     "data/rules/play/fever-r1/psi-b.ron",
 ];
+
+/// Every rules path, profile first, then roster, puzzle book and plays.
+#[must_use]
+pub fn rules_paths() -> Vec<&'static str> {
+    let mut paths = vec![
+        RULES_PROFILE_PATH,
+        RULES_ROSTER_PATH,
+        RULES_PUZZLE_BOOK_PATH,
+    ];
+    paths.extend(RULES_PLAY_PATHS);
+    paths
+}
 
 /// How long a data read may hang before it is treated as failed.
 pub const DATA_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
@@ -159,27 +182,43 @@ pub struct RulesLoad {
 /// Present only once the load settles. A failed rules resolution deliberately
 /// has no substitute: the client must not start a match without authority.
 #[derive(Debug, Resource)]
-pub struct RulesData(pub DataResolution<ValidatedRuleLibrary>);
+pub struct RulesData {
+    /// The library, or the failure that blocks every match.
+    pub resolution: DataResolution<ValidatedRuleLibrary>,
+    /// Per-character failures that only narrow character selection.
+    ///
+    /// The blocking scope follows the same criterion as the level itself: a
+    /// missing profile makes Match unreachable, while one character's
+    /// unusable gameplay data only makes that character unselectable.
+    pub excluded_characters: Vec<DataLoadError>,
+}
 
 impl RulesData {
+    /// The validated library, when the blocking-scope data all loaded.
     #[must_use]
     pub fn rules(&self) -> Option<&ValidatedRuleLibrary> {
-        self.0.loaded()
+        self.resolution.loaded()
     }
 
     /// The read or parse failure, if this is one.
     #[must_use]
     pub fn error(&self) -> Option<&DataLoadError> {
-        self.0.error()
+        self.resolution.error()
+    }
+
+    /// Whether a match may be started from this resolution.
+    #[must_use]
+    pub const fn is_playable(&self) -> bool {
+        matches!(self.resolution, DataResolution::Loaded(_))
     }
 }
 
-/// Ask Bevy Asset for the rules document.
+/// Ask Bevy Asset for the rules documents.
 pub fn start_rules_load(asset_server: Res<AssetServer>, mut commands: Commands) {
     commands.insert_resource(RulesLoad {
-        handles: RULES_PATHS
-            .iter()
-            .map(|path| asset_server.load::<SourceText>(*path))
+        handles: rules_paths()
+            .into_iter()
+            .map(|path| asset_server.load::<SourceText>(path))
             .collect(),
         waited: Duration::ZERO,
     });
@@ -213,49 +252,83 @@ pub fn poll_rules(
             _ => return None,
         })
     };
-    let mut source_texts = Vec::with_capacity(RULES_PATHS.len());
-    for index in 0..RULES_PATHS.len() {
+    let paths = rules_paths();
+    let mut source_texts = Vec::with_capacity(paths.len());
+    for index in 0..paths.len() {
         let Some(source) = source_for(index) else {
             return;
         };
         source_texts.push(source);
     }
-    let resolution = (|| {
-        let profile = source_texts[0]
-            .as_ref()
-            .map_err(|cause| (0, cause.clone()))
-            .and_then(|text| {
-                parse_rule_profile(text)
-                    .map_err(DataErrorCause::from)
-                    .map_err(|cause| (0, cause))
-            })?;
-        let plays = source_texts[1..]
-            .iter()
-            .enumerate()
-            .map(|(index, source)| {
-                source
-                    .as_ref()
-                    .map_err(|cause| (index + 1, cause.clone()))
-                    .and_then(|text| {
-                        parse_character_play(text)
-                            .map_err(DataErrorCause::from)
-                            .map_err(|cause| (index + 1, cause))
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        ValidatedRuleLibrary::new(vec![profile], plays)
-            .map_err(DataErrorCause::from)
-            .map_err(|cause| (0, cause))
-    })();
-    commands.insert_resource(RulesData(match resolution {
+
+    // Blocking scope: the profile, roster and puzzle book gate every match, so
+    // a failure in any of them fails the whole resolution. A character's
+    // gameplay data only gates that character.
+    let mut excluded_characters = Vec::new();
+    let resolution = match build_library(&source_texts, &paths, &mut excluded_characters) {
         Ok(library) => DataResolution::Loaded(library),
-        Err((index, cause)) => DataResolution::Failed(DataLoadError {
-            path: RULES_PATHS[index].into(),
+        Err(error) => DataResolution::Failed(error),
+    };
+
+    for excluded in &excluded_characters {
+        warn!("excluded unusable character data at {:?}", excluded.path);
+    }
+    commands.insert_resource(RulesData {
+        resolution,
+        excluded_characters,
+    });
+    commands.remove_resource::<RulesLoad>();
+}
+
+/// Parses one blocking-scope document, attaching its resource context.
+fn parse_blocking<T>(
+    source: Result<&str, DataErrorCause>,
+    path: &str,
+    parse: impl FnOnce(&str) -> Result<T, ConfigError>,
+) -> Result<T, DataLoadError> {
+    source
+        .and_then(|text| parse(text).map_err(DataErrorCause::from))
+        .map_err(|cause| DataLoadError {
+            path: path.into(),
             category: DataCategory::Rules,
             cause,
-        }),
-    }));
-    commands.remove_resource::<RulesLoad>();
+        })
+}
+
+/// Builds the validated library from already-read sources.
+///
+/// Split out of the polling system so the blocking-versus-narrowing scope is
+/// testable without an asset server.
+pub fn build_library(
+    sources: &[Result<&str, DataErrorCause>],
+    paths: &[&str],
+    excluded_characters: &mut Vec<DataLoadError>,
+) -> Result<ValidatedRuleLibrary, DataLoadError> {
+    let profile = parse_blocking(sources[0].clone(), paths[0], parse_rule_profile)?;
+    let roster = parse_blocking(sources[1].clone(), paths[1], parse_roster)?;
+    let book = parse_blocking(sources[2].clone(), paths[2], parse_fever_puzzle_book)?;
+
+    let mut plays = Vec::new();
+    for (offset, source) in sources[3..].iter().enumerate() {
+        match parse_blocking(source.clone(), paths[3 + offset], parse_character_play) {
+            Ok(play) => plays.push(play),
+            Err(error) => excluded_characters.push(error),
+        }
+    }
+
+    let (library, report) = ValidatedRuleLibrary::partial(vec![profile], roster, plays, vec![book])
+        .map_err(|error| DataLoadError {
+            path: paths[0].into(),
+            category: DataCategory::Rules,
+            cause: error.into(),
+        })?;
+    for unavailable in report.unavailable_characters {
+        warn!(
+            "character {} is not selectable: {}",
+            unavailable.character.0, unavailable.reason
+        );
+    }
+    Ok(library)
 }
 
 /// Registers the project's asset reading path and data load lifecycle.

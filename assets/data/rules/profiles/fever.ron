@@ -1,3 +1,6 @@
+// Rule profile: how one set of competitive rules computes.
+// Reference profile: Puyo Puyo Fever 1/2, console/PC. Every duration is in
+// ticks at the fixed 60 Hz rules rate; seconds appear only in comments.
 (
     schema_version: 1,
     id: ("fever-r1"),
@@ -10,18 +13,76 @@
         spawn_column: 2,
         color_count: 4,
     ),
+    // Frame data transcribed from the Puyo Puyo Tsu reverse-engineering
+    // tables; see docs/development/decision/timing-parameter-source.md.
+    drop: (
+        next_queue_len: 2,
+        natural_fall_ticks: 16,
+        soft_drop_ticks: 2,
+        horizontal_repeat_delay_ticks: 8,
+        horizontal_repeat_interval_ticks: 2,
+        horizontal_cooldown_ticks: 1,
+        lock_delay_ticks: 32,
+        lift_limit: 8,
+        split_delay_pivot_ticks: 1,
+        split_delay_follower_ticks: 2,
+    ),
+    rotation: (
+        cooldown_ticks: 1,
+        double_rotation_period: 2,
+    ),
     resolve: (
         clear_threshold: 4,
         clear_preview_ticks: 12,
+        // Indexed by fall distance in cells; shared with post-lock free fall.
         gravity_ticks_by_distance: [0, 10, 15, 19, 22, 25, 28, 31, 33, 35, 37, 39, 41, 43],
     ),
-    nuisance: (queue_limit: 100000, drop_limit: 30),
+    scoring: (
+        // Indexed by the link's distinct color count.
+        color_bonus: [0, 0, 2, 4, 8, 16],
+        // Indexed by group size; sizes past the tail share the tail value.
+        group_bonus: [0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 8],
+        target_points: 120,
+        margin: (
+            // 96 s before the first decay, then one step every 16 s.
+            start_ticks: 5760,
+            step_ticks: 960,
+            // Authoritative table; `source` is provenance, not authority.
+            target_points_by_step: [120, 90, 67, 50, 37, 27, 20, 15, 11, 8, 6, 4, 3, 2, 1],
+            source: (
+                ratio_numerator: 3,
+                ratio_denominator: 4,
+                max_steps: 14,
+            ),
+        ),
+    ),
+    offense: (
+        soft_drop_points_per_cell: 1,
+        // Fever 1/2 does not carry drop bonus into the nuisance conversion.
+        soft_drop_counts_toward_attack: false,
+    ),
+    nuisance: (
+        queue_limit: 100000,
+        drop_limit: 30,
+    ),
     fever: (
         gauge_capacity: 7,
+        // 15 s at round start, clamped to 0..30 s.
         initial_time_ticks: 900,
         min_time_ticks: 0,
         max_time_ticks: 1800,
         min_level: 3,
         max_level: 15,
+        // +1 s to the attacker whose chain was offset.
+        offset_reward_ticks: 60,
+        // +5 s for an all clear.
+        all_clear_reward_ticks: 300,
+        all_clear_puzzle_id: "ac-4chain",
+        level_ladder: (
+            on_target: 1,
+            on_all_clear: 2,
+            miss_by_two: -1,
+            miss_by_more: -2,
+        ),
     ),
 )

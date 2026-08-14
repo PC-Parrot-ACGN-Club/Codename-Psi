@@ -10,6 +10,7 @@
 pub mod board;
 pub mod config;
 pub mod determinism;
+pub mod digest;
 pub mod falling;
 pub mod fever;
 pub mod input;

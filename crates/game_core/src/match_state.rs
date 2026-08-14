@@ -2,6 +2,7 @@
 
 use crate::{
     board::Board,
+    config::{ColorDraw, ColorSlot},
     determinism::{MatchRng, StreamName},
     falling::{FallingGroup, GroupBall},
     fever::FeverState,
@@ -48,7 +49,7 @@ pub struct MatchState {
     phase: MatchPhase,
     boards: [Board; PARTICIPANT_SLOTS],
     color_rng: [MatchRng; PARTICIPANT_SLOTS],
-    drop_cursor: [usize; PARTICIPANT_SLOTS],
+    drop_cursor: [u64; PARTICIPANT_SLOTS],
     active: [Option<FallingGroup>; PARTICIPANT_SLOTS],
     resolution: [Option<ResolutionState>; PARTICIPANT_SLOTS],
     fever: [FeverState; PARTICIPANT_SLOTS],
@@ -63,10 +64,10 @@ impl MatchState {
             MatchRng::derive(spec.root_seed, 0, 0, slot as u8, StreamName::Color)
         });
         let fever = [FeverState::new(
-            spec.fever_capacity,
-            spec.fever_initial_time_ticks,
-            spec.fever_min_time_ticks,
-            spec.fever_max_time_ticks,
+            spec.fever.gauge_capacity,
+            spec.fever.initial_time_ticks,
+            spec.fever.min_time_ticks,
+            spec.fever.max_time_ticks,
         ); PARTICIPANT_SLOTS];
         let mut state = Self {
             spec,
@@ -149,21 +150,20 @@ impl MatchState {
                 }
                 continue;
             }
-            if let Some(group) = &mut self.active[slot] {
-                if group
+            if let Some(group) = &mut self.active[slot]
+                && group
                     .apply_actions(
                         &mut self.boards[slot],
                         inputs.player(slot).unwrap_or_default(),
                     )
                     .map_err(|_| MatchStepError::InvalidGroup)?
                     .is_some()
-                {
-                    self.active[slot] = None;
-                    self.resolution[slot] = Some(ResolutionState::new(
-                        self.boards[slot].clone(),
-                        self.spec.resolution.clone(),
-                    ));
-                }
+            {
+                self.active[slot] = None;
+                self.resolution[slot] = Some(ResolutionState::new(
+                    self.boards[slot].clone(),
+                    self.spec.resolution.clone(),
+                ));
             }
         }
         Ok(MatchStepReport {
@@ -173,7 +173,7 @@ impl MatchState {
     }
 
     fn spawn_next(&mut self, slot: usize) {
-        let template = &self.spec.drop_sets[slot].0[self.drop_cursor[slot] % 16];
+        let hand = self.spec.drop_sets[slot].hand(self.drop_cursor[slot]);
         self.drop_cursor[slot] += 1;
         let pivot = self.boards[slot].coord(
             self.spec.board_geometry.spawn_column(),
@@ -183,17 +183,43 @@ impl MatchState {
             self.active[slot] = None;
             return;
         };
-        let balls = template
-            .balls
-            .iter()
+        let (first, second) = self.draw_hand_colors(slot, hand.color_draw());
+        let balls = hand
+            .balls()
+            .into_iter()
             .map(|ball| GroupBall {
                 dx: ball.dx,
                 dy: ball.dy,
-                color: (self.color_rng[slot].next_u32() % u32::from(self.spec.color_count)) as u8,
+                color: match ball.color_slot {
+                    ColorSlot::First => first,
+                    ColorSlot::Second => second,
+                },
             })
             .collect();
         let group = FallingGroup::new(pivot, balls, self.drop_cursor[slot] as u32).ok();
         self.active[slot] = group.filter(|candidate| candidate.can_place(&self.boards[slot]));
+    }
+
+    /// Draws a hand's colors from the participant's color stream.
+    ///
+    /// A dual-color `O` needs two different colors, so its second draw picks
+    /// from the remaining colors rather than rejecting and retrying: a retry
+    /// loop would consume a data-dependent number of random values and make
+    /// the stream position depend on the draws themselves.
+    fn draw_hand_colors(&mut self, slot: usize, draw: ColorDraw) -> (u8, u8) {
+        let colors = u32::from(self.spec.color_count);
+        let first = (self.color_rng[slot].next_u32() % colors) as u8;
+        match draw {
+            ColorDraw::Single => (first, first),
+            ColorDraw::Independent => {
+                let second = (self.color_rng[slot].next_u32() % colors) as u8;
+                (first, second)
+            }
+            ColorDraw::Distinct => {
+                let offset = 1 + self.color_rng[slot].next_u32() % (colors - 1);
+                (first, ((u32::from(first) + offset) % colors) as u8)
+            }
+        }
     }
 
     /// Rebuilds round-local random state after an exactly simultaneous defeat.

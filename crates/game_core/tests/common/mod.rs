@@ -8,7 +8,71 @@
 // part of it, so unused items here are expected rather than dead code.
 #![allow(dead_code)]
 
-use game_core::rules::ChainPowerParameters;
+use game_core::{
+    config::{
+        CharacterId, RuleProfileId, ValidatedRuleLibrary, parse_character_play,
+        parse_fever_puzzle_book, parse_roster, parse_rule_profile,
+    },
+    match_spec::{LockedMatchSpec, MatchRequest},
+    rules::ChainPowerParameters,
+};
+
+/// The repository's rule profile, roster, puzzle book and gameplay data.
+///
+/// Tests read the shipped content so a fixture cannot drift away from what the
+/// client actually loads.
+pub const PROFILE_SRC: &str = include_str!("../../../../assets/data/rules/profiles/fever.ron");
+/// Repository character roster.
+pub const ROSTER_SRC: &str = include_str!("../../../../assets/data/rules/roster.ron");
+/// Repository Fever puzzle book.
+pub const PUZZLE_BOOK_SRC: &str =
+    include_str!("../../../../assets/data/rules/puzzles/fever-r1.ron");
+/// Repository gameplay data for character A.
+pub const PLAY_A_SRC: &str = include_str!("../../../../assets/data/rules/play/fever-r1/psi-a.ron");
+/// Repository gameplay data for character B.
+pub const PLAY_B_SRC: &str = include_str!("../../../../assets/data/rules/play/fever-r1/psi-b.ron");
+
+/// Character A's roster id.
+pub const CHARACTER_A_ID: &str = "psi-a";
+/// Character B's roster id.
+pub const CHARACTER_B_ID: &str = "psi-b";
+/// The repository profile's id.
+pub const PROFILE_ID: &str = "fever-r1";
+
+/// Builds the validated library from the repository's shipped content.
+pub fn repository_library() -> ValidatedRuleLibrary {
+    library_from(&[PLAY_A_SRC, PLAY_B_SRC])
+}
+
+/// Builds a validated library from the repository profile plus the given plays.
+pub fn library_from(plays: &[&str]) -> ValidatedRuleLibrary {
+    ValidatedRuleLibrary::new(
+        vec![parse_rule_profile(PROFILE_SRC).expect("repository profile parses")],
+        parse_roster(ROSTER_SRC).expect("repository roster parses"),
+        plays
+            .iter()
+            .map(|source| parse_character_play(source).expect("repository play parses"))
+            .collect(),
+        vec![parse_fever_puzzle_book(PUZZLE_BOOK_SRC).expect("repository puzzle book parses")],
+    )
+    .expect("repository content validates")
+}
+
+/// Freezes a two-player match from the repository content.
+pub fn repository_spec(root_seed: u64) -> LockedMatchSpec {
+    LockedMatchSpec::freeze(
+        MatchRequest {
+            rule_profile_id: RuleProfileId(PROFILE_ID.into()),
+            root_seed,
+            characters: [
+                CharacterId(CHARACTER_A_ID.into()),
+                CharacterId(CHARACTER_B_ID.into()),
+            ],
+        },
+        &repository_library(),
+    )
+    .expect("repository selection freezes")
+}
 
 /// `docs/development/design/chain-power-curve.md`, character A.
 pub const CHARACTER_A: ChainPowerParameters = ChainPowerParameters {

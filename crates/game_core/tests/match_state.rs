@@ -1,58 +1,21 @@
+mod common;
+
 use game_core::{
     MatchState,
-    config::{CharacterId, CharacterPlay, DropSet, ValidatedRuleLibrary, parse_rule_profile},
     input::{GameAction, PlayerActions, TickInputs},
-    match_spec::{LockedMatchSpec, MatchRequest},
     match_state::{MatchPhase, MatchStepError},
 };
 
-const PROFILE: &str = include_str!("../../../assets/data/rules/profiles/fever.ron");
-
 fn state() -> MatchState {
-    let profile = parse_rule_profile(PROFILE).expect("profile parses");
-    let a = CharacterId("a".into());
-    let b = CharacterId("b".into());
-    let powers = |value| vec![value; 24];
-    let library = ValidatedRuleLibrary::new(
-        vec![profile.clone()],
-        vec![
-            CharacterPlay {
-                schema_version: 1,
-                profile_id: profile.id.clone(),
-                character_id: a.clone(),
-                drop_set: DropSet::default(),
-                normal_chain_power: powers(1),
-                fever_chain_power: powers(1),
-            },
-            CharacterPlay {
-                schema_version: 1,
-                profile_id: profile.id.clone(),
-                character_id: b.clone(),
-                drop_set: DropSet::default(),
-                normal_chain_power: powers(1),
-                fever_chain_power: powers(1),
-            },
-        ],
-    )
-    .expect("library validates");
-    let spec = LockedMatchSpec::freeze(
-        MatchRequest {
-            rule_profile_id: profile.id,
-            root_seed: 9,
-            characters: [a, b],
-        },
-        &library,
-    )
-    .expect("spec freezes");
-    MatchState::new(spec)
+    MatchState::new(common::repository_spec(9))
 }
 
 #[test]
 fn a_locked_group_waits_for_settlement_before_the_next_group_spawns() {
     let mut match_state = state();
-    let idle = TickInputs::new(&[PlayerActions::EMPTY, PlayerActions::EMPTY]).unwrap();
+    let idle = TickInputs::new([PlayerActions::EMPTY, PlayerActions::EMPTY]).unwrap();
     match_state.step(&idle).unwrap();
-    let hard_drop = TickInputs::new(&[
+    let hard_drop = TickInputs::new([
         PlayerActions::from(GameAction::HardDrop),
         PlayerActions::EMPTY,
     ])
@@ -89,7 +52,7 @@ fn one_tick_requires_exactly_two_slots_and_then_enters_playing() {
     );
 
     let inputs =
-        TickInputs::new(&[PlayerActions::EMPTY, PlayerActions::EMPTY]).expect("two inputs fit");
+        TickInputs::new([PlayerActions::EMPTY, PlayerActions::EMPTY]).expect("two inputs fit");
     let report = match_state
         .step(&inputs)
         .expect("two slots advance the match");

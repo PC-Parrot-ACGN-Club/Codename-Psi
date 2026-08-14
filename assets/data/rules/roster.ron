@@ -1,0 +1,8 @@
+// Character identities. Gameplay data lives per profile under play/.
+(
+    schema_version: 1,
+    characters: [
+        (id: ("psi-a"), display_name_key: "character.psi_a.name"),
+        (id: ("psi-b"), display_name_key: "character.psi_b.name"),
+    ],
+)

@@ -3,6 +3,12 @@
 /// Number of samples in a chain-power table.
 pub const CHAIN_POWER_TABLE_LEN: usize = 24;
 
+/// Largest value a chain-power sample may take.
+pub const CHAIN_POWER_MAX: u16 = 999;
+
+/// Smallest value a chain-power sample may take.
+pub const CHAIN_POWER_MIN: u16 = 1;
+
 /// A frozen chain-power curve.  The table, rather than its generation
 /// parameters, is the runtime authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,5 +198,85 @@ pub struct ChainPowerMismatch {
 }
 
 fn sample(value: f64) -> u16 {
-    value.round().clamp(1.0, 999.0) as u16
+    value
+        .round()
+        .clamp(f64::from(CHAIN_POWER_MIN), f64::from(CHAIN_POWER_MAX)) as u16
+}
+
+/// Source parameters for the margin target-score table.
+///
+/// Like the chain-power curves, the generated integer table is the runtime
+/// authority and these values are provenance. The generation is integer-only,
+/// so it can also run inside the release binary without introducing floats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarginParameters {
+    /// Target score before any decay.
+    pub initial_target_points: u64,
+    /// Numerator of the per-step ratio.
+    pub ratio_numerator: u64,
+    /// Denominator of the per-step ratio.
+    pub ratio_denominator: u64,
+    /// Largest number of decay steps.
+    pub max_steps: u8,
+}
+
+/// Generates the margin target-score table.
+///
+/// Index zero is the undecayed target. Decay stops early once the target
+/// reaches one, so the table can be shorter than `max_steps + 1`.
+#[must_use]
+pub fn generate_margin_table(parameters: MarginParameters) -> Vec<u64> {
+    let mut table = vec![parameters.initial_target_points];
+    for _ in 0..parameters.max_steps {
+        let previous = *table.last().expect("table always holds the initial value");
+        if previous <= 1 {
+            break;
+        }
+        let next = (previous * parameters.ratio_numerator / parameters.ratio_denominator).max(1);
+        table.push(next);
+    }
+    table
+}
+
+/// Reports the first stored margin sample that its parameters do not reproduce.
+pub fn verify_margin_table(
+    stored: &[u64],
+    parameters: MarginParameters,
+) -> Result<(), MarginMismatch> {
+    let generated = generate_margin_table(parameters);
+    if generated.len() != stored.len() {
+        return Err(MarginMismatch {
+            index: stored.len().min(generated.len()),
+            expected: generated.len() as u64,
+            actual: stored.len() as u64,
+            length_mismatch: true,
+        });
+    }
+    for (index, (expected, actual)) in generated.iter().zip(stored).enumerate() {
+        if expected != actual {
+            return Err(MarginMismatch {
+                index,
+                expected: *expected,
+                actual: *actual,
+                length_mismatch: false,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// A margin table sample differs from its generated source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "margin table sample {index}: expected {expected}, found {actual} (length mismatch: {length_mismatch})"
+)]
+pub struct MarginMismatch {
+    /// Zero-based table position.
+    pub index: usize,
+    /// Value regenerated from the parameters.
+    pub expected: u64,
+    /// Value stored in content, or the stored length on a length mismatch.
+    pub actual: u64,
+    /// Whether the tables differ in length rather than in a sample.
+    pub length_mismatch: bool,
 }
