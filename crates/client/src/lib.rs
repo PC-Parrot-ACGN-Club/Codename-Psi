@@ -8,10 +8,13 @@ use bevy::state::app::StatesPlugin;
 pub mod ai;
 pub mod app_state;
 pub mod bootstrap;
+pub mod character_presentation;
 pub mod data;
 pub mod i18n;
 pub mod input;
 pub mod match_flow;
+pub mod page;
+pub mod presentation;
 pub mod settings;
 pub mod simulation;
 

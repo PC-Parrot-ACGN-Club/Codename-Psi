@@ -21,7 +21,7 @@
     // Frame data transcribed from the Puyo Puyo Tsu reverse-engineering
     // tables; see docs/development/decision/timing-parameter-source.md.
     drop: (
-        next_queue_len: 2,
+        next_queue_len: 3,
         natural_fall_ticks: 16,
         soft_drop_ticks: 2,
         horizontal_repeat_delay_ticks: 8,

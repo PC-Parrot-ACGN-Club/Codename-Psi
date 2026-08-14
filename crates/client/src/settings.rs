@@ -32,6 +32,14 @@ pub enum WindowModeSetting {
     Fullscreen,
 }
 
+/// Amount of disposable visual motion. Rule timing is identical in both modes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnimationIntensity {
+    Reduced,
+    #[default]
+    Full,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerInputBindings {
     pub bindings: BTreeMap<GameAction, Vec<PhysicalInput>>,
@@ -132,6 +140,7 @@ pub struct UserSettings {
     pub sfx_volume: f32,
     pub players: [PlayerInputBindings; 2],
     pub vibration: bool,
+    pub animation_intensity: AnimationIntensity,
 }
 
 impl Default for UserSettings {
@@ -144,6 +153,7 @@ impl Default for UserSettings {
             sfx_volume: 1.0,
             players: std::array::from_fn(PlayerInputBindings::for_player),
             vibration: true,
+            animation_intensity: AnimationIntensity::Full,
         }
     }
 }

@@ -75,7 +75,9 @@ fixed schedule 的规则频率配置为 60Hz。
 - 输出：`FixedGameSet::Rules` 可推进的规则实例。
 - 错误语义：新建或重建未能完成时不保留半初始化实例，不进入可推进状态，并产生诊断；此时 `Match` 不提供可继续的对局。
 
-退出 `AppState::Match` 且目标不是 `Paused` 时释放规则实例、AI 计划状态和随对局存在的表现资源。`Match → Paused → Match` 不触发释放。
+冻结的 `LockedMatchSpec` 由实例化它的那次进入消费；实例建立后规格由实例自身持有，`RestartRequested` 从实例读取。冻结规格不跨对局存活，因此一次冻结只能为它被冻结的那场对局提供种子与规格。
+
+退出 `AppState::Match` 且目标不是 `Paused` 时释放规则实例、冻结规格、AI 计划状态和随对局存在的表现资源。`Match → Paused → Match` 不触发释放。
 
 `RestartRequested` 与 `RematchRequested` 的区别只在种子与规格是否重新冻结：前者复现同一场对局的初始条件，后者产生一场新的对局。
 

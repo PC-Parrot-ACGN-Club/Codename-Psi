@@ -228,6 +228,12 @@ impl PlayerBattleState {
         self.session.as_ref()
     }
 
+    /// Links committed in the chain currently being resolved.
+    #[must_use]
+    pub const fn chain_count(&self) -> u8 {
+        self.chain_total_links
+    }
+
     /// The per-level puzzle bags, which are rules state.
     #[must_use]
     pub const fn bags(&self) -> &PuzzleBags {

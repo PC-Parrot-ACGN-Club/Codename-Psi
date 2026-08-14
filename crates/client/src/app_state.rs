@@ -10,6 +10,7 @@ impl Plugin for AppStatePlugin {
         app.init_state::<AppState>()
             .init_resource::<AppTransitionRequests>()
             .init_resource::<AppTransitionDiagnostics>()
+            .insert_resource(SettingsOrigin(AppState::MainMenu))
             .configure_sets(
                 Update,
                 (AppTransitionSet::Request, AppTransitionSet::Arbitrate).chain(),
@@ -41,6 +42,7 @@ pub enum AppState {
     MainMenu,
     ModeSelect,
     CharacterSelect,
+    Settings,
     Match,
     Paused,
     Result,
@@ -52,11 +54,29 @@ pub enum AppTransitionCause {
     StartGame,
     ModeConfirmed,
     CharacterConfirmed,
+    BackRequested,
+    SettingsOpened,
+    SettingsClosed,
     MatchStartRequested,
     PauseRequested,
     ResumeRequested,
+    RestartRequested,
     MatchCompleted,
+    RematchRequested,
+    MatchAbandoned,
     ReturnToMainMenu,
+}
+
+/// State from which the settings overlay was opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
+pub struct SettingsOrigin(pub AppState);
+
+/// The transition selected by the arbiter for the next state commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
+pub struct CommittedTransition {
+    pub from: AppState,
+    pub to: AppState,
+    pub cause: AppTransitionCause,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,12 +110,25 @@ pub const fn is_valid_transition(from: AppState, to: AppState) -> bool {
     matches!(
         (from, to),
         (AppState::Boot, AppState::MainMenu)
-            | (AppState::MainMenu, AppState::ModeSelect)
-            | (AppState::ModeSelect, AppState::CharacterSelect)
-            | (AppState::CharacterSelect, AppState::Match)
+            | (
+                AppState::MainMenu,
+                AppState::ModeSelect | AppState::Settings
+            )
+            | (
+                AppState::ModeSelect,
+                AppState::CharacterSelect | AppState::MainMenu
+            )
+            | (
+                AppState::CharacterSelect,
+                AppState::Match | AppState::ModeSelect
+            )
+            | (AppState::Settings, AppState::MainMenu | AppState::Paused)
             | (AppState::Match, AppState::Paused | AppState::Result)
-            | (AppState::Paused, AppState::Match)
-            | (AppState::Result, AppState::MainMenu)
+            | (
+                AppState::Paused,
+                AppState::Match | AppState::Settings | AppState::MainMenu
+            )
+            | (AppState::Result, AppState::Match | AppState::MainMenu)
     )
 }
 
@@ -122,6 +155,7 @@ pub fn arbitrate_transitions(
     mut next_state: ResMut<NextState<AppState>>,
     mut requests: ResMut<AppTransitionRequests>,
     mut diagnostics: ResMut<AppTransitionDiagnostics>,
+    mut commands: Commands,
 ) {
     let current = *state.get();
     let mut valid: Vec<AppTransitionRequest> = Vec::new();
@@ -151,6 +185,11 @@ pub fn arbitrate_transitions(
     };
     if valid.len() == 1 {
         next_state.set(first.target);
+        commands.insert_resource(CommittedTransition {
+            from: current,
+            to: first.target,
+            cause: first.cause,
+        });
         return;
     }
 
@@ -162,7 +201,14 @@ pub fn arbitrate_transitions(
     });
 
     match (winners.next(), winners.next()) {
-        (Some(winner), None) => next_state.set(winner.target),
+        (Some(winner), None) => {
+            next_state.set(winner.target);
+            commands.insert_resource(CommittedTransition {
+                from: current,
+                to: winner.target,
+                cause: winner.cause,
+            });
+        }
         _ => {
             let diagnostic = AppTransitionDiagnostic::ConflictingTargets(
                 valid.iter().map(|request| request.target).collect(),

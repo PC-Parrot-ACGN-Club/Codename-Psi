@@ -75,7 +75,7 @@ root_digest = H( profile_digest ‖ roster_digest ‖ play_digest[0..n] )
 | --- | --- | --- | --- |
 | 规则源文本 | `client::data` | `game_core::config` | 已读取的内存内容与资源类别 |
 | 已校验剖面与内容库 | `game_core::config` | client 流程组件 | resolved 规则数据 |
-| `MatchRequest` | client 角色选择流程 | `game_core::match_spec` | 剖面 id、根种子与双方角色 |
+| `MatchRequest` | client 角色选择流程与赛果页再战 | `game_core::match_spec` | 剖面 id、根种子与双方角色 |
 | `LockedMatchSpec` | `game_core::match_spec` | 规则聚合根、确定性验证、联机握手 | 整场 BO3 不可变 |
 
 1. `client::data` 读取 `assets/data/rules/` 并把内容交给 `game_core::config` 解析与校验。

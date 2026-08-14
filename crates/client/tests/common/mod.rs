@@ -19,11 +19,12 @@ use client::input::{LocalInputSampler, PhysicalInput};
 use client::settings::PlayerInputBindings;
 use game_core::input::GameAction;
 
-pub const ALL_STATES: [AppState; 7] = [
+pub const ALL_STATES: [AppState; 8] = [
     AppState::Boot,
     AppState::MainMenu,
     AppState::ModeSelect,
     AppState::CharacterSelect,
+    AppState::Settings,
     AppState::Match,
     AppState::Paused,
     AppState::Result,
@@ -163,6 +164,12 @@ pub fn advance_to(app: &mut App, target: AppState) {
     commit(app);
     assert_eq!(current_state(app), AppState::MainMenu);
     if target == AppState::MainMenu {
+        return;
+    }
+    if target == AppState::Settings {
+        submit(app, AppState::Settings, AppTransitionCause::SettingsOpened);
+        commit(app);
+        assert_eq!(current_state(app), target);
         return;
     }
 

@@ -30,6 +30,7 @@
 - 退出 `Match` 按目标状态决定是否释放实例与随对局资源（TC-005～TC-006）。
 - 创建失败不留下半初始化实例（TC-007）。
 - 比赛结束只进入一次 `Result`（TC-008）。
+- 冻结规格随对局释放，不为后续对局提供种子（TC-010；Concern: Determinism）。
 
 ### System — Match Flow
 
@@ -42,6 +43,7 @@
 | 判定表 | cause × 实例处置、种子与比分 | TC-001～TC-004 |
 | 状态迁移 | 退出 `Match` 的两类目标状态 | TC-005～TC-006 |
 | 错误猜测 | 冻结失败与结束 tick 后继续推进 | TC-007～TC-008 |
+| 生命周期 | 冻结规格在实例化与释放两端的存活范围 | TC-010 |
 | 场景 / 协作路径 | 两种模式的完整对局流程 | TC-009 |
 
 ## 测试用例列表
@@ -51,13 +53,14 @@
 | TC-001 | `CharacterConfirmed` 进入 Match 时按冻结规格新建实例 | P0 | Component Integration | — | Match Flow；Client | 最小客户端 app，已完成开局规格冻结 | 以 `CharacterConfirmed` 提交 `CharacterSelect → Match` 并运行进入处理 | 冻结种子 `seed=7`；两个 participant slot | 产生可推进的规则实例；实例使用冻结的 `LockedMatchSpec` 与 `seed=7`；`wins` 为 `0:0`；`match_tick` 为 0 | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期) |
 | TC-002 | `ResumeRequested` 保留既有实例 | P0 | Component Integration | Determinism | Match Flow；Client | Match 中已推进至非初始状态并记录状态校验和 | 迁移到 `Paused`，再以 `ResumeRequested` 迁回 `Match` | 暂停前 `match_tick=N`、校验和 `C`、`wins=1:0` | 实例未被替换；恢复后 `match_tick` 与校验和仍为 `N` 与 `C`；`wins` 保持 `1:0` | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期) |
 | TC-003 | `RestartRequested` 用同一规格与同一种子重建实例 | P0 | Component Integration | Determinism | Match Flow；Client | Match 中已推进若干 tick 且 `wins=1:0` | 迁移到 `Paused`，以 `RestartRequested` 迁回 `Match` | 同一 `LockedMatchSpec`，种子保持 `seed=7` | 产生新实例；`LockedMatchSpec` 与种子与重建前相同；`wins` 归零为 `0:0`；`match_tick` 归零；以相同输入推进得到与本场开局相同的球序 | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期) |
-| TC-004 | `RematchRequested` 重新冻结并使用新种子 | P1 | Component Integration | Determinism | Match Flow；Client | 已进入 `Result` 且上一场使用 `seed=7` | 以 `RematchRequested` 提交 `Result → Match` 并运行进入处理 | 上一场 `seed=7`；再战产生新的本地种子 | 产生新实例；模式、双方角色与规则剖面与上一场相同；种子不等于 `seed=7`；`wins` 为 `0:0`；相同输入下首手球序与上一场不同 | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期)；[应用状态机：协作](../../development/design/application-state-machine.md#协作) |
+| TC-004 | `RematchRequested` 重新冻结并使用新种子 | P1 | Component Integration | Determinism | Match Flow；Client | 已进入 `Result`，上一场由 client 自行冻结并使用 `seed=7` | 在赛果页提出再战，运行冻结与进入处理 | 上一场 `seed=7`；再战的种子由 client 产生，不由用例给定 | 产生新实例；模式、双方角色与规则剖面与上一场相同；种子不等于 `seed=7`；`wins` 为 `0:0`；相同输入下首手球序与上一场不同 | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期)；[应用状态机：协作](../../development/design/application-state-machine.md#协作) |
 | TC-005 | 退出 Match 且目标不是 Paused 时释放对局资源 | P1 | Component Integration | — | Match Flow；Client | Match 中已存在实例、AI 计划状态与随对局存在的表现资源 | 参数化以两种 cause 退出 Match | `MatchCompleted`（→`Result`）；`MatchAbandoned`（→`MainMenu`） | 两种情况均释放规则实例、AI 计划状态与随对局存在的表现资源；不残留可推进的旧实例 | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期) |
 | TC-006 | `Match → Paused → Match` 不释放对局资源 | P1 | Component Integration | — | Match Flow；Client | Match 中已存在实例与随对局存在的表现资源 | 迁移到 `Paused` 后再迁回 `Match` | `PauseRequested` 后 `ResumeRequested` | 全程不触发释放；表现资源在 `Paused` 期间保持存在；实例标识与迁移前相同 | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期) |
 | TC-007 | 实例创建失败时不留下半初始化对局 | P1 | Component Integration | — | Match Flow；Client | 可注入使创建失败的条件 | 以 `CharacterConfirmed` 进入 Match，创建过程失败 | 冻结失败或实例构建失败 | 不存在可推进的实例；`FixedGameSet::Rules` 不推进任何规则状态；失败原因可观察；后续一次成功创建仍能正常开始对局 | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期) |
 | TC-008 | 比赛结束只进入一次 Result | P1 | Component Integration | — | Match Flow；Client | Match 中一方即将达到两胜 | 推进到比赛结束 tick，并在其后继续提供若干 fixed 执行机会 | 结束后 10 个 fixed 执行机会 | `Match → Result` 只提交一次；后续执行机会不再产生迁移请求；`Result` 的 `OnEnter` 只触发一次 | [Confirmed] [应用状态机：请求处理](../../development/design/application-state-machine.md#请求处理)；[小局、BO3 与安全点：完成态](../../development/design/match-and-round.md#完成态) |
 | TC-009 | 单人与本地双人均可从主菜单完成 BO3 并回到赛果 | P0 | System | Smoke | Match Flow；Client | 已装配客户端，规则数据可用 | 分别以两种模式走完整流程：主菜单 → 模式 → 选角 → BO3 → 赛果 → 返回主菜单 | 单人（P1 + AI）；本地双人（P1 + P2）；每种模式打到某一方两胜 | 两种模式均能完成 BO3；某一方达到两胜后进入 `Result` 并显示获胜方与局分；「返回主菜单」回到 `MainMenu`；全程只有一个当前 `AppState`；单人模式下 AI 只控制自己的槽位 | [Confirmed] [PRD §8](../../PRD.md)；[页面导航与焦点：页面与迁移](../../development/design/page-navigation.md#页面与迁移) |
+| TC-010 | 冻结规格不为它之外的对局提供种子 | P1 | Component Integration | Determinism | Match Flow；Client | 最小客户端 app，选择可被 client 自行冻结 | 进入 Match 后检查冻结规格；放弃对局回到主菜单，改用另一份选择再走一次开局 | 第一场 `seed=7`；第二场选择的种子为 `41` | 实例建立后不残留冻结规格；退出 Match 到主菜单后同样不残留；第二场使用 `seed=41` 而非 `seed=7` | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期) |
 
 ## 风险查漏
 
-四个 cause 的实例处置、种子与比分、资源释放、创建失败与结束去重均有直接用例；暂停期间的 tick 停止由 `integration-system/input-and-fixed-tick::TC-007` 覆盖。
+四个 cause 的实例处置、种子与比分、资源释放、冻结规格存活范围、创建失败与结束去重均有直接用例；暂停期间的 tick 停止由 `integration-system/input-and-fixed-tick::TC-007` 覆盖。

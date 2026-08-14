@@ -551,7 +551,7 @@ fn a_failed_rules_resolution_never_requests_the_match_transition() {
             .resource::<client::app_state::AppTransitionRequests>()
             .pending
             .is_empty(),
-        "a blocking failure produces no MatchStartRequested"
+        "a blocking failure produces no CharacterConfirmed request"
     );
     assert!(failed.world().get_resource::<FrozenMatch>().is_none());
     assert!(
@@ -572,7 +572,7 @@ fn a_failed_rules_resolution_never_requests_the_match_transition() {
     assert_eq!(requests.pending.len(), 1);
     assert_eq!(
         requests.pending[0].cause,
-        client::app_state::AppTransitionCause::MatchStartRequested
+        client::app_state::AppTransitionCause::CharacterConfirmed
     );
     assert!(loaded.world().get_resource::<FrozenMatch>().is_some());
 }

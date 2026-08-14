@@ -11,11 +11,12 @@ use common::{
 };
 use game_core::input::GameAction;
 
-const NON_MATCH_STATES: [AppState; 6] = [
+const NON_MATCH_STATES: [AppState; 7] = [
     AppState::Boot,
     AppState::MainMenu,
     AppState::ModeSelect,
     AppState::CharacterSelect,
+    AppState::Settings,
     AppState::Paused,
     AppState::Result,
 ];

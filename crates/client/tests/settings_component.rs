@@ -2,8 +2,8 @@
 
 use client::input::{PhysicalInput, UIAction};
 use client::settings::{
-    SETTINGS_SCHEMA_VERSION, SettingsError, SettingsLoad, SettingsStore, UserSettings,
-    WindowModeSetting, parse_settings, serialize_settings,
+    AnimationIntensity, SETTINGS_SCHEMA_VERSION, SettingsError, SettingsLoad, SettingsStore,
+    UserSettings, WindowModeSetting, parse_settings, serialize_settings,
 };
 use game_core::input::GameAction;
 
@@ -143,6 +143,7 @@ const FULL_SETTINGS_RON: &str = r#"(
         },
     )),
     vibration: false,
+    animation_intensity: Reduced,
 )
 "#;
 
@@ -160,6 +161,7 @@ fn a_supported_settings_document_restores_every_persisted_field() {
     assert_eq!(settings.master_volume, 0.4);
     assert_eq!(settings.sfx_volume, 0.25);
     assert!(!settings.vibration);
+    assert_eq!(settings.animation_intensity, AnimationIntensity::Reduced);
     assert_only_configurable_bindings(&settings);
 
     assert_eq!(
