@@ -17,6 +17,7 @@ pub mod page;
 pub mod presentation;
 pub mod settings;
 pub mod simulation;
+pub mod ui;
 
 /// Project root plugin used by both the production client and startup smoke tests.
 #[derive(Debug, Default)]
@@ -47,6 +48,7 @@ impl Plugin for GameInfrastructurePlugin {
             input::InputPlugin,
             match_flow::MatchFlowPlugin,
             simulation::SimulationPlugin,
+            ui::UiPlugin,
         ));
     }
 }

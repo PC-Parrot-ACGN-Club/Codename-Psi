@@ -281,6 +281,11 @@ impl PageModel {
     }
 
     #[must_use]
+    pub fn items(&self) -> &[FocusItem] {
+        self.ring.items()
+    }
+
+    #[must_use]
     pub const fn focused_index(&self) -> usize {
         self.ring.focused_index()
     }

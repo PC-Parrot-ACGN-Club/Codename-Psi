@@ -20,7 +20,19 @@ impl Plugin for SettingsPlugin {
         app.init_resource::<UserSettings>()
             .init_resource::<LastSaveError>()
             .add_message::<SaveSettingsRequest>()
-            .add_systems(Update, (save_settings_on_request, apply_settings));
+            .add_systems(
+                Update,
+                (
+                    save_settings_on_request,
+                    // Applying a locale before the catalogs have resolved would
+                    // report every language as missing, so this waits for the
+                    // startup barrier. Change detection is per-system: the
+                    // settings loaded during bootstrap still count as changed
+                    // the first time this runs.
+                    apply_settings
+                        .run_if(|status: Res<crate::bootstrap::BootstrapStatus>| status.is_ready()),
+                ),
+            );
     }
 }
 

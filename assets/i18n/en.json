@@ -3,7 +3,22 @@
   "locale": "en",
   "messages": {
     "app.title": "Codename Psi",
+    "common.back": "Back",
+    "common.return_to_main_menu": "Return to Main Menu",
     "main_menu.start": "Start",
-    "main_menu.settings": "Settings"
+    "main_menu.settings": "Settings",
+    "main_menu.exit": "Exit",
+    "mode_select.title": "Select Mode",
+    "mode_select.single_player": "Single Player",
+    "mode_select.local_versus": "Local Versus",
+    "mode_select.lan": "LAN Versus",
+    "character_select.title": "Select Character",
+    "character_select.confirm": "Confirm",
+    "settings.title": "Settings",
+    "pause.title": "Paused",
+    "pause.resume": "Resume",
+    "pause.restart": "Restart",
+    "result.title": "Result",
+    "result.rematch": "Play Again"
   }
 }
