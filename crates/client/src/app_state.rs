@@ -57,7 +57,6 @@ pub enum AppTransitionCause {
     BackRequested,
     SettingsOpened,
     SettingsClosed,
-    MatchStartRequested,
     PauseRequested,
     ResumeRequested,
     RestartRequested,

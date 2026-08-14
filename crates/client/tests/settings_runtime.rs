@@ -5,10 +5,13 @@ mod common;
 use bevy::prelude::*;
 use client::bootstrap::BootstrapPaths;
 use client::i18n::Localization;
+use client::input::{LocalInputSampler, PhysicalInput};
 use client::settings::{
-    LastSaveError, SaveSettingsRequest, SettingsStore, UserSettings, WindowModeSetting,
+    AnimationIntensity, LastSaveError, SaveSettingsRequest, SettingsStore, UserSettings,
+    WindowModeSetting,
 };
-use common::controlled_app;
+use common::{controlled_app, run_until_bootstrap_ready};
+use game_core::input::GameAction;
 
 /// An app whose settings file lives in a temporary directory.
 fn app_with_settings_path() -> (App, tempfile::TempDir) {
@@ -98,4 +101,74 @@ fn an_unavailable_language_falls_back_to_the_default_locale() {
         "en",
         "an unavailable locale must not leave the resource pointing at a missing catalog"
     );
+}
+
+// integration-system/runtime-data::TC-004
+#[test]
+fn every_changed_setting_reaches_its_consumer_without_a_restart() {
+    let (mut app, _dir) = app_with_settings_path();
+    run_until_bootstrap_ready(&mut app);
+
+    // A window exists only so the window-mode consumer has something to write.
+    let window = app.world_mut().spawn(Window::default()).id();
+
+    {
+        let mut settings = app.world_mut().resource_mut::<UserSettings>();
+        settings.language = "zh-CN".into();
+        settings.window_mode = WindowModeSetting::Fullscreen;
+        settings.master_volume = 0.3;
+        settings.animation_intensity = AnimationIntensity::Reduced;
+        settings.vibration = false;
+        settings.players[0].bind(GameAction::SoftDrop, PhysicalInput::keyboard("KeyP"));
+    }
+    app.update();
+
+    // Language: the catalog behind text lookups actually moved.
+    assert_eq!(
+        app.world().resource::<Localization>().current_locale,
+        "zh-CN",
+        "a language change must reach the localization runtime"
+    );
+
+    // Window mode: applied to the live window, not just stored.
+    assert!(
+        matches!(
+            app.world().get::<Window>(window).expect("window").mode,
+            bevy::window::WindowMode::Fullscreen(..)
+        ),
+        "a window-mode change must reach the window"
+    );
+
+    // Bindings: the sampler is re-installed, so the new key produces the action
+    // on the very next sampled frame rather than after leaving the page.
+    assert!(
+        app.world()
+            .resource::<LocalInputSampler>()
+            .bindings
+            .first()
+            .expect("player 0 bindings")
+            .actions_for(&PhysicalInput::keyboard("KeyP"))
+            .any(|action| action == GameAction::SoftDrop),
+        "a rebinding must reach the runtime sampler"
+    );
+
+    // Volume, animation intensity and vibration are read from the settings
+    // resource by their consumers; the contract is that the change is visible
+    // there immediately, with no separate commit step.
+    let settings = app.world().resource::<UserSettings>();
+    assert!((settings.master_volume - 0.3).abs() < f32::EPSILON);
+    assert_eq!(settings.animation_intensity, AnimationIntensity::Reduced);
+    assert!(!settings.vibration);
+
+    // A write failure must not roll back what already took effect in memory.
+    app.insert_resource(BootstrapPaths {
+        settings: Some(std::path::PathBuf::from("/nonexistent-root/settings.ron")),
+    });
+    app.world_mut().write_message(SaveSettingsRequest);
+    app.update();
+    assert!(
+        app.world().resource::<LastSaveError>().0.is_some(),
+        "the save was expected to fail"
+    );
+    assert_eq!(app.world().resource::<UserSettings>().language, "zh-CN");
 }

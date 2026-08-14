@@ -3,7 +3,7 @@
 mod common;
 
 use bevy::prelude::*;
-use client::app_state::{AppState, AppTransitionCause};
+use client::app_state::{AppState, AppTransitionCause, CommittedTransition, SettingsOrigin};
 use common::{ALL_STATES, advance_to, commit, current_state, state_only_app, submit};
 
 #[derive(Debug, Default, Resource)]
@@ -256,5 +256,73 @@ fn a_conflict_without_declared_precedence_is_rejected() {
             client::app_state::AppTransitionDiagnostic::ConflictingTargets(_)
         )),
         "the rejection must be observable: {diagnostics:?}"
+    );
+}
+
+// integration-system/application-lifecycle::TC-011
+#[test]
+fn settings_returns_to_whichever_state_opened_it() {
+    for origin in [AppState::MainMenu, AppState::Paused] {
+        let mut app = observed_app();
+        advance_to(&mut app, origin);
+
+        // The page records where it came from before asking to open.
+        app.insert_resource(SettingsOrigin(origin));
+        submit(
+            &mut app,
+            AppState::Settings,
+            AppTransitionCause::SettingsOpened,
+        );
+        commit(&mut app);
+        assert_eq!(current_state(&app), AppState::Settings);
+
+        let target = app.world().resource::<SettingsOrigin>().0;
+        submit(&mut app, target, AppTransitionCause::SettingsClosed);
+        commit(&mut app);
+        assert_eq!(
+            current_state(&app),
+            origin,
+            "settings opened from {origin:?} must return there"
+        );
+    }
+}
+
+// integration-system/application-lifecycle::TC-012
+#[test]
+fn the_committed_transition_tells_resume_apart_from_restart_on_the_same_edge() {
+    for cause in [
+        AppTransitionCause::ResumeRequested,
+        AppTransitionCause::RestartRequested,
+    ] {
+        let mut app = observed_app();
+        advance_to(&mut app, AppState::Paused);
+
+        submit(&mut app, AppState::Match, cause);
+        commit(&mut app);
+
+        let committed = *app.world().resource::<CommittedTransition>();
+        assert_eq!(committed.from, AppState::Paused);
+        assert_eq!(committed.to, AppState::Match);
+        assert_eq!(
+            committed.cause, cause,
+            "the same edge must carry the cause that produced it"
+        );
+    }
+
+    // A rejected request leaves the last committed transition alone.
+    let mut app = observed_app();
+    advance_to(&mut app, AppState::MainMenu);
+    let before = *app.world().resource::<CommittedTransition>();
+    submit(
+        &mut app,
+        AppState::Result,
+        AppTransitionCause::MatchCompleted,
+    );
+    commit(&mut app);
+    assert_eq!(current_state(&app), AppState::MainMenu);
+    assert_eq!(
+        *app.world().resource::<CommittedTransition>(),
+        before,
+        "an invalid edge must not be recorded as committed"
     );
 }

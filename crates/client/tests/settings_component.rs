@@ -2,8 +2,9 @@
 
 use client::input::{PhysicalInput, UIAction};
 use client::settings::{
-    AnimationIntensity, SETTINGS_SCHEMA_VERSION, SettingsError, SettingsLoad, SettingsStore,
-    UserSettings, WindowModeSetting, parse_settings, serialize_settings,
+    AnimationIntensity, BindingCapture, BindingConflict, CaptureOutcome, DeviceCategory,
+    SETTINGS_SCHEMA_VERSION, SettingsError, SettingsLoad, SettingsStore, UserSettings,
+    WindowModeSetting, parse_settings, serialize_settings,
 };
 use game_core::input::GameAction;
 
@@ -421,4 +422,113 @@ fn a_document_with_a_fixed_binding_defaults_and_is_never_written_back() {
     let reloaded = store.load();
     assert!(matches!(reloaded, SettingsLoad::Loaded(_)));
     assert_only_configurable_bindings(reloaded.settings());
+}
+
+// component/user-settings::TC-009
+#[test]
+fn schema_evolution_defaults_a_new_field_ignores_an_unknown_one_and_resets_on_a_version_bump() {
+    // A field added since the file was written: only that field falls back,
+    // every other choice the player made survives.
+    let missing_field = r#"(
+    schema_version: 1,
+    language: "zh-CN",
+    vibration: false,
+)"#;
+    let parsed = parse_settings(missing_field).expect("a missing field is not a parse failure");
+    assert_eq!(parsed.animation_intensity, AnimationIntensity::Full);
+    assert_eq!(parsed.language, "zh-CN");
+    assert!(!parsed.vibration);
+
+    // A field this build no longer knows: ignored, the rest still applies.
+    let unknown_field = r#"(
+    schema_version: 1,
+    language: "zh-CN",
+    colour_blind_assist: true,
+)"#;
+    let parsed = parse_settings(unknown_field).expect("an unknown field is not a parse failure");
+    assert_eq!(parsed.language, "zh-CN");
+
+    // An incompatible change: the whole document is abandoned for defaults.
+    let bumped = r#"(
+    schema_version: 255,
+    language: "zh-CN",
+)"#;
+    let error = parse_settings(bumped).expect_err("an unsupported schema cannot be trusted");
+    assert!(matches!(
+        error,
+        SettingsError::UnsupportedSchema {
+            found: 255,
+            supported: SETTINGS_SCHEMA_VERSION
+        }
+    ));
+}
+
+// component/user-settings::TC-010
+#[test]
+fn a_capture_writes_cancels_or_reports_a_conflict_for_the_page_to_resolve() {
+    let free_key = PhysicalInput::keyboard("KeyP");
+    let taken_key = PhysicalInput::keyboard("KeyW");
+
+    // Writing: an unclaimed input binds straight away.
+    let mut settings = UserSettings::default();
+    let capture = BindingCapture::open(0, GameAction::SoftDrop, DeviceCategory::Keyboard)
+        .expect("SoftDrop is configurable");
+    let outcome = capture
+        .offer(&mut settings, &free_key)
+        .expect("player 0 exists");
+    assert_eq!(outcome, CaptureOutcome::Bound);
+    assert!(
+        settings.players[0]
+            .actions_for(&free_key)
+            .eq([GameAction::SoftDrop])
+    );
+
+    // Another device category is not this capture's business, and leaves it open.
+    let mut settings = UserSettings::default();
+    let outcome = capture
+        .offer(&mut settings, &PhysicalInput::gamepad("North"))
+        .expect("player 0 exists");
+    assert_eq!(outcome, CaptureOutcome::Ignored);
+    assert_eq!(settings, UserSettings::default());
+
+    // Cancelling: a back input ends the capture and keeps the original binding.
+    let mut settings = UserSettings::default();
+    let cancelled = BindingCapture::open(0, GameAction::SoftDrop, DeviceCategory::Keyboard)
+        .expect("SoftDrop is configurable");
+    assert_eq!(cancelled.cancel(), CaptureOutcome::Cancelled);
+    assert_eq!(settings, UserSettings::default());
+
+    // Conflicting: reported, and the table is left untouched until the page decides.
+    let capture = BindingCapture::open(0, GameAction::SoftDrop, DeviceCategory::Keyboard)
+        .expect("SoftDrop is configurable");
+    let outcome = capture
+        .offer(&mut settings, &taken_key)
+        .expect("player 0 exists");
+    assert_eq!(
+        outcome,
+        CaptureOutcome::Conflict(BindingConflict {
+            requested: GameAction::SoftDrop,
+            existing: GameAction::HardDrop,
+            input: taken_key.clone(),
+        })
+    );
+    assert_eq!(settings, UserSettings::default());
+
+    // Overwriting: the previous owner loses the input rather than sharing it.
+    capture
+        .overwrite(&mut settings, &taken_key)
+        .expect("player 0 exists");
+    assert!(
+        settings.players[0]
+            .actions_for(&taken_key)
+            .eq([GameAction::SoftDrop])
+    );
+    assert!(
+        !settings.players[0]
+            .actions_for(&taken_key)
+            .any(|action| action == GameAction::HardDrop)
+    );
+
+    // A fixed binding never opens a capture at all.
+    assert!(BindingCapture::open(0, GameAction::Left, DeviceCategory::Keyboard).is_none());
 }

@@ -234,8 +234,22 @@ pub fn binding_input(player: usize, action: GameAction) -> PhysicalInput {
     PhysicalInput::keyboard(format!("P{player}{code}"))
 }
 
-/// Replace the sampler with one that has usable bindings for `players` locals.
+/// Give `players` locals usable bindings.
+///
+/// The bindings go through `UserSettings`, because that is where the runtime
+/// sampler mirrors from. They also have to be written *after* the startup
+/// barrier: the bootstrap load replaces the whole settings resource, which
+/// would otherwise discard them again.
 pub fn install_sampler(app: &mut App, players: usize) {
+    run_until_bootstrap_ready(app);
+    {
+        let mut settings = app
+            .world_mut()
+            .resource_mut::<client::settings::UserSettings>();
+        for player in 0..players {
+            settings.players[player] = keyboard_bindings(player);
+        }
+    }
     app.insert_resource(LocalInputSampler::new(
         (0..players).map(keyboard_bindings).collect(),
     ));

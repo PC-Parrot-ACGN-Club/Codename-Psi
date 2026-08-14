@@ -69,6 +69,25 @@ impl PlayerInputBindings {
             })
     }
 
+    /// Adds one physical input to an action, keeping the list duplicate-free.
+    pub fn bind(&mut self, action: GameAction, input: PhysicalInput) {
+        let inputs = self.bindings.entry(action).or_default();
+        if !inputs.contains(&input) {
+            inputs.push(input);
+        }
+    }
+
+    /// Removes one physical input from every action of this player.
+    ///
+    /// An action left with no inputs stays in the map as an empty entry: it is
+    /// still configurable and still shown, it just produces nothing until it is
+    /// bound again.
+    pub fn unbind_input(&mut self, input: &PhysicalInput) {
+        for inputs in self.bindings.values_mut() {
+            inputs.retain(|bound| bound != input);
+        }
+    }
+
     #[must_use]
     pub fn conflict(&self, action: GameAction, input: &PhysicalInput) -> Option<BindingConflict> {
         action.is_configurable().then(|| {
@@ -130,6 +149,106 @@ pub struct BindingConflict {
     pub input: PhysicalInput,
 }
 
+/// Which physical device a binding belongs to.
+///
+/// Bindings of different categories can never name the same physical input, so
+/// a capture only ever considers -- and only ever collides with -- inputs of
+/// its own category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceCategory {
+    Keyboard,
+    Gamepad,
+}
+
+/// One rebinding in progress.
+///
+/// Held as a resource while the settings page waits for a physical input. Its
+/// presence also suspends normal input consumption, so the key being bound does
+/// not simultaneously act as a menu or gameplay action.
+#[derive(Debug, Clone, PartialEq, Eq, Resource)]
+pub struct BindingCapture {
+    pub player: usize,
+    pub action: GameAction,
+    pub device: DeviceCategory,
+}
+
+/// What one captured input did to the binding table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureOutcome {
+    /// The input belongs to another device category; the capture stays open.
+    Ignored,
+    /// The binding was written.
+    Bound,
+    /// Another action of the same player and category already owns the input.
+    /// The settings page decides between overwrite and cancel.
+    Conflict(BindingConflict),
+    /// The player backed out; the binding table was never touched.
+    Cancelled,
+}
+
+impl BindingCapture {
+    /// Opens a capture, or refuses one for a non-configurable action.
+    #[must_use]
+    pub fn open(player: usize, action: GameAction, device: DeviceCategory) -> Option<Self> {
+        action.is_configurable().then_some(Self {
+            player,
+            action,
+            device,
+        })
+    }
+
+    /// Offers one physical input to the capture.
+    ///
+    /// A conflict leaves the table untouched: the page has to choose, and until
+    /// it does, the player keeps the bindings they had.
+    pub fn offer(
+        &self,
+        settings: &mut UserSettings,
+        input: &PhysicalInput,
+    ) -> Result<CaptureOutcome, SettingsError> {
+        if input.category() != self.device {
+            return Ok(CaptureOutcome::Ignored);
+        }
+        let bindings = settings
+            .players
+            .get_mut(self.player)
+            .ok_or(SettingsError::UnknownPlayer(self.player))?;
+
+        if let Some(conflict) = bindings.conflict(self.action, input) {
+            return Ok(CaptureOutcome::Conflict(conflict));
+        }
+        bindings.bind(self.action, input.clone());
+        Ok(CaptureOutcome::Bound)
+    }
+
+    /// Ends the capture on a back input, leaving the original binding in place.
+    ///
+    /// Consuming `self` is the point: a cancelled capture cannot go on to
+    /// accept an input, so the page has to open a new one to try again.
+    #[must_use]
+    pub fn cancel(self) -> CaptureOutcome {
+        CaptureOutcome::Cancelled
+    }
+
+    /// Resolves a conflict in favour of the action being bound.
+    ///
+    /// The previous owner loses the input rather than sharing it -- two actions
+    /// on one key would make the binding page lie about what the key does.
+    pub fn overwrite(
+        &self,
+        settings: &mut UserSettings,
+        input: &PhysicalInput,
+    ) -> Result<(), SettingsError> {
+        let bindings = settings
+            .players
+            .get_mut(self.player)
+            .ok_or(SettingsError::UnknownPlayer(self.player))?;
+        bindings.unbind_input(input);
+        bindings.bind(self.action, input.clone());
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
 #[serde(default)]
 pub struct UserSettings {
@@ -166,6 +285,8 @@ pub enum SettingsError {
     UnsupportedSchema { found: u32, supported: u32 },
     #[error("{0:?} is a fixed physical binding and cannot be persisted as a player binding")]
     NonConfigurableBinding(GameAction),
+    #[error("no local player in slot {0}")]
+    UnknownPlayer(usize),
     #[error("settings I/O failed at {path}: {source}")]
     Io {
         path: PathBuf,

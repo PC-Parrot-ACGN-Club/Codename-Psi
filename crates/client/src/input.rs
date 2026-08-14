@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::app_state::{
     AppState, AppTransitionCause, AppTransitionRequest, AppTransitionRequests, AppTransitionSet,
 };
-use crate::settings::{PlayerInputBindings, UserSettings};
+use crate::settings::{BindingCapture, DeviceCategory, PlayerInputBindings, UserSettings};
 
 #[derive(Debug, Default)]
 pub struct InputPlugin;
@@ -38,10 +38,14 @@ impl Plugin for InputPlugin {
                 submit_pause_request.in_set(AppTransitionSet::Request),
             )
             // Menu contexts only: in `Match` the same physical directions are
-            // rules input, and must not also move UI focus.
+            // rules input, and must not also move UI focus. A rebinding in
+            // progress suspends this too, so the key being captured does not
+            // also move the focus it is being bound from.
             .add_systems(
                 Update,
-                emit_ui_actions.run_if(not(in_state(AppState::Match))),
+                emit_ui_actions.run_if(
+                    not(in_state(AppState::Match)).and_then(not(resource_exists::<BindingCapture>)),
+                ),
             );
     }
 }
@@ -351,11 +355,16 @@ impl UiInputState {
 /// produce an action. It only fills an empty sampler: tests install their own
 /// bindings, and pushing a settings change onto a running sampler belongs to
 /// the settings system rather than here.
+/// Keep the sampler's binding table equal to the current settings.
+///
+/// This runs on every settings change, not just the first: a rebinding has to
+/// take effect on the next sampled frame, without leaving the settings page or
+/// restarting the game.
 pub fn install_settings_bindings(
     settings: Res<UserSettings>,
     mut sampler: ResMut<LocalInputSampler>,
 ) {
-    if sampler.bindings.is_empty() {
+    if settings.is_changed() || sampler.bindings.is_empty() {
         sampler.set_bindings(settings.players.to_vec());
     }
 }
@@ -603,6 +612,14 @@ impl PhysicalInput {
     #[must_use]
     pub fn gamepad(button: impl Into<String>) -> Self {
         Self::Gamepad(button.into())
+    }
+
+    #[must_use]
+    pub const fn category(&self) -> DeviceCategory {
+        match self {
+            Self::Keyboard(_) => DeviceCategory::Keyboard,
+            Self::Gamepad(_) => DeviceCategory::Gamepad,
+        }
     }
 }
 
