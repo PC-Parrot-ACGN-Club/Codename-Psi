@@ -11,9 +11,13 @@ use game_core::{
     match_spec::{LockedMatchSpec, MatchRequest},
 };
 
+use std::collections::BTreeMap;
+
+use crate::ai::AiControllerState;
 use crate::app_state::CommittedTransition;
 use crate::app_state::{AppState, AppTransitionCause, AppTransitionRequests, AppTransitionSet};
 use crate::data::RulesData;
+use crate::page::MatchMode;
 use crate::simulation::{FixedGameSet, RulesSimulation};
 
 /// What the character-selection flow has confirmed.
@@ -92,9 +96,16 @@ pub struct MatchInstanceId(pub u64);
 #[derive(Debug, Default, Resource)]
 struct NextMatchInstanceId(u64);
 
-/// Placeholder for AI planning state whose lifetime is exactly one match instance.
+/// Which participant slots an AI drives, and its planning state for each.
+///
+/// The lifetime is exactly one match instance: a plan is only meaningful for
+/// the board it was made against.
 #[derive(Debug, Default, Resource)]
-pub struct AiPlanState;
+pub struct AiPlanState(pub BTreeMap<usize, AiControllerState>);
+
+/// Mode the player picked, which decides how many slots a local human drives.
+#[derive(Debug, Clone, Copy, Default, Resource)]
+pub struct SelectedMode(pub MatchMode);
 
 /// Placeholder for resident board/HUD entities owned by a match instance.
 #[derive(Debug, Default, Resource)]
@@ -211,6 +222,7 @@ pub struct MatchFlowPlugin;
 impl Plugin for MatchFlowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MatchStartDiagnostics>()
+            .init_resource::<SelectedMode>()
             .init_resource::<MatchLifecycleDiagnostics>()
             .init_resource::<NextMatchInstanceId>()
             .init_resource::<MatchCompletionReported>()
@@ -235,17 +247,33 @@ impl Plugin for MatchFlowPlugin {
     }
 }
 
+/// Slots the AI drives under a mode. Local versus leaves both to humans.
+fn ai_slots(mode: MatchMode) -> BTreeMap<usize, AiControllerState> {
+    match mode {
+        MatchMode::SinglePlayer => BTreeMap::from([(1, AiControllerState::new())]),
+        MatchMode::LocalVersus => BTreeMap::new(),
+    }
+}
+
+/// Bookkeeping the match entry updates alongside the instance itself.
+#[derive(bevy::ecs::system::SystemParam)]
+struct MatchEntryBooks<'w> {
+    next_id: ResMut<'w, NextMatchInstanceId>,
+    completion: ResMut<'w, MatchCompletionReported>,
+    diagnostics: ResMut<'w, MatchLifecycleDiagnostics>,
+}
+
 fn enter_match(
     transition: Option<Res<CommittedTransition>>,
+    mode: Res<SelectedMode>,
     frozen: Option<Res<FrozenMatch>>,
     current: Option<Res<RulesSimulation>>,
-    mut next_id: ResMut<NextMatchInstanceId>,
-    mut completion: ResMut<MatchCompletionReported>,
-    mut diagnostics: ResMut<MatchLifecycleDiagnostics>,
+    mut books: MatchEntryBooks,
     mut commands: Commands,
 ) {
     let Some(transition) = transition else {
-        diagnostics
+        books
+            .diagnostics
             .0
             .push(MatchLifecycleFailure::MissingFrozenMatch(
                 AppTransitionCause::CharacterConfirmed,
@@ -255,7 +283,8 @@ fn enter_match(
 
     if transition.cause == AppTransitionCause::ResumeRequested {
         if current.is_none() {
-            diagnostics
+            books
+                .diagnostics
                 .0
                 .push(MatchLifecycleFailure::MissingResumedInstance);
         }
@@ -271,21 +300,22 @@ fn enter_match(
     };
     let Some(spec) = spec else {
         release_match_scoped(&mut commands);
-        diagnostics
+        books
+            .diagnostics
             .0
             .push(MatchLifecycleFailure::MissingFrozenMatch(transition.cause));
         return;
     };
 
-    next_id.0 += 1;
-    completion.0 = false;
+    books.next_id.0 += 1;
+    books.completion.0 = false;
     // The instance owns its spec from here on, and `RestartRequested` reads it
     // back from there; keeping the frozen copy would only let it seed a match
     // it was never frozen for.
     commands.remove_resource::<FrozenMatch>();
     commands.insert_resource(RulesSimulation(MatchState::new(spec)));
-    commands.insert_resource(MatchInstanceId(next_id.0));
-    commands.insert_resource(AiPlanState);
+    commands.insert_resource(MatchInstanceId(books.next_id.0));
+    commands.insert_resource(AiPlanState(ai_slots(mode.0)));
     commands.insert_resource(MatchPresentationResources);
 }
 

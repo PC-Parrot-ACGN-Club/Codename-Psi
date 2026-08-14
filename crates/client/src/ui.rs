@@ -13,7 +13,7 @@ use crate::app_state::{AppState, AppTransitionRequests, AppTransitionSet, Settin
 use crate::data::RulesData;
 use crate::i18n::Localization;
 use crate::input::{UIAction, UIActionEvent};
-use crate::match_flow::{MatchResultSummary, MatchSeedSource, MatchSelection};
+use crate::match_flow::{MatchResultSummary, MatchSeedSource, MatchSelection, SelectedMode};
 use crate::page::{CharacterSelectPage, MatchMode, PageCommand, PageItem, PageModel};
 use crate::presentation::VirtualCanvas;
 
@@ -48,7 +48,6 @@ impl Plugin for UiPlugin {
         }
 
         app.init_resource::<UiFont>()
-            .init_resource::<SelectedMode>()
             .add_systems(Startup, load_ui_font)
             .add_systems(Update, apply_virtual_canvas)
             .add_systems(Update, drive_focused_page.in_set(AppTransitionSet::Request))
@@ -448,19 +447,6 @@ fn spawn_settings_rows(
             world.entity_mut(row).add_child(value);
         }
         world.entity_mut(parent).add_child(row);
-    }
-}
-
-/// Mode the player picked on the mode page.
-///
-/// It decides how many locals the character page gives a slot to, so it is
-/// recorded when the mode item is confirmed rather than inferred later.
-#[derive(Debug, Clone, Copy, Resource)]
-pub struct SelectedMode(pub MatchMode);
-
-impl Default for SelectedMode {
-    fn default() -> Self {
-        Self(MatchMode::SinglePlayer)
     }
 }
 

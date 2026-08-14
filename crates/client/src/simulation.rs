@@ -118,12 +118,30 @@ pub fn prepare_tick_inputs(
     mut sampler: ResMut<LocalInputSampler>,
     mut current: ResMut<CurrentTickInputs>,
     probe: Option<ResMut<SimulationProbe>>,
+    simulation: Option<Res<RulesSimulation>>,
+    ai: Option<ResMut<crate::match_flow::AiPlanState>>,
 ) {
-    let canonical: Vec<PlayerActions> = sampler
+    let mut canonical: Vec<PlayerActions> = sampler
         .sample_fixed()
         .into_iter()
         .map(PlayerActions::normalized)
         .collect();
+
+    // An AI participant is an input producer like any other: it sees only its
+    // own `PlayerView` and its actions go through the same normalization, so
+    // the rules cannot tell it apart from a human.
+    if let (Some(simulation), Some(mut ai)) = (simulation, ai) {
+        for (slot, controller) in &mut ai.0 {
+            let Some(view) = simulation.0.player_view(*slot) else {
+                continue;
+            };
+            let actions = controller.step(&view, simulation.0.spec()).normalized();
+            if canonical.len() <= *slot {
+                canonical.resize(*slot + 1, PlayerActions::EMPTY);
+            }
+            canonical[*slot] = actions;
+        }
+    }
 
     current.inputs = TickInputs::new(&canonical).unwrap_or_else(|error| {
         warn!("dropping local inputs for this tick: {error}");

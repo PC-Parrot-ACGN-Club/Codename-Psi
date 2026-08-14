@@ -359,8 +359,9 @@ impl PageModel {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MatchMode {
+    #[default]
     SinglePlayer,
     LocalVersus,
 }
