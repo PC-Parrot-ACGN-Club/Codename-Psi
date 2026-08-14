@@ -1,14 +1,26 @@
 //! Exact nuisance queues, offsetting, and deterministic drop-column state.
+//!
+//! A queue is a single exact integer, never a list of batches: the UI's tiered
+//! icons are a projection of that integer, and the integer is the only truth.
+
+use crate::board::{Board, Cell, Coord};
 
 /// Maximum nuisance count released by one no-chain drop.
 pub const MAX_NUISANCE_DROP: u32 = 30;
 /// Number of board columns used by the rules kernel.
 pub const BOARD_COLUMNS: u8 = 6;
 
+/// Largest pending count one channel may hold, before profile data says otherwise.
+pub const MAX_PENDING_NUISANCE: u32 = 100_000;
+
 /// Frozen nuisance values selected from a rule profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NuisanceRules {
+    /// Largest batch one no-chain drop releases.
     pub drop_limit: u32,
+    /// Largest pending count one channel may hold.
+    pub queue_limit: u32,
+    /// Board columns the release order walks.
     pub columns: u8,
 }
 
@@ -16,7 +28,39 @@ impl Default for NuisanceRules {
     fn default() -> Self {
         Self {
             drop_limit: MAX_NUISANCE_DROP,
+            queue_limit: MAX_PENDING_NUISANCE,
             columns: BOARD_COLUMNS,
+        }
+    }
+}
+
+/// Adds `amount` to a channel queue, returning what the limit discarded.
+///
+/// The limit is a profile value checked during validation, so reaching it means
+/// the match has gone far past any reachable board state rather than that the
+/// arithmetic went wrong.
+pub fn enqueue(pending: &mut u32, amount: u32, limit: u32) -> u32 {
+    let total = pending.saturating_add(amount);
+    *pending = total.min(limit);
+    total - *pending
+}
+
+/// An attack that has been converted but not yet arbitrated at a safety point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttackIntent {
+    /// Exact nuisance count this attack carries.
+    pub amount: u32,
+    /// One-based chain link that produced it.
+    pub chain_index: u8,
+}
+
+impl AttackIntent {
+    /// An attack produced by one committed link.
+    #[must_use]
+    pub const fn new(amount: u32, chain_index: u8) -> Self {
+        Self {
+            amount,
+            chain_index,
         }
     }
 }
@@ -121,4 +165,53 @@ pub fn offset_attack(attack: u32, active: &mut u32, other: &mut u32) -> OffsetFa
         offset: from_active + from_other,
         sent: after_active - from_other,
     }
+}
+
+/// Where a released nuisance batch came to rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NuisanceLanding {
+    /// Landing cells in release order.
+    pub coords: Vec<Coord>,
+    /// Balls removed from the queue.
+    pub dropped: u32,
+    /// Pending count after the release.
+    pub remaining: u32,
+}
+
+/// Releases one batch onto the active board, if this turn releases at all.
+///
+/// A turn that triggered any chain releases nothing: the queue stays put and
+/// the player simply gets the next group. That is the continuous-offset rule,
+/// not an optimisation.
+pub fn release_nuisance(
+    board: &mut Board,
+    pending: &mut u32,
+    state: &mut NuisanceDropState,
+    rules: NuisanceRules,
+    chain_triggered: bool,
+) -> Option<NuisanceLanding> {
+    if chain_triggered || *pending == 0 {
+        return None;
+    }
+    let batch = drop_nuisance_with_rules(pending, state, rules);
+    let mut coords = Vec::with_capacity(batch.columns.len());
+    for column in &batch.columns {
+        if let Some(coord) = lowest_free_cell(board, *column) {
+            board.set(coord, Cell::Nuisance);
+            coords.push(coord);
+        }
+    }
+    Some(NuisanceLanding {
+        coords,
+        dropped: batch.dropped,
+        remaining: batch.remaining,
+    })
+}
+
+/// Lowest empty cell in a column, or `None` when the column is full.
+fn lowest_free_cell(board: &Board, column: u8) -> Option<Coord> {
+    (0..board.geometry().height())
+        .rev()
+        .filter_map(|y| board.coord(column, y))
+        .find(|coord| !board.get(*coord).is_occupied())
 }

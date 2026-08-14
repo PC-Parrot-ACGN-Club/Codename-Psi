@@ -442,3 +442,90 @@ fn neither_the_stepping_pattern_nor_a_presentation_consumer_shifts_the_phase_tic
         "the fixture must actually traverse preview, gravity and settlement"
     );
 }
+
+// component/chain-resolution::TC-013
+#[test]
+fn a_fever_clock_reaching_zero_mid_chain_does_not_disturb_the_phase_sequence() {
+    use game_core::fever::FeverState;
+
+    const TWO_LINK: [(u8, u8, Cell); 9] = [
+        (0, 13, Cell::Color(2)),
+        (1, 13, Cell::Color(2)),
+        (2, 13, Cell::Color(2)),
+        (3, 13, Cell::Color(2)),
+        (3, 12, Cell::Nuisance),
+        (0, 12, Cell::Color(1)),
+        (1, 12, Cell::Color(1)),
+        (2, 12, Cell::Color(1)),
+        (3, 11, Cell::Color(1)),
+    ];
+
+    /// Phase name per tick, which is what "the tick sequence" means here.
+    fn phase_trace(zero_at: Option<u16>) -> (Vec<&'static str>, Option<u16>, u16) {
+        let mut state = ResolutionState::new(board(&TWO_LINK), ResolutionRules::default());
+        // Two ticks of Fever time, so the clock can be driven to zero on the
+        // tick the caller asks for.
+        let mut fever = FeverState::new(1, 2, 0, 600);
+        fever.record_offset(true);
+        assert!(fever.enter_if_full());
+
+        let mut trace = Vec::new();
+        let mut exit_marked_at = None;
+        let mut ticks = 0_u16;
+        while state.report().is_none() {
+            ticks += 1;
+            if zero_at == Some(ticks) {
+                // Drain the clock during the first step's gravity.
+                while !fever.exit_pending() {
+                    fever.tick();
+                }
+                exit_marked_at = Some(ticks);
+            }
+            state.tick();
+            trace.push(match state.phase() {
+                ResolutionPhase::Idle => "idle",
+                ResolutionPhase::ClearPreview { .. } => "preview",
+                ResolutionPhase::ClearCommit { .. } => "commit",
+                ResolutionPhase::Gravity { .. } => "gravity",
+                ResolutionPhase::ScanNext { .. } => "scan",
+                ResolutionPhase::Settlement(_) => "settlement",
+            });
+            // The exit is only applied once the report exists.
+            assert!(
+                fever.active() || zero_at.is_none(),
+                "the exit must not be applied before settlement"
+            );
+        }
+        // Settlement is the safety point where a pending exit is applied.
+        if fever.exit_pending() {
+            fever.exit();
+        }
+        assert!(!fever.active() || zero_at.is_none());
+        (trace, exit_marked_at, ticks)
+    }
+
+    let (baseline, _, baseline_ticks) = phase_trace(None);
+    // Zero the clock inside the first step's gravity phase.
+    let gravity_tick = baseline
+        .iter()
+        .position(|phase| *phase == "gravity")
+        .expect("the fixture falls, so it has a gravity phase") as u16
+        + 1;
+    let (zeroed, marked, zeroed_ticks) = phase_trace(Some(gravity_tick));
+
+    assert_eq!(
+        zeroed, baseline,
+        "a Fever clock reaching zero must not change any phase boundary"
+    );
+    assert_eq!(zeroed_ticks, baseline_ticks);
+    assert_eq!(
+        marked,
+        Some(gravity_tick),
+        "the exit is marked when it zeroes"
+    );
+
+    // The chain still completes both links.
+    let mut state = ResolutionState::new(board(&TWO_LINK), ResolutionRules::default());
+    let report = state.settle();
+    assert_eq!(report.links.len(), 2, "the second link still completes");
+}

@@ -192,10 +192,8 @@ pub struct LockedMatchSpec {
     pub margin: MarginRules,
     /// Score-to-attack conversion.
     pub offense: OffenseRules,
-    /// Nuisance drop geometry and batch limit.
+    /// Nuisance drop geometry, batch limit and queue limit.
     pub nuisance: NuisanceRules,
-    /// Largest pending count one channel may hold.
-    pub nuisance_queue_limit: u32,
     /// Fever values.
     pub fever: FeverRules,
     /// Selected character per participant slot.
@@ -307,9 +305,9 @@ impl LockedMatchSpec {
             },
             nuisance: NuisanceRules {
                 drop_limit: profile.nuisance.drop_limit,
+                queue_limit: profile.nuisance.queue_limit,
                 columns: profile.field.width,
             },
-            nuisance_queue_limit: profile.nuisance.queue_limit,
             fever: FeverRules {
                 gauge_capacity: profile.fever.gauge_capacity,
                 initial_time_ticks: profile.fever.initial_time_ticks,

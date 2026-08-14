@@ -70,6 +70,7 @@ pub struct ControlState {
     horizontal: HorizontalState,
     rotate_cooldown: [u16; 2],
     counter: DoubleRotation,
+    soft_drop_cells: u32,
     last_lock_cause: Option<LockCause>,
 }
 
@@ -88,6 +89,7 @@ impl ControlState {
             },
             rotate_cooldown: [0, 0],
             counter: DoubleRotation::new(),
+            soft_drop_cells: 0,
             last_lock_cause: None,
         }
     }
@@ -108,6 +110,15 @@ impl ControlState {
     #[must_use]
     pub const fn double_rotation(&self) -> DoubleRotation {
         self.counter
+    }
+
+    /// Cells this group descended under soft drop.
+    ///
+    /// The caller turns these into display-only points; on the Fever profile
+    /// they never reach the attack conversion.
+    #[must_use]
+    pub const fn soft_drop_cells(&self) -> u32 {
+        self.soft_drop_cells
     }
 
     /// Why the group locked, once it has.
@@ -260,7 +271,9 @@ impl ControlState {
             // The lock grace is cumulative over the group's whole life: a
             // group that leaves the floor after a rotation push-up keeps what
             // it has already accumulated, so rotating cannot stall a drop.
-            group.try_translate(board, 0, 1);
+            if group.try_translate(board, 0, 1) && soft_dropping {
+                self.soft_drop_cells += 1;
+            }
         }
     }
 

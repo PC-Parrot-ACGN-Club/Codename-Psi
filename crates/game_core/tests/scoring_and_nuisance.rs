@@ -4,12 +4,14 @@ mod common;
 
 use common::{A_FEVER, A_NORMAL, B_FEVER, B_NORMAL, TARGET_POINTS, color_bonus, group_bonus};
 use game_core::{
+    board::{Board, Cell},
     nuisance::{
         MAX_NUISANCE_DROP, NuisanceDropState, NuisanceRules, drop_nuisance,
-        drop_nuisance_with_rules, offset_attack,
+        drop_nuisance_with_rules, enqueue, offset_attack, release_nuisance,
     },
     resolution::ChainLinkFacts,
     rules::{BoardMode, ChainPowerProfile},
+    safety_point::arbitrate_attacks_with_limit,
     scoring::{AttackFraction, MarginState, ScoreState, ScoringRules},
 };
 
@@ -26,7 +28,7 @@ fn profile_nuisance_rules_control_the_batch_limit_without_changing_column_order(
         &mut state,
         NuisanceRules {
             drop_limit: 4,
-            columns: 6,
+            ..NuisanceRules::default()
         },
     );
     assert_eq!(drop.dropped, 4);
@@ -181,20 +183,37 @@ fn the_remainder_carries_across_drops_and_conserves_the_attack_total() {
 // component/scoring-and-attack::TC-008
 #[test]
 fn margin_advances_an_index_and_the_target_score_comes_from_the_table() {
-    let table = [120_u64, 90];
+    let spec = common::repository_spec(1);
+    let rules = &spec.margin;
     let mut margin = MarginState::default();
 
+    // Before the margin start tick nothing has decayed.
+    margin.advance_to(rules, rules.start_ticks - 1);
     assert_eq!(margin.table_index(), 0);
-    assert_eq!(margin.target_points(&table), Some(120));
+    let target = margin
+        .target_points(&rules.target_points_by_step)
+        .expect("index 0 is in the table");
+    assert_eq!(target, 120);
     let mut before = AttackFraction::default();
-    assert_eq!(before.convert(360, 120), 3);
+    assert_eq!(before.convert(360, target), 3);
+    assert_eq!(before.remainder(), 0);
 
-    margin.advance(&table);
-
+    // The round tick, not a call count, decides the step.
+    margin.advance_to(rules, rules.start_ticks);
     assert_eq!(margin.table_index(), 1);
-    assert_eq!(margin.target_points(&table), Some(90));
+    let target = margin
+        .target_points(&rules.target_points_by_step)
+        .expect("index 1 is in the table");
+    assert_eq!(target, 90);
     let mut after = AttackFraction::default();
-    assert_eq!(after.convert(360, 90), 4);
+    assert_eq!(after.convert(360, target), 4);
+    assert_eq!(after.remainder(), 0);
+
+    // The state keeps only the index; nothing caches a converted target.
+    assert_eq!(
+        std::mem::size_of::<MarginState>(),
+        std::mem::size_of::<usize>()
+    );
 }
 
 // component/scoring-and-attack::TC-009
@@ -255,4 +274,88 @@ fn an_incomplete_row_advances_the_column_order_along_its_two_branches() {
         1,
         "two or more left over restart on the column the last ball used"
     );
+}
+
+// component/scoring-and-attack::TC-010
+#[test]
+fn a_turn_that_triggered_a_chain_leaves_its_queue_untouched() {
+    let mut board = Board::empty();
+    let mut pending = 8_u32;
+    let mut other = 0_u32;
+    let mut state = NuisanceDropState::at_column(0);
+
+    // The turn's attack offsets first; three of the eight are cancelled.
+    let facts = offset_attack(3, &mut pending, &mut other);
+    assert_eq!(facts.offset, 3);
+    assert_eq!(facts.sent, 0);
+    assert_eq!(pending, 5);
+
+    let released = release_nuisance(
+        &mut board,
+        &mut pending,
+        &mut state,
+        NuisanceRules::default(),
+        true,
+    );
+
+    assert!(released.is_none(), "a chain suppresses this turn's release");
+    assert_eq!(pending, 5, "the rest of the queue waits for a later turn");
+    assert_eq!(state.next_column(), 0, "the column order does not advance");
+    assert!(
+        board
+            .visible_coords()
+            .all(|coord| board.get(coord) == Cell::Empty),
+        "nothing lands on the board"
+    );
+}
+
+// component/scoring-and-attack::TC-011
+#[test]
+fn a_turn_without_a_chain_drops_its_queue_into_the_active_board() {
+    let mut board = Board::empty();
+    let mut pending = 6_u32;
+    let mut state = NuisanceDropState::at_column(0);
+
+    let landing = release_nuisance(
+        &mut board,
+        &mut pending,
+        &mut state,
+        NuisanceRules::default(),
+        false,
+    )
+    .expect("a chainless turn releases");
+
+    assert_eq!(landing.dropped, 6);
+    assert_eq!(landing.remaining, 0);
+    assert_eq!(pending, 0);
+    let columns: Vec<u8> = landing.coords.iter().map(|coord| coord.x()).collect();
+    assert_eq!(
+        columns,
+        vec![0, 1, 2, 3, 4, 5],
+        "a full row fills left to right"
+    );
+    let rows: Vec<u8> = landing.coords.iter().map(|coord| coord.y()).collect();
+    assert!(
+        rows.iter().all(|y| *y == rows[0]),
+        "six balls on an empty board share one row"
+    );
+    assert!(
+        landing
+            .coords
+            .iter()
+            .all(|coord| board.get(*coord) == Cell::Nuisance),
+        "the board holds the landed nuisance and can now run gravity"
+    );
+}
+
+// component/scoring-and-attack::TC-011
+#[test]
+fn a_queue_never_grows_past_the_profile_limit() {
+    let mut pending = 90_u32;
+    let discarded = enqueue(&mut pending, 20, 100);
+    assert_eq!(pending, 100, "the limit clamps the queue");
+    assert_eq!(discarded, 10, "the overflow is reported, not hidden");
+
+    let report = arbitrate_attacks_with_limit([50, 0], [0, 80], 100);
+    assert_eq!(report.queues_after[1], 100);
 }

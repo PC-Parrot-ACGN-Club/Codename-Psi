@@ -117,6 +117,14 @@ pub struct MarginState {
 }
 
 impl MarginState {
+    /// Recomputes the decay step from the round tick.
+    ///
+    /// The state holds only the index: the target score is always a table
+    /// lookup, so no converted copy of it can go stale.
+    pub fn advance_to(&mut self, rules: &crate::match_spec::MarginRules, round_tick: u64) {
+        self.table_index = rules.step_at(round_tick);
+    }
+
     /// Advances to the next value, saturating at the table tail.
     pub fn advance(&mut self, table: &[u64]) {
         if !table.is_empty() {

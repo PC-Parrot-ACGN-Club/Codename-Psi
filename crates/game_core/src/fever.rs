@@ -9,6 +9,7 @@ pub struct FeverState {
     min_time_ticks: u32,
     max_time_ticks: u32,
     active: bool,
+    exit_pending: bool,
 }
 
 impl FeverState {
@@ -26,6 +27,7 @@ impl FeverState {
             min_time_ticks,
             max_time_ticks,
             active: false,
+            exit_pending: false,
         }
     }
     #[must_use]
@@ -59,14 +61,30 @@ impl FeverState {
             .saturating_add(ticks)
             .min(self.max_time_ticks);
     }
+    /// Whether the clock has run out and the exit is waiting for a boundary.
+    ///
+    /// The clock does not pause for settlement animation, so it can reach zero
+    /// mid-chain. The exit is recorded here and applied at the safety point,
+    /// which is what keeps the chain's tick sequence unaffected.
+    #[must_use]
+    pub const fn exit_pending(self) -> bool {
+        self.exit_pending
+    }
+
     /// Advances one rules tick; expiry asks the caller to exit at a safe boundary.
     pub fn tick(&mut self) -> bool {
         if self.active {
             self.time_ticks = self.time_ticks.saturating_sub(1).max(self.min_time_ticks);
+            if self.time_ticks == self.min_time_ticks {
+                self.exit_pending = true;
+            }
         }
-        self.active && self.time_ticks == self.min_time_ticks
+        self.active && self.exit_pending
     }
+
+    /// Applies a pending exit. Callers only reach here at a safety point.
     pub fn exit(&mut self) {
         self.active = false;
+        self.exit_pending = false;
     }
 }
