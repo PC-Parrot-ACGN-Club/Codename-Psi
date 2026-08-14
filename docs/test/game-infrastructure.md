@@ -41,8 +41,8 @@
 
 - `PlayerActions` 位编码之上的稳定网络报文格式；bit 编号由 `component/game-actions::TC-011` 验证。
 - `RuleProfile`、角色、Fever 题面及其它玩法配置的完整 schema 和语义约束；该范围见[规则配置与开局规格冻结](../development/design/rule-configuration.md)。
-- UI 返回、退出、再赛等新增状态边及其仲裁优先级；应用状态基线见[应用状态机](../development/design/application-state-machine.md)。
+- 页面焦点、页面动作与对局实例生命周期；这些属于[游戏表现测试](game-presentation.md)。本组测试稿只覆盖状态边判定、迁移提交与仲裁。
 - 方向输入的 DAS/ARR 节奏；采样器不提供连发由 `component/client-input::TC-008` 验证，重复移动规则由玩法设计定义。
-- 规则 tick 的网络帧号、回滚状态、渲染表现和音频结果；对应职责分别归属 Network、Rules 与 Client 后续测试设计。
+- 规则 tick 的网络帧号与回滚状态；该范围归属 Network 后续测试设计。渲染表现与音频结果见[游戏表现测试](game-presentation.md)。
 
 `main.rs` 薄入口、模块所有权和禁止平行状态字段属于架构审查项；可机械验证的 crate 依赖边界由 `integration-system/build-and-startup::TC-002` 回归保护。
