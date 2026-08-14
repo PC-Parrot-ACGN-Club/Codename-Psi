@@ -26,7 +26,7 @@ ResolutionState
 | `ChainReport` | 一次落子的完整结算结果 | 全部连锁步、总清除数、最终盘面事实 |
 | `FieldFacts` | 稳定盘面的只读结论 | `all_clear`；不直接决定跨领域奖励或胜负 |
 
-`Settlement` 是终态。`ClearCommit` 是零时长边界，其余四态都跨 tick 保存，因此结算过程可被快照与恢复。
+`Settlement` 是终态。`ClearCommit` 与 `ScanNext` 是零时长边界：它们不消耗 tick，但停在 tick 边界上，因此与 `ClearPreview`、`Gravity` 一样进入快照，结算过程可在任意 tick 被快照与恢复。边界上的动作在下一个 tick 开始时执行，与该 tick 为新阶段计时同时发生。
 
 **隐藏行不参与结算。** 按[盘面几何](board-and-falling-group.md#盘面)，`y = 0` 与 `y = 1` 的球不计入连锁：扫描连通组时排除这两行，相邻垃圾清除不跨入这两行，`all_clear` 也以可见区为空成立。
 
@@ -37,6 +37,9 @@ ResolutionState
 | `ClearPreview` | 12 tick |
 | `ClearCommit` | 0 tick（边界） |
 | `Gravity` | 按本轮最大下落格数查表 |
+| `ScanNext` | 0 tick（边界） |
+
+因此一个连锁步占 `ClearPreview` 加本轮重力时长，两个边界都不额外计时。
 
 重力使用与[分裂自由落体](board-and-falling-group.md#时序参数)相同的参数组，因此共用同一张格数时长表。取值来源与其校准地位见 [DEC-004](../decision/settlement-timing-values.md)。
 

@@ -7,9 +7,17 @@
 
 #![forbid(unsafe_code)]
 
+pub mod board;
 pub mod config;
 pub mod input;
+pub mod nuisance;
+pub mod resolution;
+pub mod rules;
+pub mod scoring;
 
-/// Placeholder until the deterministic match state machine lands.
-#[derive(Debug, Clone, Default)]
+/// Placeholder aggregation root until match/round orchestration lands.
+///
+/// The component modules intentionally remain usable without this type: they
+/// are pure, in-memory building blocks for the rules-engine test suite.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatchState;
