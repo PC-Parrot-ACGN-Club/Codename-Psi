@@ -19,6 +19,13 @@
     "pause.resume": "继续",
     "pause.restart": "重开",
     "result.title": "赛果",
-    "result.rematch": "再来一局"
+    "result.rematch": "再来一局",
+    "settings.language": "语言",
+    "settings.window_mode": "窗口模式",
+    "settings.master_volume": "主音量",
+    "settings.sfx_volume": "音效音量",
+    "settings.vibration": "震动",
+    "settings.animation_intensity": "动画强度",
+    "settings.rebind": "重新绑定"
   }
 }

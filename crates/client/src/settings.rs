@@ -169,7 +169,7 @@ pub struct BindingConflict {
 /// Bindings of different categories can never name the same physical input, so
 /// a capture only ever considers -- and only ever collides with -- inputs of
 /// its own category.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceCategory {
     Keyboard,
     Gamepad,

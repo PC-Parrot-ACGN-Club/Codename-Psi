@@ -51,11 +51,16 @@ impl Plugin for UiPlugin {
             .init_resource::<SelectedMode>()
             .add_systems(Startup, load_ui_font)
             .add_systems(Update, apply_virtual_canvas)
+            .add_systems(Update, drive_focused_page.in_set(AppTransitionSet::Request))
+            .add_systems(Update, complete_binding_capture)
             .add_systems(
-                Update,
-                (drive_focused_page, drive_character_select).in_set(AppTransitionSet::Request),
-            )
-            .add_systems(PostUpdate, (refresh_focus_visuals, refresh_slot_visuals));
+                PostUpdate,
+                (
+                    refresh_focus_visuals,
+                    refresh_slot_visuals,
+                    refresh_setting_values,
+                ),
+            );
 
         for state in PAGE_STATES {
             app.add_systems(OnEnter(state), move |world: &mut World| {
@@ -133,6 +138,13 @@ const fn label_key(item: PageItem) -> &'static str {
         PageItem::Restart => "pause.restart",
         PageItem::ReturnToMainMenu => "common.return_to_main_menu",
         PageItem::Rematch => "result.rematch",
+        PageItem::Language => "settings.language",
+        PageItem::WindowMode => "settings.window_mode",
+        PageItem::MasterVolume => "settings.master_volume",
+        PageItem::SfxVolume => "settings.sfx_volume",
+        PageItem::Vibration => "settings.vibration",
+        PageItem::AnimationIntensity => "settings.animation_intensity",
+        PageItem::Rebind { .. } => "settings.rebind",
     }
 }
 
@@ -215,6 +227,11 @@ fn spawn_page(world: &mut World, state: AppState) {
     match state {
         AppState::CharacterSelect => spawn_character_slots(world, root, &font),
         AppState::Result => spawn_scoreline(world, root, &font),
+        AppState::Settings => {
+            spawn_settings_rows(world, root, &font, &rows);
+            world.insert_resource(ActivePage(model));
+            return;
+        }
         _ => {}
     }
 
@@ -255,6 +272,166 @@ fn spawn_page(world: &mut World, state: AppState) {
     }
 
     world.insert_resource(ActivePage(model));
+}
+
+/// The text showing a setting's current value.
+#[derive(Debug, Component)]
+struct SettingValueText(PageItem);
+
+/// How a setting currently reads on the page.
+fn setting_value(item: PageItem, settings: &crate::settings::UserSettings) -> String {
+    use crate::settings::{AnimationIntensity, WindowModeSetting};
+    match item {
+        PageItem::Language => settings.language.clone(),
+        PageItem::WindowMode => match settings.window_mode {
+            WindowModeSetting::Windowed => "Windowed".into(),
+            WindowModeSetting::BorderlessFullscreen => "Borderless".into(),
+            WindowModeSetting::Fullscreen => "Fullscreen".into(),
+        },
+        PageItem::MasterVolume => format!("{:.0}%", settings.master_volume * 100.0),
+        PageItem::SfxVolume => format!("{:.0}%", settings.sfx_volume * 100.0),
+        PageItem::Vibration => if settings.vibration { "On" } else { "Off" }.into(),
+        PageItem::AnimationIntensity => match settings.animation_intensity {
+            AnimationIntensity::Full => "Full".into(),
+            AnimationIntensity::Reduced => "Reduced".into(),
+        },
+        PageItem::Rebind {
+            player,
+            action,
+            device,
+        } => settings
+            .players
+            .get(player)
+            .and_then(|bindings| bindings.bindings.get(&action))
+            .and_then(|inputs| {
+                inputs
+                    .iter()
+                    .find(|input| input.category() == device)
+                    .map(|input| match input {
+                        crate::input::PhysicalInput::Keyboard(code)
+                        | crate::input::PhysicalInput::Gamepad(code) => code.clone(),
+                    })
+            })
+            .unwrap_or_else(|| "--".into()),
+        _ => String::new(),
+    }
+}
+
+/// Label for a rebinding row, which names a player, action and device.
+fn rebind_label(
+    player: usize,
+    action: game_core::input::GameAction,
+    device: crate::settings::DeviceCategory,
+) -> String {
+    use crate::settings::DeviceCategory;
+    let device = match device {
+        DeviceCategory::Keyboard => "KB",
+        DeviceCategory::Gamepad => "PAD",
+    };
+    format!("P{} {action:?} [{device}]", player + 1)
+}
+
+/// The settings page: general settings in one column, rebindings in the other.
+///
+/// Two columns because the page lists more rows than a 1080-tall canvas fits in
+/// one. The focus ring stays a single linear ring across both.
+fn spawn_settings_rows(
+    world: &mut World,
+    root: Entity,
+    font: &Handle<Font>,
+    rows: &[(PageItem, String, bool)],
+) {
+    let settings = world.resource::<crate::settings::UserSettings>().clone();
+
+    let columns = world
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: px(80),
+                align_items: AlignItems::FlexStart,
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+    world.entity_mut(root).add_child(columns);
+
+    let mut column_ids = Vec::new();
+    for _ in 0..2 {
+        let column = world
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(6),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+            ))
+            .id();
+        world.entity_mut(columns).add_child(column);
+        column_ids.push(column);
+    }
+
+    for (id, label, _) in rows {
+        let is_rebind = matches!(id, PageItem::Rebind { .. });
+        let parent = column_ids[usize::from(is_rebind)];
+        let label = match *id {
+            PageItem::Rebind {
+                player,
+                action,
+                device,
+            } => rebind_label(player, action, device),
+            _ => label.clone(),
+        };
+
+        let row = world
+            .spawn((
+                PageItemNode(*id),
+                Node {
+                    width: px(520),
+                    height: px(40),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    padding: UiRect::horizontal(px(16)),
+                    border: UiRect::all(px(2)),
+                    border_radius: BorderRadius::all(px(8)),
+                    ..default()
+                },
+                BorderColor::all(CHIP),
+                BackgroundColor(CHIP),
+            ))
+            .id();
+
+        let name = world
+            .spawn((
+                Text::new(label),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(22.0),
+                    ..default()
+                },
+                TextColor(TEXT),
+            ))
+            .id();
+        world.entity_mut(row).add_child(name);
+
+        if id.is_setting() {
+            let value = world
+                .spawn((
+                    SettingValueText(*id),
+                    Text::new(setting_value(*id, &settings)),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(22.0),
+                        ..default()
+                    },
+                    TextColor(CHIP_FOCUSED),
+                ))
+                .id();
+            world.entity_mut(row).add_child(value);
+        }
+        world.entity_mut(parent).add_child(row);
+    }
 }
 
 /// Mode the player picked on the mode page.
@@ -423,22 +600,36 @@ fn spawn_scoreline(world: &mut World, root: Entity, font: &Handle<Font>) {
 fn drive_focused_page(
     mut actions: MessageReader<UIActionEvent>,
     page: Option<ResMut<ActivePage>>,
-    character_select: Option<Res<ActiveCharacterSelect>>,
+    mut pages: PageDrivers,
     mut requests: ResMut<AppTransitionRequests>,
     mut origin: ResMut<SettingsOrigin>,
     mut exit: MessageWriter<AppExit>,
     mut mode: ResMut<SelectedMode>,
 ) {
+    // The one-shot guard belongs to the character page, so it resets whenever
+    // that page is not up.
+    if pages.character_select.is_none() {
+        *pages.selection_written = false;
+    }
     let Some(mut page) = page else {
         actions.clear();
         return;
     };
+    // One reader for the whole page stack. Bevy keeps a message readable for
+    // two frames, so a second system reading the same stream would see the
+    // confirm that opened a page again once that page was up -- and act on it.
     for event in actions.read() {
-        // On the character page the slots own direction and confirm: the row
-        // ring must not also fire its confirm, or the page would leave for
-        // `Match` before anyone had picked a character. Back still belongs to
-        // the ring, which is what leaves the page.
-        if character_select.is_some() && event.action != UIAction::Back {
+        if pages.character_select.is_some() {
+            // On the character page the slots own direction and confirm: the
+            // row ring must not also fire its confirm, or the page would leave
+            // for `Match` before anyone had picked a character. Back still
+            // belongs to the ring, which is what leaves the page.
+            if event.action != UIAction::Back {
+                drive_character_select(&mut pages, event);
+                continue;
+            }
+        } else if page.0.state() == AppState::Settings && event.action == UIAction::Confirm {
+            drive_settings(&mut pages, page.0.focused().id);
             continue;
         }
         // The mode has to be read off the item that was confirmed: both mode
@@ -469,55 +660,194 @@ fn drive_focused_page(
     }
 }
 
+/// Everything the page drivers write to, kept in one bundle so the dispatcher
+/// stays a single system with a single message cursor.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PageDrivers<'w, 's> {
+    character_select: Option<ResMut<'w, ActiveCharacterSelect>>,
+    settings: ResMut<'w, crate::settings::UserSettings>,
+    save: MessageWriter<'w, crate::settings::SaveSettingsRequest>,
+    rules: Option<Res<'w, RulesData>>,
+    seeds: ResMut<'w, MatchSeedSource>,
+    commands: Commands<'w, 's>,
+    selection_written: Local<'s, bool>,
+}
+
+/// Confirming a settings row edits it in place.
+///
+/// Confirm cycles the value rather than Left/Right adjusting it, because all
+/// four directions move focus in the page model; giving two of them a second
+/// meaning would contradict the focus contract every other page follows.
+fn drive_settings(pages: &mut PageDrivers, focused: PageItem) {
+    use crate::settings::{AnimationIntensity, BindingCapture, WindowModeSetting};
+
+    if let PageItem::Rebind {
+        player,
+        action,
+        device,
+    } = focused
+    {
+        if let Some(capture) = BindingCapture::open(player, action, device) {
+            pages.commands.insert_resource(capture);
+        }
+        return;
+    }
+
+    let settings = &mut *pages.settings;
+    match focused {
+        PageItem::Language => {
+            settings.language = if settings.language == "en" {
+                "zh-CN".into()
+            } else {
+                "en".into()
+            };
+        }
+        PageItem::WindowMode => {
+            settings.window_mode = match settings.window_mode {
+                WindowModeSetting::Windowed => WindowModeSetting::BorderlessFullscreen,
+                WindowModeSetting::BorderlessFullscreen => WindowModeSetting::Fullscreen,
+                WindowModeSetting::Fullscreen => WindowModeSetting::Windowed,
+            };
+        }
+        PageItem::MasterVolume => settings.master_volume = next_volume(settings.master_volume),
+        PageItem::SfxVolume => settings.sfx_volume = next_volume(settings.sfx_volume),
+        PageItem::Vibration => settings.vibration = !settings.vibration,
+        PageItem::AnimationIntensity => {
+            settings.animation_intensity = match settings.animation_intensity {
+                AnimationIntensity::Full => AnimationIntensity::Reduced,
+                AnimationIntensity::Reduced => AnimationIntensity::Full,
+            };
+        }
+        _ => return,
+    }
+    // Persisted as soon as it is edited: the design has no separate commit
+    // step, and a setting that took effect but was never written would come
+    // back changed after a restart.
+    pages.save.write(crate::settings::SaveSettingsRequest);
+}
+
+/// Volume steps, wrapping back to silence after full.
+fn next_volume(current: f32) -> f32 {
+    let stepped = (current * 10.0).round() as i32 + 1;
+    if stepped > 10 {
+        0.0
+    } else {
+        stepped as f32 / 10.0
+    }
+}
+
+/// Complete an open rebinding from the next physical input.
+///
+/// This reads devices directly because a capture suspends the normal
+/// `UIAction` path: the whole point is that the key being bound must not also
+/// act as a menu action while it is being captured.
+fn complete_binding_capture(
+    capture: Option<Res<crate::settings::BindingCapture>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    mut settings: ResMut<crate::settings::UserSettings>,
+    mut save: MessageWriter<crate::settings::SaveSettingsRequest>,
+    mut commands: Commands,
+) {
+    use crate::input::PhysicalInput;
+    use crate::settings::CaptureOutcome;
+
+    let Some(capture) = capture else {
+        return;
+    };
+    // Back cancels, leaving the original binding in place.
+    if keys.just_pressed(KeyCode::Escape) {
+        commands.remove_resource::<crate::settings::BindingCapture>();
+        return;
+    }
+
+    let captured = keys
+        .get_just_pressed()
+        .next()
+        .map(|code| PhysicalInput::keyboard(format!("{code:?}")))
+        .or_else(|| {
+            pads.iter().find_map(|pad| {
+                pad.get_just_pressed()
+                    .next()
+                    .map(|button| PhysicalInput::gamepad(format!("{button:?}")))
+            })
+        });
+    let Some(input) = captured else {
+        return;
+    };
+
+    match capture.offer(&mut settings, &input) {
+        Ok(CaptureOutcome::Ignored) => return,
+        // R1 resolves a conflict by overwriting: the page has no prompt yet, and
+        // leaving the capture open would trap the player on a key they cannot use.
+        Ok(CaptureOutcome::Conflict(_)) => {
+            if let Err(error) = capture.overwrite(&mut settings, &input) {
+                warn!("rebinding failed: {error}");
+            }
+        }
+        Ok(_) => {}
+        Err(error) => warn!("rebinding failed: {error}"),
+    }
+    commands.remove_resource::<crate::settings::BindingCapture>();
+    save.write(crate::settings::SaveSettingsRequest);
+}
+
+/// Keep the value column showing what the settings actually hold.
+fn refresh_setting_values(
+    settings: Res<crate::settings::UserSettings>,
+    capture: Option<Res<crate::settings::BindingCapture>>,
+    mut values: Query<(&SettingValueText, &mut Text)>,
+) {
+    for (value, mut text) in &mut values {
+        let awaiting = capture.as_deref().is_some_and(|capture| {
+            matches!(value.0, PageItem::Rebind { player, action, device }
+                if player == capture.player && action == capture.action && device == capture.device)
+        });
+        let shown = if awaiting {
+            "...".to_owned()
+        } else {
+            setting_value(value.0, &settings)
+        };
+        if text.0 != shown {
+            text.0 = shown;
+        }
+    }
+}
+
 /// Feed input into the character page's two slots.
 ///
 /// The page's own `Confirm` picks a character for the acting slot. Only once
 /// both slots hold one does a further `Confirm` commit the selection, which is
 /// what makes the confirm item unavailable until then.
-fn drive_character_select(
-    mut actions: MessageReader<UIActionEvent>,
-    page: Option<ResMut<ActiveCharacterSelect>>,
-    rules: Option<Res<RulesData>>,
-    mut seeds: ResMut<MatchSeedSource>,
-    mut commands: Commands,
-    mut selection_written: Local<bool>,
-) {
-    // The model exists only while its page is on screen, so its presence is
-    // the page check.
-    let Some(mut page) = page else {
-        *selection_written = false;
+fn drive_character_select(pages: &mut PageDrivers, event: &UIActionEvent) {
+    let Some(page) = pages.character_select.as_mut() else {
         return;
     };
-    for event in actions.read() {
-        if event.action == UIAction::Confirm && page.0.confirm_enabled() && !*selection_written {
-            let selected = page.0.selected();
-            let (Some(first), Some(second)) = (selected[0], selected[1]) else {
-                continue;
-            };
-            let Some(profile) = rules
-                .as_deref()
-                .and_then(RulesData::rules)
-                .and_then(|library| library.profile_ids().next().cloned())
-            else {
-                continue;
-            };
-            // Only the selection is written here. Freezing it and requesting
-            // the transition stay with `match_flow`, which owns both.
-            commands.insert_resource(MatchSelection {
-                rule_profile_id: profile,
-                root_seed: seeds.next_seed(),
-                characters: [first.clone(), second.clone()],
-                confirmed: true,
-            });
-            *selection_written = true;
-            continue;
-        }
-        if event.action == UIAction::Back {
-            // Back leaves the page, which is the row ring's job.
-            continue;
-        }
-        page.0.handle_player(event.player, event.action);
+    if event.action == UIAction::Confirm && page.0.confirm_enabled() && !*pages.selection_written {
+        let selected = page.0.selected();
+        let (Some(first), Some(second)) = (selected[0], selected[1]) else {
+            return;
+        };
+        let Some(profile) = pages
+            .rules
+            .as_deref()
+            .and_then(RulesData::rules)
+            .and_then(|library| library.profile_ids().next().cloned())
+        else {
+            return;
+        };
+        // Only the selection is written here. Freezing it and requesting the
+        // transition stay with `match_flow`, which owns both.
+        pages.commands.insert_resource(MatchSelection {
+            rule_profile_id: profile,
+            root_seed: pages.seeds.next_seed(),
+            characters: [first.clone(), second.clone()],
+            confirmed: true,
+        });
+        *pages.selection_written = true;
+        return;
     }
+    page.0.handle_player(event.player, event.action);
 }
 
 /// Mirror each slot's focus and selection onto its cells.

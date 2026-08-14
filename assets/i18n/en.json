@@ -19,6 +19,13 @@
     "pause.resume": "Resume",
     "pause.restart": "Restart",
     "result.title": "Result",
-    "result.rematch": "Play Again"
+    "result.rematch": "Play Again",
+    "settings.language": "Language",
+    "settings.window_mode": "Window Mode",
+    "settings.master_volume": "Master Volume",
+    "settings.sfx_volume": "SFX Volume",
+    "settings.vibration": "Vibration",
+    "settings.animation_intensity": "Animation",
+    "settings.rebind": "Rebind"
   }
 }

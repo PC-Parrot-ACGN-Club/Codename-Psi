@@ -1,9 +1,11 @@
 //! In-memory page focus and action model.
 
 use game_core::config::CharacterId;
+use game_core::input::GameAction;
 
 use crate::app_state::{AppState, AppTransitionCause, AppTransitionRequest, SettingsOrigin};
 use crate::input::UIAction;
+use crate::settings::DeviceCategory;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageItem {
@@ -19,6 +21,66 @@ pub enum PageItem {
     Restart,
     ReturnToMainMenu,
     Rematch,
+    Language,
+    WindowMode,
+    MasterVolume,
+    SfxVolume,
+    Vibration,
+    AnimationIntensity,
+    /// One configurable binding of one player on one device.
+    Rebind {
+        player: usize,
+        action: GameAction,
+        device: DeviceCategory,
+    },
+}
+
+impl PageItem {
+    /// Whether confirming this item edits a setting instead of navigating.
+    #[must_use]
+    pub const fn is_setting(self) -> bool {
+        matches!(
+            self,
+            Self::Language
+                | Self::WindowMode
+                | Self::MasterVolume
+                | Self::SfxVolume
+                | Self::Vibration
+                | Self::AnimationIntensity
+                | Self::Rebind { .. }
+        )
+    }
+}
+
+/// Every settings item, in the order the page lists them.
+fn settings_items() -> Vec<FocusItem> {
+    let mut items = vec![
+        FocusItem::new(PageItem::Language, true, None::<String>),
+        FocusItem::new(PageItem::WindowMode, true, None::<String>),
+        FocusItem::new(PageItem::MasterVolume, true, None::<String>),
+        FocusItem::new(PageItem::SfxVolume, true, None::<String>),
+        FocusItem::new(PageItem::Vibration, true, None::<String>),
+        FocusItem::new(PageItem::AnimationIntensity, true, None::<String>),
+    ];
+    for player in 0..2 {
+        for action in GameAction::CONFIGURABLE {
+            for device in [DeviceCategory::Keyboard, DeviceCategory::Gamepad] {
+                items.push(FocusItem::new(
+                    PageItem::Rebind {
+                        player,
+                        action,
+                        device,
+                    },
+                    true,
+                    None::<String>,
+                ));
+            }
+        }
+    }
+    // No command: the settings page's back target comes from where it was
+    // opened, which `PageModel::back` resolves.
+    items.push(FocusItem::new(PageItem::Back, true, None::<String>));
+    items
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,7 +253,7 @@ impl PageModel {
                     AppTransitionCause::BackRequested,
                 ),
             ],
-            AppState::Settings => vec![FocusItem::new(PageItem::Back, true, None::<String>)],
+            AppState::Settings => settings_items(),
             AppState::Paused => vec![
                 action_item(
                     PageItem::Resume,
