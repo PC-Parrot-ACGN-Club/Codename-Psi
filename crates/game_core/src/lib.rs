@@ -9,8 +9,10 @@
 
 pub mod board;
 pub mod config;
+pub mod control;
 pub mod determinism;
 pub mod digest;
+pub mod drop_stream;
 pub mod falling;
 pub mod fever;
 pub mod input;

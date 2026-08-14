@@ -2,9 +2,10 @@
 
 use crate::{
     board::Board,
-    config::{ColorDraw, ColorSlot},
+    control::{ControlOutcome, ControlRules, ControlState, SplitState},
     determinism::{MatchRng, StreamName},
-    falling::{FallingGroup, GroupBall},
+    drop_stream::{DropStream, spawn_group},
+    falling::FallingGroup,
     fever::FeverState,
     input::TickInputs,
     match_spec::{LockedMatchSpec, PARTICIPANT_SLOTS},
@@ -14,32 +15,42 @@ use crate::{
 /// Match lifecycle visible to callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchPhase {
+    /// Pre-round countdown; gameplay actions are ignored.
     RoundIntro,
+    /// Both players are controlling their own boards.
     Playing,
+    /// The match is over.
     Completed,
 }
 
 /// A read-only result from consuming one fixed input tick.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchStepReport {
+    /// Ticks consumed since the match began.
     pub match_tick: u64,
+    /// Lifecycle phase after this tick.
     pub phase: MatchPhase,
+    /// Participants whose spawn failed on this tick, in slot order.
+    pub spawn_failures: Vec<usize>,
 }
 
 /// Refusal that leaves the aggregation root untouched.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MatchStepError {
+    /// The tick did not carry exactly one input per participant slot.
     #[error("a match requires exactly {expected} participant inputs, got {actual}")]
-    ParticipantCount { expected: usize, actual: usize },
-    #[error("active group violated its frozen placement invariant")]
-    InvalidGroup,
+    ParticipantCount {
+        /// Slots the match has.
+        expected: usize,
+        /// Slots the caller supplied.
+        actual: usize,
+    },
 }
 
 /// All mutable rules state for a two-player BO3.
 ///
-/// The first implementation establishes the only legal cross-player entry
-/// point. Falling groups, settlement safety points and Fever extend this root
-/// rather than gaining direct access to the opposing player.
+/// The aggregation root is the only owner of cross-player writes. Per-player
+/// components advance their own board and never reach the opposing slot.
 #[derive(Debug, Clone)]
 pub struct MatchState {
     spec: LockedMatchSpec,
@@ -49,10 +60,13 @@ pub struct MatchState {
     phase: MatchPhase,
     boards: [Board; PARTICIPANT_SLOTS],
     color_rng: [MatchRng; PARTICIPANT_SLOTS],
-    drop_cursor: [u64; PARTICIPANT_SLOTS],
+    streams: [DropStream; PARTICIPANT_SLOTS],
     active: [Option<FallingGroup>; PARTICIPANT_SLOTS],
+    control: [ControlState; PARTICIPANT_SLOTS],
+    split: [Option<SplitState>; PARTICIPANT_SLOTS],
     resolution: [Option<ResolutionState>; PARTICIPANT_SLOTS],
     fever: [FeverState; PARTICIPANT_SLOTS],
+    defeated: [bool; PARTICIPANT_SLOTS],
 }
 
 impl MatchState {
@@ -60,8 +74,16 @@ impl MatchState {
     #[must_use]
     pub fn new(spec: LockedMatchSpec) -> Self {
         let boards = std::array::from_fn(|_| Board::with_geometry(spec.board_geometry));
-        let color_rng = std::array::from_fn(|slot| {
+        let mut color_rng: [MatchRng; PARTICIPANT_SLOTS] = std::array::from_fn(|slot| {
             MatchRng::derive(spec.root_seed, 0, 0, slot as u8, StreamName::Color)
+        });
+        let streams = std::array::from_fn(|slot| {
+            DropStream::new(
+                spec.drop_sets[slot].clone(),
+                spec.drop.next_queue_len,
+                spec.color_count,
+                &mut color_rng[slot],
+            )
         });
         let fever = [FeverState::new(
             spec.fever.gauge_capacity,
@@ -77,10 +99,13 @@ impl MatchState {
             phase: MatchPhase::RoundIntro,
             boards,
             color_rng,
-            drop_cursor: [0; PARTICIPANT_SLOTS],
+            streams,
             active: [None, None],
+            control: [ControlState::new(); PARTICIPANT_SLOTS],
+            split: [None, None],
             resolution: [None, None],
             fever,
+            defeated: [false; PARTICIPANT_SLOTS],
         };
         for slot in 0..PARTICIPANT_SLOTS {
             state.spawn_next(slot);
@@ -94,7 +119,7 @@ impl MatchState {
         &self.spec
     }
 
-    /// Current match tick, including intro/outro ticks.
+    /// Current match tick, including intro ticks.
     #[must_use]
     pub const fn match_tick(&self) -> u64 {
         self.match_tick
@@ -118,10 +143,34 @@ impl MatchState {
         self.active.get(slot)?.as_ref()
     }
 
+    /// Control timers for one participant.
+    #[must_use]
+    pub fn control(&self, slot: usize) -> Option<&ControlState> {
+        self.control.get(slot)
+    }
+
+    /// Supply state for one participant.
+    #[must_use]
+    pub fn stream(&self, slot: usize) -> Option<&DropStream> {
+        self.streams.get(slot)
+    }
+
+    /// Post-lock free fall in progress for one participant.
+    #[must_use]
+    pub fn split(&self, slot: usize) -> Option<&SplitState> {
+        self.split.get(slot)?.as_ref()
+    }
+
     /// Player-level Fever state, independent from the active board channel.
     #[must_use]
     pub fn fever(&self, slot: usize) -> Option<FeverState> {
         self.fever.get(slot).copied()
+    }
+
+    /// Whether a participant has already lost this round.
+    #[must_use]
+    pub fn is_defeated(&self, slot: usize) -> bool {
+        self.defeated.get(slot).copied().unwrap_or(false)
     }
 
     /// Consumes exactly one two-slot input tick.
@@ -138,86 +187,95 @@ impl MatchState {
             return Ok(MatchStepReport {
                 match_tick: self.match_tick,
                 phase: self.phase,
+                spawn_failures: Vec::new(),
             });
         }
+
+        let mut spawn_failures = Vec::new();
         for slot in 0..PARTICIPANT_SLOTS {
+            if self.defeated[slot] {
+                continue;
+            }
+            // Post-lock free fall runs before anything can scan the board, so
+            // a ball still in flight never enters a link.
+            if let Some(split) = &mut self.split[slot] {
+                split.tick(&mut self.boards[slot]);
+                if split.is_complete() {
+                    self.split[slot] = None;
+                    self.start_resolution(slot);
+                }
+                continue;
+            }
             if let Some(resolution) = &mut self.resolution[slot] {
                 resolution.tick();
                 if matches!(resolution.phase(), ResolutionPhase::Settlement(_)) {
                     self.boards[slot] = resolution.board().clone();
                     self.resolution[slot] = None;
-                    self.spawn_next(slot);
+                    if !self.spawn_next(slot) {
+                        spawn_failures.push(slot);
+                    }
                 }
                 continue;
             }
-            if let Some(group) = &mut self.active[slot]
-                && group
-                    .apply_actions(
+
+            let outcome = {
+                let rules = ControlRules {
+                    timing: &self.spec.drop,
+                    fall_ticks_by_distance: &self.spec.resolution.gravity_ticks_by_distance,
+                    color_count: self.spec.color_count,
+                };
+                match &mut self.active[slot] {
+                    Some(group) => self.control[slot].step(
+                        group,
                         &mut self.boards[slot],
                         inputs.player(slot).unwrap_or_default(),
-                    )
-                    .map_err(|_| MatchStepError::InvalidGroup)?
-                    .is_some()
-            {
+                        rules,
+                    ),
+                    None => ControlOutcome::Continue,
+                }
+            };
+            if let ControlOutcome::Locked { split, .. } = outcome {
                 self.active[slot] = None;
-                self.resolution[slot] = Some(ResolutionState::new(
-                    self.boards[slot].clone(),
-                    self.spec.resolution.clone(),
-                ));
+                match split {
+                    Some(split) => self.split[slot] = Some(split),
+                    None => self.start_resolution(slot),
+                }
             }
         }
         Ok(MatchStepReport {
             match_tick: self.match_tick,
             phase: self.phase,
+            spawn_failures,
         })
     }
 
-    fn spawn_next(&mut self, slot: usize) {
-        let hand = self.spec.drop_sets[slot].hand(self.drop_cursor[slot]);
-        self.drop_cursor[slot] += 1;
-        let pivot = self.boards[slot].coord(
-            self.spec.board_geometry.spawn_column(),
-            self.spec.board_geometry.hidden_rows().saturating_sub(1),
-        );
-        let Some(pivot) = pivot else {
-            self.active[slot] = None;
-            return;
-        };
-        let (first, second) = self.draw_hand_colors(slot, hand.color_draw());
-        let balls = hand
-            .balls()
-            .into_iter()
-            .map(|ball| GroupBall {
-                dx: ball.dx,
-                dy: ball.dy,
-                color: match ball.color_slot {
-                    ColorSlot::First => first,
-                    ColorSlot::Second => second,
-                },
-            })
-            .collect();
-        let group = FallingGroup::new(pivot, balls, self.drop_cursor[slot] as u32).ok();
-        self.active[slot] = group.filter(|candidate| candidate.can_place(&self.boards[slot]));
+    fn start_resolution(&mut self, slot: usize) {
+        self.resolution[slot] = Some(ResolutionState::new(
+            self.boards[slot].clone(),
+            self.spec.resolution.clone(),
+        ));
     }
 
-    /// Draws a hand's colors from the participant's color stream.
+    /// Supplies the next group, or reports the spawn failure that ends a round.
     ///
-    /// A dual-color `O` needs two different colors, so its second draw picks
-    /// from the remaining colors rather than rejecting and retrying: a retry
-    /// loop would consume a data-dependent number of random values and make
-    /// the stream position depend on the draws themselves.
-    fn draw_hand_colors(&mut self, slot: usize, draw: ColorDraw) -> (u8, u8) {
-        let colors = u32::from(self.spec.color_count);
-        let first = (self.color_rng[slot].next_u32() % colors) as u8;
-        match draw {
-            ColorDraw::Single => (first, first),
-            ColorDraw::Independent => {
-                let second = (self.color_rng[slot].next_u32() % colors) as u8;
-                (first, second)
+    /// The spawn pose is tested *before* the hand leaves NEXT, so a failure
+    /// leaves the cursor and the queue exactly where they were.
+    fn spawn_next(&mut self, slot: usize) -> bool {
+        match spawn_group(
+            &self.boards[slot],
+            &mut self.streams[slot],
+            self.spec.board_geometry,
+            self.spec.color_count,
+            &mut self.color_rng[slot],
+        ) {
+            Ok(group) => {
+                self.active[slot] = Some(group);
+                self.control[slot] = ControlState::new();
+                true
             }
-            ColorDraw::Distinct => {
-                let offset = 1 + self.color_rng[slot].next_u32() % (colors - 1);
-                (first, ((u32::from(first) + offset) % colors) as u8)
+            Err(_) => {
+                self.defeated[slot] = true;
+                false
             }
         }
     }
@@ -235,6 +293,22 @@ impl MatchState {
                 StreamName::Color,
             )
         });
+        self.streams = std::array::from_fn(|slot| {
+            DropStream::new(
+                self.spec.drop_sets[slot].clone(),
+                self.spec.drop.next_queue_len,
+                self.spec.color_count,
+                &mut self.color_rng[slot],
+            )
+        });
+        self.active = [None, None];
+        self.control = [ControlState::new(); PARTICIPANT_SLOTS];
+        self.split = [None, None];
+        self.resolution = [None, None];
+        self.defeated = [false; PARTICIPANT_SLOTS];
         self.phase = MatchPhase::RoundIntro;
+        for slot in 0..PARTICIPANT_SLOTS {
+            self.spawn_next(slot);
+        }
     }
 }
