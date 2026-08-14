@@ -2,7 +2,7 @@
 
 use crate::{
     board::BoardGeometry,
-    config::{CharacterId, ConfigError, RuleProfile, RuleProfileId, ValidatedRuleLibrary},
+    config::{CharacterId, ConfigError, DropSet, RuleProfile, RuleProfileId, ValidatedRuleLibrary},
     resolution::ResolutionRules,
     rules::ChainPowerProfile,
 };
@@ -25,11 +25,17 @@ pub struct LockedMatchSpec {
     pub rule_version: String,
     pub root_seed: u64,
     pub board_geometry: BoardGeometry,
+    pub color_count: u8,
     pub resolution: ResolutionRules,
     pub nuisance_queue_limit: u32,
     pub nuisance_drop_limit: u32,
+    pub fever_capacity: u8,
+    pub fever_initial_time_ticks: u32,
+    pub fever_min_time_ticks: u32,
+    pub fever_max_time_ticks: u32,
     pub characters: [CharacterId; PARTICIPANT_SLOTS],
     pub chain_power: [ChainPowerProfile; PARTICIPANT_SLOTS],
+    pub drop_sets: [DropSet; PARTICIPANT_SLOTS],
 }
 
 impl LockedMatchSpec {
@@ -59,6 +65,21 @@ impl LockedMatchSpec {
             power_for(&request.characters[0])?,
             power_for(&request.characters[1])?,
         ];
+        let drop_for = |character: &CharacterId| {
+            library
+                .character_play(&request.rule_profile_id, character)
+                .ok_or_else(|| {
+                    ConfigError::InvalidData(format!(
+                        "missing gameplay data for character {}",
+                        character.0
+                    ))
+                })
+                .map(|play| play.drop_set.clone())
+        };
+        let drop_sets = [
+            drop_for(&request.characters[0])?,
+            drop_for(&request.characters[1])?,
+        ];
         let board_geometry = profile.field.geometry().ok_or_else(|| {
             ConfigError::InvalidData("validated profile has invalid board geometry".into())
         })?;
@@ -67,11 +88,17 @@ impl LockedMatchSpec {
             rule_version: profile.rule_version.clone(),
             root_seed: request.root_seed,
             board_geometry,
+            color_count: profile.field.color_count,
             resolution: resolution_rules(profile),
             nuisance_queue_limit: profile.nuisance.queue_limit,
             nuisance_drop_limit: profile.nuisance.drop_limit,
+            fever_capacity: profile.fever.gauge_capacity,
+            fever_initial_time_ticks: profile.fever.initial_time_ticks,
+            fever_min_time_ticks: profile.fever.min_time_ticks,
+            fever_max_time_ticks: profile.fever.max_time_ticks,
             characters: request.characters,
             chain_power,
+            drop_sets,
         })
     }
 }

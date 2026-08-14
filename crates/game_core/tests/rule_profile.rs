@@ -1,5 +1,8 @@
 use game_core::{
-    config::{CharacterId, CharacterPlay, RuleProfileId, ValidatedRuleLibrary, parse_rule_profile},
+    config::{
+        CharacterId, CharacterPlay, DropSet, RuleProfileId, ValidatedRuleLibrary,
+        parse_rule_profile,
+    },
     match_spec::{LockedMatchSpec, MatchRequest},
 };
 
@@ -33,6 +36,7 @@ fn a_match_freezes_character_curves_and_never_needs_to_read_assets_again() {
                 schema_version: 1,
                 profile_id: profile_id.clone(),
                 character_id: a.clone(),
+                drop_set: DropSet::default(),
                 normal_chain_power: table(10),
                 fever_chain_power: table(20),
             },
@@ -40,6 +44,7 @@ fn a_match_freezes_character_curves_and_never_needs_to_read_assets_again() {
                 schema_version: 1,
                 profile_id: profile_id.clone(),
                 character_id: b.clone(),
+                drop_set: DropSet::default(),
                 normal_chain_power: table(30),
                 fever_chain_power: table(40),
             },

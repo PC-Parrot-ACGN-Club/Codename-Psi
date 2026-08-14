@@ -86,8 +86,44 @@ pub struct CharacterPlay {
     pub schema_version: u32,
     pub profile_id: RuleProfileId,
     pub character_id: CharacterId,
+    #[serde(default)]
+    pub drop_set: DropSet,
     pub normal_chain_power: Vec<u16>,
     pub fever_chain_power: Vec<u16>,
+}
+
+/// Sixteen configured group templates for one character.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct DropSet(pub Vec<DropTemplate>);
+
+impl Default for DropSet {
+    fn default() -> Self {
+        Self(vec![DropTemplate::pair(); 16])
+    }
+}
+
+/// One group expressed around its spawn pivot.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct DropTemplate {
+    pub balls: Vec<DropBallTemplate>,
+}
+
+impl DropTemplate {
+    fn pair() -> Self {
+        Self {
+            balls: vec![
+                DropBallTemplate { dx: 0, dy: 0 },
+                DropBallTemplate { dx: 0, dy: -1 },
+            ],
+        }
+    }
+}
+
+/// A ball position whose color comes from the participant's color stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct DropBallTemplate {
+    pub dx: i8,
+    pub dy: i8,
 }
 
 impl CharacterPlay {
@@ -148,6 +184,7 @@ impl ValidatedRuleLibrary {
                 )));
             }
             play.chain_power()?;
+            validate_drop_set(&play)?;
             let key = (play.profile_id.clone(), play.character_id.clone());
             if play_map.insert(key, play).is_some() {
                 return Err(ConfigError::InvalidData(
@@ -176,6 +213,22 @@ impl ValidatedRuleLibrary {
     ) -> Option<&CharacterPlay> {
         self.plays.get(&(profile.clone(), character.clone()))
     }
+}
+
+fn validate_drop_set(play: &CharacterPlay) -> Result<(), ConfigError> {
+    if play.drop_set.0.len() != 16 {
+        return Err(ConfigError::InvalidData(
+            "drop_set must contain 16 turns".into(),
+        ));
+    }
+    for group in &play.drop_set.0 {
+        if !(2..=4).contains(&group.balls.len()) {
+            return Err(ConfigError::InvalidData(
+                "drop group must contain 2 to 4 balls".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Parses one versioned rule profile from in-memory RON.

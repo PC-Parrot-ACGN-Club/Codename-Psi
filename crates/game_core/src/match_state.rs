@@ -3,8 +3,11 @@
 use crate::{
     board::Board,
     determinism::{MatchRng, StreamName},
+    falling::{FallingGroup, GroupBall},
+    fever::FeverState,
     input::TickInputs,
     match_spec::{LockedMatchSpec, PARTICIPANT_SLOTS},
+    resolution::{ResolutionPhase, ResolutionState},
 };
 
 /// Match lifecycle visible to callers.
@@ -27,6 +30,8 @@ pub struct MatchStepReport {
 pub enum MatchStepError {
     #[error("a match requires exactly {expected} participant inputs, got {actual}")]
     ParticipantCount { expected: usize, actual: usize },
+    #[error("active group violated its frozen placement invariant")]
+    InvalidGroup,
 }
 
 /// All mutable rules state for a two-player BO3.
@@ -43,6 +48,10 @@ pub struct MatchState {
     phase: MatchPhase,
     boards: [Board; PARTICIPANT_SLOTS],
     color_rng: [MatchRng; PARTICIPANT_SLOTS],
+    drop_cursor: [usize; PARTICIPANT_SLOTS],
+    active: [Option<FallingGroup>; PARTICIPANT_SLOTS],
+    resolution: [Option<ResolutionState>; PARTICIPANT_SLOTS],
+    fever: [FeverState; PARTICIPANT_SLOTS],
 }
 
 impl MatchState {
@@ -53,7 +62,13 @@ impl MatchState {
         let color_rng = std::array::from_fn(|slot| {
             MatchRng::derive(spec.root_seed, 0, 0, slot as u8, StreamName::Color)
         });
-        Self {
+        let fever = [FeverState::new(
+            spec.fever_capacity,
+            spec.fever_initial_time_ticks,
+            spec.fever_min_time_ticks,
+            spec.fever_max_time_ticks,
+        ); PARTICIPANT_SLOTS];
+        let mut state = Self {
             spec,
             match_tick: 0,
             round_index: 0,
@@ -61,7 +76,15 @@ impl MatchState {
             phase: MatchPhase::RoundIntro,
             boards,
             color_rng,
+            drop_cursor: [0; PARTICIPANT_SLOTS],
+            active: [None, None],
+            resolution: [None, None],
+            fever,
+        };
+        for slot in 0..PARTICIPANT_SLOTS {
+            state.spawn_next(slot);
         }
+        state
     }
 
     /// Frozen selection that governs this whole match.
@@ -88,6 +111,18 @@ impl MatchState {
         self.boards.get(slot)
     }
 
+    /// Currently controllable group for one participant.
+    #[must_use]
+    pub fn active_group(&self, slot: usize) -> Option<&FallingGroup> {
+        self.active.get(slot)?.as_ref()
+    }
+
+    /// Player-level Fever state, independent from the active board channel.
+    #[must_use]
+    pub fn fever(&self, slot: usize) -> Option<FeverState> {
+        self.fever.get(slot).copied()
+    }
+
     /// Consumes exactly one two-slot input tick.
     pub fn step(&mut self, inputs: &TickInputs) -> Result<MatchStepReport, MatchStepError> {
         if inputs.len() != PARTICIPANT_SLOTS {
@@ -99,11 +134,66 @@ impl MatchState {
         self.match_tick += 1;
         if self.phase == MatchPhase::RoundIntro {
             self.phase = MatchPhase::Playing;
+            return Ok(MatchStepReport {
+                match_tick: self.match_tick,
+                phase: self.phase,
+            });
+        }
+        for slot in 0..PARTICIPANT_SLOTS {
+            if let Some(resolution) = &mut self.resolution[slot] {
+                resolution.tick();
+                if matches!(resolution.phase(), ResolutionPhase::Settlement(_)) {
+                    self.boards[slot] = resolution.board().clone();
+                    self.resolution[slot] = None;
+                    self.spawn_next(slot);
+                }
+                continue;
+            }
+            if let Some(group) = &mut self.active[slot] {
+                if group
+                    .apply_actions(
+                        &mut self.boards[slot],
+                        inputs.player(slot).unwrap_or_default(),
+                    )
+                    .map_err(|_| MatchStepError::InvalidGroup)?
+                    .is_some()
+                {
+                    self.active[slot] = None;
+                    self.resolution[slot] = Some(ResolutionState::new(
+                        self.boards[slot].clone(),
+                        self.spec.resolution.clone(),
+                    ));
+                }
+            }
         }
         Ok(MatchStepReport {
             match_tick: self.match_tick,
             phase: self.phase,
         })
+    }
+
+    fn spawn_next(&mut self, slot: usize) {
+        let template = &self.spec.drop_sets[slot].0[self.drop_cursor[slot] % 16];
+        self.drop_cursor[slot] += 1;
+        let pivot = self.boards[slot].coord(
+            self.spec.board_geometry.spawn_column(),
+            self.spec.board_geometry.hidden_rows().saturating_sub(1),
+        );
+        let Some(pivot) = pivot else {
+            self.active[slot] = None;
+            return;
+        };
+        let balls = template
+            .balls
+            .iter()
+            .map(|ball| GroupBall {
+                dx: ball.dx,
+                dy: ball.dy,
+                color: (self.color_rng[slot].next_u32() % u32::from(self.spec.color_count)) as u8,
+            })
+            .collect();
+        let group = FallingGroup::new(pivot, balls, self.drop_cursor[slot] as u32).ok();
+        self.active[slot] = group.filter(|candidate| candidate.can_place(&self.boards[slot]));
     }
 
     /// Rebuilds round-local random state after an exactly simultaneous defeat.

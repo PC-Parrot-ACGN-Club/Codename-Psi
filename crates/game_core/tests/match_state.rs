@@ -1,7 +1,7 @@
 use game_core::{
     MatchState,
-    config::{CharacterId, CharacterPlay, ValidatedRuleLibrary, parse_rule_profile},
-    input::{PlayerActions, TickInputs},
+    config::{CharacterId, CharacterPlay, DropSet, ValidatedRuleLibrary, parse_rule_profile},
+    input::{GameAction, PlayerActions, TickInputs},
     match_spec::{LockedMatchSpec, MatchRequest},
     match_state::{MatchPhase, MatchStepError},
 };
@@ -20,6 +20,7 @@ fn state() -> MatchState {
                 schema_version: 1,
                 profile_id: profile.id.clone(),
                 character_id: a.clone(),
+                drop_set: DropSet::default(),
                 normal_chain_power: powers(1),
                 fever_chain_power: powers(1),
             },
@@ -27,6 +28,7 @@ fn state() -> MatchState {
                 schema_version: 1,
                 profile_id: profile.id.clone(),
                 character_id: b.clone(),
+                drop_set: DropSet::default(),
                 normal_chain_power: powers(1),
                 fever_chain_power: powers(1),
             },
@@ -43,6 +45,28 @@ fn state() -> MatchState {
     )
     .expect("spec freezes");
     MatchState::new(spec)
+}
+
+#[test]
+fn a_locked_group_waits_for_settlement_before_the_next_group_spawns() {
+    let mut match_state = state();
+    let idle = TickInputs::new(&[PlayerActions::EMPTY, PlayerActions::EMPTY]).unwrap();
+    match_state.step(&idle).unwrap();
+    let hard_drop = TickInputs::new(&[
+        PlayerActions::from(GameAction::HardDrop),
+        PlayerActions::EMPTY,
+    ])
+    .unwrap();
+    match_state.step(&hard_drop).unwrap();
+    assert!(
+        match_state.active_group(0).is_none(),
+        "settlement owns the field after a lock"
+    );
+    match_state.step(&idle).unwrap();
+    assert!(
+        match_state.active_group(0).is_some(),
+        "the next group appears only after settlement"
+    );
 }
 
 #[test]

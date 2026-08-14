@@ -10,12 +10,15 @@
 pub mod board;
 pub mod config;
 pub mod determinism;
+pub mod falling;
+pub mod fever;
 pub mod input;
 pub mod match_spec;
 pub mod match_state;
 pub mod nuisance;
 pub mod resolution;
 pub mod rules;
+pub mod safety_point;
 pub mod scoring;
 
 pub use match_state::MatchState;
