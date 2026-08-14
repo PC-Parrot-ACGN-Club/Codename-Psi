@@ -162,10 +162,25 @@ const fn title_key(state: AppState) -> &'static str {
 
 // Lab signal panel palette: dark ground, saturated accent, high-contrast text.
 const GROUND: Color = Color::srgb(0.04, 0.05, 0.07);
+/// Ground for a page that overlays a live match, dimming it without hiding it.
+const SCRIM: Color = Color::srgba(0.04, 0.05, 0.07, 0.82);
 const CHIP: Color = Color::srgb(0.10, 0.12, 0.16);
 const CHIP_FOCUSED: Color = Color::srgb(0.16, 0.42, 0.55);
 const TEXT: Color = Color::srgb(0.90, 0.94, 0.98);
 const TEXT_DISABLED: Color = Color::srgb(0.45, 0.48, 0.53);
+
+/// Pages that sit over a running match dim it instead of replacing it, so the
+/// board stays readable underneath.
+const fn page_ground(state: AppState, origin: Option<SettingsOrigin>) -> Color {
+    match state {
+        AppState::Paused => SCRIM,
+        AppState::Settings => match origin {
+            Some(SettingsOrigin(AppState::Paused)) => SCRIM,
+            _ => GROUND,
+        },
+        _ => GROUND,
+    }
+}
 
 fn spawn_page(world: &mut World, state: AppState) {
     let origin = world.get_resource::<SettingsOrigin>().copied();
@@ -193,6 +208,8 @@ fn spawn_page(world: &mut World, state: AppState) {
         .spawn((
             PageRoot,
             DespawnOnExit(state),
+            // Above the HUD, so a page opened over a running match covers it.
+            GlobalZIndex(10),
             Node {
                 position_type: PositionType::Absolute,
                 width: px(1920),
@@ -203,7 +220,7 @@ fn spawn_page(world: &mut World, state: AppState) {
                 row_gap: px(18),
                 ..default()
             },
-            BackgroundColor(GROUND),
+            BackgroundColor(page_ground(state, origin)),
         ))
         .id();
 

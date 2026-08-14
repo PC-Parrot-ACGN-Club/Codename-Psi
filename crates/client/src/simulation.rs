@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use game_core::input::{PlayerActions, TickInputs};
 
 use game_core::MatchState;
+use game_core::match_state::MatchStepReport;
 
 use crate::app_state::AppState;
 use crate::input::LocalInputSampler;
@@ -99,6 +100,7 @@ impl Plugin for SimulationPlugin {
         )))
         .init_resource::<CurrentTickInputs>()
         .init_resource::<RuleState>()
+        .init_resource::<LatestStepReport>()
         .configure_sets(
             FixedUpdate,
             (FixedGameSet::Input, FixedGameSet::Rules)
@@ -136,11 +138,19 @@ pub fn prepare_tick_inputs(
 }
 
 /// Consume this tick's inputs exactly once and advance the rule state.
+/// The most recent tick's report, kept for the presentation layer.
+///
+/// One tick's facts, replaced every tick: the presentation layer turns them
+/// into one-shot cues, while everything persistent is read from the snapshot.
+#[derive(Debug, Default, Resource)]
+pub struct LatestStepReport(pub Option<MatchStepReport>);
+
 pub fn advance_rules(
     mut current: ResMut<CurrentTickInputs>,
     mut rules: ResMut<RuleState>,
     simulation: Option<ResMut<RulesSimulation>>,
     probe: Option<ResMut<SimulationProbe>>,
+    mut latest: ResMut<LatestStepReport>,
 ) {
     if current.consumed {
         return;
@@ -149,8 +159,9 @@ pub fn advance_rules(
 
     match simulation {
         Some(mut simulation) => {
-            if let Err(error) = simulation.0.step(&current.inputs) {
-                warn!("rules refused this tick: {error}");
+            match simulation.0.step(&current.inputs) {
+                Ok(report) => latest.0 = Some(report),
+                Err(error) => warn!("rules refused this tick: {error}"),
             }
             rules.tick = simulation.0.match_tick();
             rules.checksum = simulation.0.checksum().0;
