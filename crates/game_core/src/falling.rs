@@ -399,3 +399,20 @@ fn shifted(board: &Board, coord: Coord, dx: i8, dy: i8) -> Option<Coord> {
         .then(|| board.coord(x as u8, y as u8))
         .flatten()
 }
+
+impl crate::digest::Digestible for DoubleRotation {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u8(self.attempts);
+    }
+}
+
+impl crate::digest::Digestible for FallingGroup {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        self.template.digest_into(writer);
+        writer.u8(self.transform_id);
+        self.pivot.digest_into(writer);
+        writer.u8(self.colors[0]);
+        writer.u8(self.colors[1]);
+        writer.u32(self.turn_id);
+    }
+}

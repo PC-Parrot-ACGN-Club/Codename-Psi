@@ -215,3 +215,9 @@ fn lowest_free_cell(board: &Board, column: u8) -> Option<Coord> {
         .filter_map(|y| board.coord(column, y))
         .find(|coord| !board.get(*coord).is_occupied())
 }
+
+impl crate::digest::Digestible for NuisanceDropState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u8(self.next_column);
+    }
+}

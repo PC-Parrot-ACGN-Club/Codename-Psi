@@ -321,3 +321,35 @@ pub fn load_puzzle(board: &mut Board, puzzle: &FeverPuzzle) {
 pub fn puzzle_by_id<'a>(book: &'a FeverPuzzleBook, id: &str) -> Option<&'a FeverPuzzle> {
     book.puzzles.iter().find(|puzzle| puzzle.id == id)
 }
+
+impl crate::digest::Digestible for FeverState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u8(self.gauge);
+        writer.u8(self.capacity);
+        writer.u32(self.time_ticks);
+        writer.u32(self.min_time_ticks);
+        writer.u32(self.max_time_ticks);
+        writer.bool(self.active);
+        writer.bool(self.exit_pending);
+        writer.bool(self.gauge_credited);
+        writer.u32(self.deferred_reward);
+    }
+}
+
+impl crate::digest::Digestible for PuzzleBags {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.len(self.remaining.len());
+        for (level, ids) in &self.remaining {
+            writer.u8(*level);
+            writer.seq(ids);
+        }
+    }
+}
+
+impl crate::digest::Digestible for FeverSession {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u8(self.target_level);
+        writer.str(&self.current_puzzle_id);
+        self.bags.digest_into(writer);
+    }
+}

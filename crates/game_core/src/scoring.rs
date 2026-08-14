@@ -144,3 +144,22 @@ impl MarginState {
         self.table_index
     }
 }
+
+impl crate::digest::Digestible for ScoreState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u64(self.chain_score);
+        writer.u64(self.soft_drop_score);
+    }
+}
+
+impl crate::digest::Digestible for AttackFraction {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u64(self.remainder);
+    }
+}
+
+impl crate::digest::Digestible for MarginState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.len(self.table_index);
+    }
+}

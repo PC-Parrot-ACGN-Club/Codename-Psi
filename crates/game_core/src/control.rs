@@ -427,3 +427,58 @@ fn fall_duration(table: &[u16], distance: u8) -> u16 {
         .copied()
         .unwrap_or(0)
 }
+
+impl crate::digest::Digestible for BallFall {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        self.from.digest_into(writer);
+        self.to.digest_into(writer);
+        writer.u16(self.start_tick);
+        writer.u16(self.arrival_tick);
+    }
+}
+
+impl crate::digest::Digestible for SplitState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.seq(&self.falls);
+        writer.u16(self.elapsed);
+    }
+}
+
+impl crate::digest::Digestible for LockCause {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u8(match self {
+            Self::HardDrop => 0,
+            Self::LockDelay => 1,
+            Self::SoftDrop => 2,
+            Self::LiftLimit => 3,
+        });
+    }
+}
+
+impl crate::digest::Digestible for ControlState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u16(self.fall_ticks);
+        writer.u16(self.lock_delay_ticks);
+        writer.u8(self.lifts);
+        match self.horizontal.direction {
+            Some(direction) => {
+                writer.u8(1);
+                writer.i8(direction);
+            }
+            None => writer.u8(0),
+        }
+        writer.u16(self.horizontal.held_ticks);
+        writer.u16(self.horizontal.cooldown);
+        writer.u16(self.rotate_cooldown[0]);
+        writer.u16(self.rotate_cooldown[1]);
+        self.counter.digest_into(writer);
+        writer.u32(self.soft_drop_cells);
+        match &self.last_lock_cause {
+            Some(cause) => {
+                writer.u8(1);
+                cause.digest_into(writer);
+            }
+            None => writer.u8(0),
+        }
+    }
+}

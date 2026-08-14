@@ -153,7 +153,7 @@ pub enum MatchStepError {
 }
 
 /// One round's mutable state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoundState {
     round_tick: u64,
     players: [PlayerBattleState; PARTICIPANT_SLOTS],
@@ -193,7 +193,7 @@ impl RoundState {
 ///
 /// The aggregation root is the only owner of cross-player writes, so a
 /// participant can never reach the opposing slot directly.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchState {
     spec: LockedMatchSpec,
     match_tick: u64,
@@ -574,5 +574,74 @@ impl MatchState {
             phase: self.phase,
             events,
         }
+    }
+}
+
+impl crate::digest::Digestible for RoundOutcome {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        match self {
+            Self::Decided(slot) => {
+                writer.u8(0);
+                writer.len(*slot);
+            }
+            Self::Draw => writer.u8(1),
+        }
+    }
+}
+
+impl crate::digest::Digestible for MatchPhase {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        match self {
+            Self::RoundIntro { remaining_ticks } => {
+                writer.u8(0);
+                writer.u16(*remaining_ticks);
+            }
+            Self::Playing => writer.u8(1),
+            Self::RoundOutro {
+                outcome,
+                remaining_ticks,
+            } => {
+                writer.u8(2);
+                outcome.digest_into(writer);
+                writer.u16(*remaining_ticks);
+            }
+            Self::Completed(outcome) => {
+                writer.u8(3);
+                writer.len(outcome.winner);
+            }
+        }
+    }
+}
+
+impl crate::digest::Digestible for RoundState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u64(self.round_tick);
+        for player in &self.players {
+            player.digest_into(writer);
+        }
+        match &self.outcome {
+            Some(outcome) => {
+                writer.u8(1);
+                outcome.digest_into(writer);
+            }
+            None => writer.u8(0),
+        }
+    }
+}
+
+impl crate::digest::Digestible for MatchState {
+    /// Encodes every persistent field, and nothing presentational.
+    ///
+    /// The frozen rule text is not re-encoded: the root digest already covers
+    /// it and enters the checksum as a prefix.
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u64(self.match_tick);
+        self.phase.digest_into(writer);
+        writer.u8(self.wins[0]);
+        writer.u8(self.wins[1]);
+        writer.u32(self.round_index);
+        writer.u32(self.draw_attempt);
+        writer.seq(&self.round_history);
+        self.round.digest_into(writer);
     }
 }

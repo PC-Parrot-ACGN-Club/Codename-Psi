@@ -145,3 +145,24 @@ pub fn spawn_group(
     stream.take(color_count, rng);
     Ok(group)
 }
+
+impl crate::digest::Digestible for PendingHand {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        self.template.digest_into(writer);
+        writer.u8(self.colors[0]);
+        writer.u8(self.colors[1]);
+        writer.u32(self.turn_id);
+    }
+}
+
+impl crate::digest::Digestible for DropStream {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        self.drop_set.digest_into(writer);
+        writer.u64(self.cursor);
+        writer.len(self.queue.len());
+        for hand in &self.queue {
+            hand.digest_into(writer);
+        }
+        writer.len(self.queue_len);
+    }
+}

@@ -20,7 +20,37 @@ pub enum StreamName {
     FeverPuzzle,
 }
 
+/// Stream names this build knows how to derive.
+pub const REGISTERED_STREAMS: [StreamName; 3] = [
+    StreamName::Color,
+    StreamName::Nuisance,
+    StreamName::FeverPuzzle,
+];
+
+/// A stream name this build does not know how to derive.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown random stream name: {0}")]
+pub struct UnknownStream(pub String);
+
 impl StreamName {
+    /// The stable domain identifier written into logs and metadata.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Color => "color",
+            Self::Nuisance => "nuisance",
+            Self::FeverPuzzle => "fever-puzzle",
+        }
+    }
+
+    /// Resolves a stable name, refusing anything not registered.
+    pub fn from_name(name: &str) -> Result<Self, UnknownStream> {
+        REGISTERED_STREAMS
+            .into_iter()
+            .find(|stream| stream.as_str() == name)
+            .ok_or_else(|| UnknownStream(name.to_owned()))
+    }
+
     const fn tag(self) -> u64 {
         match self {
             Self::Color => 0x0000_0063_6f6c_6f72,
@@ -69,6 +99,33 @@ impl MatchRng {
     /// Takes the next deterministic value from this stream only.
     pub fn next_u32(&mut self) -> u32 {
         self.0.next_u32()
+    }
+
+    /// Position within the stream, which is part of rules state.
+    #[must_use]
+    pub fn position(&self) -> u128 {
+        self.0.get_word_pos()
+    }
+
+    /// Seed this stream was derived from.
+    #[must_use]
+    pub fn seed(&self) -> [u8; 32] {
+        self.0.get_seed()
+    }
+}
+
+impl PartialEq for MatchRng {
+    fn eq(&self, other: &Self) -> bool {
+        self.seed() == other.seed() && self.position() == other.position()
+    }
+}
+
+impl Eq for MatchRng {}
+
+impl crate::digest::Digestible for MatchRng {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.bytes(&self.seed());
+        writer.bytes(&self.position().to_le_bytes());
     }
 }
 

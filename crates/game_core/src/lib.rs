@@ -24,5 +24,6 @@ pub mod resolution;
 pub mod rules;
 pub mod safety_point;
 pub mod scoring;
+pub mod snapshot;
 
 pub use match_state::MatchState;

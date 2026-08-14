@@ -44,7 +44,7 @@ impl PlayerSettlement {
 }
 
 /// All rules state belonging to one participant.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayerBattleState {
     active_channel: usize,
     boards: [Board; CHANNELS],
@@ -543,5 +543,76 @@ impl PlayerBattleState {
     #[must_use]
     pub const fn nuisance_rng(&self) -> &MatchRng {
         &self.nuisance_rng
+    }
+}
+
+impl crate::digest::Digestible for PlayerSettlement {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u32(self.attack);
+        self.report.digest_into(writer);
+    }
+}
+
+impl crate::digest::Digestible for PlayerBattleState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.len(self.active_channel);
+        for board in &self.boards {
+            board.digest_into(writer);
+        }
+        for pending in &self.pending {
+            writer.u32(*pending);
+        }
+        for state in &self.drop_state {
+            state.digest_into(writer);
+        }
+        self.stream.digest_into(writer);
+        match &self.active {
+            Some(group) => {
+                writer.u8(1);
+                group.digest_into(writer);
+            }
+            None => writer.u8(0),
+        }
+        self.control.digest_into(writer);
+        match &self.split {
+            Some(split) => {
+                writer.u8(1);
+                split.digest_into(writer);
+            }
+            None => writer.u8(0),
+        }
+        match &self.resolution {
+            Some(resolution) => {
+                writer.u8(1);
+                resolution.digest_into(writer);
+            }
+            None => writer.u8(0),
+        }
+        self.score.digest_into(writer);
+        self.fraction.digest_into(writer);
+        self.margin.digest_into(writer);
+        self.fever.digest_into(writer);
+        match &self.session {
+            Some(session) => {
+                writer.u8(1);
+                session.digest_into(writer);
+            }
+            None => writer.u8(0),
+        }
+        self.bags.digest_into(writer);
+        self.color_rng.digest_into(writer);
+        self.nuisance_rng.digest_into(writer);
+        self.fever_rng.digest_into(writer);
+        writer.u32(self.pending_attack);
+        match &self.settlement {
+            Some(settlement) => {
+                writer.u8(1);
+                settlement.digest_into(writer);
+            }
+            None => writer.u8(0),
+        }
+        writer.bool(self.defeated);
+        writer.len(self.chain_power_slot);
+        writer.u8(self.chain_total_links);
     }
 }

@@ -199,3 +199,39 @@ impl Board {
             .all(|coord| !self.get(coord).is_occupied())
     }
 }
+
+impl crate::digest::Digestible for Coord {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u8(self.x);
+        writer.u8(self.y);
+    }
+}
+
+impl crate::digest::Digestible for Cell {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        match self {
+            Self::Empty => writer.u8(0),
+            Self::Color(color) => {
+                writer.u8(1);
+                writer.u8(*color);
+            }
+            Self::Nuisance => writer.u8(2),
+        }
+    }
+}
+
+impl crate::digest::Digestible for BoardGeometry {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u8(self.width);
+        writer.u8(self.height);
+        writer.u8(self.hidden_rows);
+        writer.u8(self.spawn_column);
+    }
+}
+
+impl crate::digest::Digestible for Board {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        self.geometry.digest_into(writer);
+        writer.seq(&self.cells);
+    }
+}

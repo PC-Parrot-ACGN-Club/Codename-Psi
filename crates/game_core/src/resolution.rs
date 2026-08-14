@@ -432,3 +432,90 @@ fn gravity_plan(board: &Board) -> (Vec<GravityMove>, Board, u8) {
     }
     (moves, target, max_distance)
 }
+
+impl crate::digest::Digestible for ChainLinkFacts {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.u8(self.chain_index);
+        writer.seq(&self.cleared_colored_coords);
+        writer.seq(&self.cleared_nuisance_coords);
+        writer.u8(self.color_count);
+        writer.len(self.group_sizes.len());
+        for size in &self.group_sizes {
+            writer.u8(*size);
+        }
+        writer.u16(self.cleared_colored);
+    }
+}
+
+impl crate::digest::Digestible for FieldFacts {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.bool(self.all_clear);
+    }
+}
+
+impl crate::digest::Digestible for ChainReport {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.seq(&self.links);
+        writer.u32(self.total_cleared_colored);
+        self.field.digest_into(writer);
+    }
+}
+
+impl crate::digest::Digestible for GravityMove {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        self.from.digest_into(writer);
+        self.to.digest_into(writer);
+    }
+}
+
+impl crate::digest::Digestible for ResolutionPhase {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        match self {
+            Self::Idle => writer.u8(0),
+            Self::ClearPreview {
+                facts,
+                elapsed_ticks,
+                duration_ticks,
+            } => {
+                writer.u8(1);
+                facts.digest_into(writer);
+                writer.u16(*elapsed_ticks);
+                writer.u16(*duration_ticks);
+            }
+            Self::ClearCommit { facts } => {
+                writer.u8(2);
+                facts.digest_into(writer);
+            }
+            Self::Gravity {
+                moves,
+                target_board,
+                elapsed_ticks,
+                duration_ticks,
+            } => {
+                writer.u8(3);
+                writer.seq(moves);
+                // The uncommitted target board is persistent state even though
+                // it is never exposed, so it has to enter the checksum.
+                target_board.digest_into(writer);
+                writer.u16(*elapsed_ticks);
+                writer.u16(*duration_ticks);
+            }
+            Self::ScanNext { next_chain_index } => {
+                writer.u8(4);
+                writer.u8(*next_chain_index);
+            }
+            Self::Settlement(report) => {
+                writer.u8(5);
+                report.digest_into(writer);
+            }
+        }
+    }
+}
+
+impl crate::digest::Digestible for ResolutionState {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        self.board.digest_into(writer);
+        self.phase.digest_into(writer);
+        writer.seq(&self.committed_links);
+    }
+}
