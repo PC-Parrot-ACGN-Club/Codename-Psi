@@ -11,5 +11,5 @@ use game_core::MatchState;
 /// Placeholder session handle until the GGRS prototype lands.
 #[derive(Debug, Default)]
 pub struct NetSession {
-    _state: MatchState,
+    _state: Option<MatchState>,
 }

@@ -18,7 +18,7 @@ use client::bootstrap::{
     request_main_menu,
 };
 use client::data::DataErrorCause;
-use client::i18n::{DEFAULT_LOCALE, Localization};
+use client::i18n::Localization;
 use client::settings::UserSettings;
 use common::{
     controlled_app_with_asset_root, current_state, run_until_bootstrap_ready, state_only_app,
@@ -146,7 +146,7 @@ fn failed_settings_and_catalog_loads_still_release_the_barrier() {
 
 // integration-system/application-lifecycle::TC-007
 #[test]
-fn a_fallback_bootstrap_keeps_its_diagnostics_and_usable_values() {
+fn a_failed_catalog_bootstrap_keeps_its_diagnostics_and_key_fallback() {
     let (mut app, _root) = failing_bootstrap_app();
 
     run_until_bootstrap_ready(&mut app);
@@ -171,8 +171,8 @@ fn a_fallback_bootstrap_keeps_its_diagnostics_and_usable_values() {
         app.world()
             .resource::<Localization>()
             .text("main_menu.start"),
-        "Start",
-        "text queries stay safe after a catalog fallback"
+        "main_menu.start",
+        "without a catalog, the documented final fallback is the key"
     );
 }
 
@@ -283,7 +283,7 @@ fn a_startup_read_that_never_returns_resolves_on_the_timeout() {
 
 // integration-system/application-lifecycle::TC-009
 #[test]
-fn a_timed_out_bootstrap_keeps_its_diagnostics_and_built_in_defaults() {
+fn a_timed_out_bootstrap_keeps_its_diagnostics_and_key_fallback() {
     let (mut app, _root) = stalled_bootstrap_app();
 
     advance_past_timeout(&mut app);
@@ -311,13 +311,13 @@ fn a_timed_out_bootstrap_keeps_its_diagnostics_and_built_in_defaults() {
     );
     let localization = app.world().resource::<Localization>();
     assert!(
-        localization.catalogs.contains_key(DEFAULT_LOCALE),
-        "the built-in English catalog must stand in for the stalled reads"
+        localization.catalogs.is_empty(),
+        "failed catalogs must not synthesize content"
     );
     assert_eq!(
         localization.text("main_menu.start"),
-        "Start",
-        "text queries stay safe after a timeout"
+        "main_menu.start",
+        "the key remains the final fallback after a timeout"
     );
 }
 

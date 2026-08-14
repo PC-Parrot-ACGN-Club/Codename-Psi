@@ -1,7 +1,7 @@
 //! Startup barrier for settings and localization.
 //!
-//! Both tasks reach `Resolved` whether they loaded cleanly or fell back to a
-//! built-in default, so the barrier releases while diagnostics are kept.
+//! Both tasks reach `Resolved` whether they loaded cleanly or failed. Settings
+//! own their first-run default; localization resolves through its key fallback.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,9 +13,7 @@ use crate::app_state::{AppState, AppTransitionCause, AppTransitionRequests, AppT
 use crate::data::{
     DataCategory, DataErrorCause, DataLoadError, DataResolution, SourceText, resolve_source,
 };
-use crate::i18n::{
-    DEFAULT_LOCALE, Localization, SUPPORTED_LOCALES, builtin_english_catalog, parse_catalog,
-};
+use crate::i18n::{DEFAULT_LOCALE, Localization, SUPPORTED_LOCALES, parse_catalog};
 use crate::settings::{SettingsError, SettingsLoad, SettingsStore, UserSettings};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -50,11 +48,12 @@ pub struct BootstrapPaths {
     pub settings: Option<PathBuf>,
 }
 
-/// How long the barrier waits for a startup asset before falling back.
+/// How long the barrier waits for a startup asset before resolving failure.
 ///
 /// Asset reads are asynchronous, so without a deadline a source that never
 /// resolves would strand the app in `Boot`. Timing out is treated as a load
-/// failure: the built-in default is used and the barrier releases.
+/// failure: the localization key fallback remains available and the barrier
+/// releases.
 pub const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The in-flight localization reads, plus how long they have been waiting.
@@ -74,7 +73,7 @@ pub struct BootstrapOutput<'w, 's> {
     pub diagnostics: ResMut<'w, BootstrapDiagnostics>,
 }
 
-/// Diagnostics kept from a fallback so consumers can still see what failed.
+/// Diagnostics kept from a failed startup read.
 #[derive(Debug, Default, Resource)]
 pub struct BootstrapDiagnostics {
     pub settings: Option<SettingsError>,
@@ -192,27 +191,15 @@ pub fn poll_localization(
             _ => return,
         };
 
-        match resolve_source(
-            &path,
-            DataCategory::Localization,
-            builtin_english_catalog(),
-            source,
-            |text| parse_catalog(text).map_err(DataErrorCause::from),
-        ) {
+        match resolve_source(&path, DataCategory::Localization, source, |text| {
+            parse_catalog(text).map_err(DataErrorCause::from)
+        }) {
             DataResolution::Loaded(catalog) => catalogs.push(catalog),
-            DataResolution::Fallback { error, .. } => errors.push(error),
+            DataResolution::Failed(error) => errors.push(error),
         }
     }
 
     diagnostics.localization.extend(errors);
-
-    // A usable English catalog is always available, even when every read failed.
-    if !catalogs
-        .iter()
-        .any(|catalog| catalog.locale == DEFAULT_LOCALE)
-    {
-        catalogs.push(builtin_english_catalog());
-    }
 
     let locale = if catalogs
         .iter()

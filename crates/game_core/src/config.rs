@@ -7,6 +7,247 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::{
+    board::BoardGeometry,
+    rules::{CHAIN_POWER_TABLE_LEN, ChainPowerProfile},
+};
+
+/// Schema supported by the versioned Fever rule documents.
+pub const RULE_PROFILE_SCHEMA_VERSION: u32 = 1;
+
+/// A stable profile identity kept separate from the version and digest.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub struct RuleProfileId(pub String);
+
+/// A stable character identity used in match requests.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub struct CharacterId(pub String);
+
+/// The versioned rule portion of a match's content library.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RuleProfile {
+    pub schema_version: u32,
+    pub id: RuleProfileId,
+    pub rule_version: String,
+    pub reference_profile: String,
+    pub field: FieldConfig,
+    pub resolve: ResolveConfig,
+    pub nuisance: NuisanceConfig,
+    pub fever: FeverConfig,
+}
+
+/// Geometry and color count used by all fields in this profile.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct FieldConfig {
+    pub width: u8,
+    pub height: u8,
+    pub hidden_rows: u8,
+    pub spawn_column: u8,
+    pub color_count: u8,
+}
+
+impl FieldConfig {
+    /// Converts validated config coordinates to rules-board geometry.
+    #[must_use]
+    pub fn geometry(&self) -> Option<BoardGeometry> {
+        BoardGeometry::new(self.width, self.height, self.hidden_rows, self.spawn_column)
+    }
+}
+
+/// Tick values used by the resolution component.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ResolveConfig {
+    pub clear_threshold: u8,
+    pub clear_preview_ticks: u16,
+    pub gravity_ticks_by_distance: Vec<u16>,
+}
+
+/// Exact nuisance queue limits frozen into a profile.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct NuisanceConfig {
+    pub queue_limit: u32,
+    pub drop_limit: u32,
+}
+
+/// The Fever values needed before the game-mode state is constructed.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct FeverConfig {
+    pub gauge_capacity: u8,
+    pub initial_time_ticks: u32,
+    pub min_time_ticks: u32,
+    pub max_time_ticks: u32,
+    pub min_level: u8,
+    pub max_level: u8,
+}
+
+/// Per-character gameplay data in one profile partition.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CharacterPlay {
+    pub schema_version: u32,
+    pub profile_id: RuleProfileId,
+    pub character_id: CharacterId,
+    pub normal_chain_power: Vec<u16>,
+    pub fever_chain_power: Vec<u16>,
+}
+
+impl CharacterPlay {
+    fn chain_power(&self) -> Result<ChainPowerProfile, ConfigError> {
+        let normal: [u16; CHAIN_POWER_TABLE_LEN] = self
+            .normal_chain_power
+            .clone()
+            .try_into()
+            .map_err(|values: Vec<u16>| {
+                ConfigError::InvalidData(format!(
+                    "normal_chain_power must contain {CHAIN_POWER_TABLE_LEN} values, got {}",
+                    values.len()
+                ))
+            })?;
+        let fever: [u16; CHAIN_POWER_TABLE_LEN] = self
+            .fever_chain_power
+            .clone()
+            .try_into()
+            .map_err(|values: Vec<u16>| {
+                ConfigError::InvalidData(format!(
+                    "fever_chain_power must contain {CHAIN_POWER_TABLE_LEN} values, got {}",
+                    values.len()
+                ))
+            })?;
+        ChainPowerProfile::new(normal, fever)
+            .map_err(|error| ConfigError::InvalidData(error.to_string()))
+    }
+
+    /// Converts the validated stored samples to runtime-authoritative curves.
+    pub(crate) fn chain_power_for_match(&self) -> Result<ChainPowerProfile, ConfigError> {
+        self.chain_power()
+    }
+}
+
+/// Validated in-memory content; callers cannot freeze a match from raw files.
+#[derive(Debug, Clone)]
+pub struct ValidatedRuleLibrary {
+    profiles: BTreeMap<RuleProfileId, RuleProfile>,
+    plays: BTreeMap<(RuleProfileId, CharacterId), CharacterPlay>,
+}
+
+impl ValidatedRuleLibrary {
+    /// Validates independently parsed profile and character-play documents.
+    pub fn new(profiles: Vec<RuleProfile>, plays: Vec<CharacterPlay>) -> Result<Self, ConfigError> {
+        let mut profile_map = BTreeMap::new();
+        for profile in profiles {
+            validate_profile(&profile)?;
+            if profile_map.insert(profile.id.clone(), profile).is_some() {
+                return Err(ConfigError::InvalidData("duplicate rule profile id".into()));
+            }
+        }
+        let mut play_map = BTreeMap::new();
+        for play in plays {
+            if !profile_map.contains_key(&play.profile_id) {
+                return Err(ConfigError::InvalidData(format!(
+                    "play references unknown profile {}",
+                    play.profile_id.0
+                )));
+            }
+            play.chain_power()?;
+            let key = (play.profile_id.clone(), play.character_id.clone());
+            if play_map.insert(key, play).is_some() {
+                return Err(ConfigError::InvalidData(
+                    "duplicate character play definition".into(),
+                ));
+            }
+        }
+        Ok(Self {
+            profiles: profile_map,
+            plays: play_map,
+        })
+    }
+
+    /// Returns a profile selected by id.
+    #[must_use]
+    pub fn profile(&self, id: &RuleProfileId) -> Option<&RuleProfile> {
+        self.profiles.get(id)
+    }
+
+    /// Returns validated gameplay data for a character under a profile.
+    #[must_use]
+    pub fn character_play(
+        &self,
+        profile: &RuleProfileId,
+        character: &CharacterId,
+    ) -> Option<&CharacterPlay> {
+        self.plays.get(&(profile.clone(), character.clone()))
+    }
+}
+
+/// Parses one versioned rule profile from in-memory RON.
+pub fn parse_rule_profile(source: &str) -> Result<RuleProfile, ConfigError> {
+    let profile: RuleProfile =
+        ron::from_str(source).map_err(|error| ConfigError::Ron(error.to_string()))?;
+    if profile.schema_version != RULE_PROFILE_SCHEMA_VERSION {
+        return Err(ConfigError::UnsupportedSchema {
+            found: profile.schema_version,
+            supported: RULE_PROFILE_SCHEMA_VERSION,
+        });
+    }
+    validate_profile(&profile)?;
+    Ok(profile)
+}
+
+/// Parses one versioned character gameplay document from in-memory RON.
+pub fn parse_character_play(source: &str) -> Result<CharacterPlay, ConfigError> {
+    let play: CharacterPlay =
+        ron::from_str(source).map_err(|error| ConfigError::Ron(error.to_string()))?;
+    if play.schema_version != RULE_PROFILE_SCHEMA_VERSION {
+        return Err(ConfigError::UnsupportedSchema {
+            found: play.schema_version,
+            supported: RULE_PROFILE_SCHEMA_VERSION,
+        });
+    }
+    play.chain_power()?;
+    Ok(play)
+}
+
+fn validate_profile(profile: &RuleProfile) -> Result<(), ConfigError> {
+    if profile.id.0.is_empty()
+        || profile.rule_version.is_empty()
+        || profile.reference_profile.is_empty()
+    {
+        return Err(ConfigError::InvalidData(
+            "profile identifiers must not be empty".into(),
+        ));
+    }
+    if profile.field.color_count < 2 || profile.field.geometry().is_none() {
+        return Err(ConfigError::InvalidData(
+            "invalid field geometry or color count".into(),
+        ));
+    }
+    if profile.resolve.clear_threshold < 2
+        || profile.resolve.clear_preview_ticks == 0
+        || profile.resolve.gravity_ticks_by_distance.len() < 2
+        || profile.resolve.gravity_ticks_by_distance[0] != 0
+        || profile.resolve.gravity_ticks_by_distance[1..]
+            .iter()
+            .any(|ticks| *ticks == 0)
+    {
+        return Err(ConfigError::InvalidData(
+            "invalid resolution timing values".into(),
+        ));
+    }
+    if profile.nuisance.queue_limit == 0
+        || profile.nuisance.drop_limit == 0
+        || profile.nuisance.drop_limit > profile.nuisance.queue_limit
+    {
+        return Err(ConfigError::InvalidData("invalid nuisance limits".into()));
+    }
+    if profile.fever.gauge_capacity == 0
+        || profile.fever.min_time_ticks > profile.fever.initial_time_ticks
+        || profile.fever.initial_time_ticks > profile.fever.max_time_ticks
+        || profile.fever.min_level > profile.fever.max_level
+    {
+        return Err(ConfigError::InvalidData("invalid Fever range".into()));
+    }
+    Ok(())
+}
+
 /// Schema version supported by the current stub loaders.
 pub const STUB_SCHEMA_VERSION: u32 = 1;
 

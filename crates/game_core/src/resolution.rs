@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeSet, VecDeque};
 
-use crate::board::{BOARD_HEIGHT, BOARD_WIDTH, Board, Cell, Coord, HIDDEN_ROWS};
+use crate::board::{Board, Cell, Coord};
 
 /// Immutable facts for one committed link in a chain.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +64,8 @@ pub enum ResolutionPhase {
     Gravity {
         /// Deterministic source/target movement pairs.
         moves: Vec<GravityMove>,
+        /// Board committed atomically when the timed phase completes.
+        target_board: Board,
         /// Ticks elapsed in this phase.
         elapsed_ticks: u16,
         /// Frozen phase duration.
@@ -277,7 +279,7 @@ impl ResolutionState {
 
     /// `ClearCommit` end action: plan the gravity moves and their duration.
     fn plan_gravity(&mut self) {
-        let (moves, _, max_distance) = gravity_plan(&self.board);
+        let (moves, target_board, max_distance) = gravity_plan(&self.board);
         let duration_ticks = self
             .rules
             .gravity_ticks_by_distance
@@ -288,6 +290,7 @@ impl ResolutionState {
         // from the unchanged board at the atomic commit boundary.
         self.phase = ResolutionPhase::Gravity {
             moves,
+            target_board,
             elapsed_ticks: 0,
             duration_ticks,
         };
@@ -298,7 +301,10 @@ impl ResolutionState {
 
     /// `Gravity` end action: commit the target board atomically.
     fn enter_scan_next(&mut self) {
-        let (_, target, _) = gravity_plan(&self.board);
+        let target = match &self.phase {
+            ResolutionPhase::Gravity { target_board, .. } => target_board.clone(),
+            _ => unreachable!("gravity completion requires a planned target board"),
+        };
         self.board = target;
         self.phase = ResolutionPhase::ScanNext {
             next_chain_index: self.committed_links.len() as u8 + 1,
@@ -324,7 +330,7 @@ impl ResolutionState {
 fn scan_link(board: &Board, threshold: u8, chain_index: u8) -> Option<ChainLinkFacts> {
     let mut visited = BTreeSet::new();
     let mut groups: Vec<(u8, Vec<Coord>)> = Vec::new();
-    for origin in Board::visible_coords() {
+    for origin in board.visible_coords() {
         if visited.contains(&origin) {
             continue;
         }
@@ -336,7 +342,7 @@ fn scan_link(board: &Board, threshold: u8, chain_index: u8) -> Option<ChainLinkF
         visited.insert(origin);
         while let Some(coord) = queue.pop_front() {
             group.push(coord);
-            for neighbor in visible_neighbors(coord) {
+            for neighbor in visible_neighbors(board, coord) {
                 if !visited.contains(&neighbor) && board.get(neighbor) == Cell::Color(color) {
                     visited.insert(neighbor);
                     queue.push_back(neighbor);
@@ -359,7 +365,7 @@ fn scan_link(board: &Board, threshold: u8, chain_index: u8) -> Option<ChainLinkF
         group_sizes.push(group.len() as u8);
         for coord in group {
             colored.insert(coord);
-            for neighbor in visible_neighbors(coord) {
+            for neighbor in visible_neighbors(board, coord) {
                 if board.get(neighbor) == Cell::Nuisance {
                     nuisance.insert(neighbor);
                 }
@@ -377,12 +383,17 @@ fn scan_link(board: &Board, threshold: u8, chain_index: u8) -> Option<ChainLinkF
     })
 }
 
-fn visible_neighbors(coord: Coord) -> impl Iterator<Item = Coord> {
+fn visible_neighbors(board: &Board, coord: Coord) -> impl Iterator<Item = Coord> + '_ {
     const OFFSETS: [(i8, i8); 4] = [(0, -1), (-1, 0), (1, 0), (0, 1)];
     OFFSETS.into_iter().filter_map(move |(dx, dy)| {
         let x = i16::from(coord.x) + i16::from(dx);
         let y = i16::from(coord.y) + i16::from(dy);
-        if x >= 0 && x < BOARD_WIDTH as i16 && y >= HIDDEN_ROWS as i16 && y < BOARD_HEIGHT as i16 {
+        let geometry = board.geometry();
+        if x >= 0
+            && x < i16::from(geometry.width())
+            && y >= i16::from(geometry.hidden_rows())
+            && y < i16::from(geometry.height())
+        {
             Some(Coord {
                 x: x as u8,
                 y: y as u8,
@@ -398,12 +409,13 @@ fn gravity_plan(board: &Board) -> (Vec<GravityMove>, Board, u8) {
     // scanning, adjacent-nuisance clearing and `all_clear`, but not from
     // gravity: a ball parked in a hidden row falls into the visible region and
     // takes part in later links from there.
-    let mut target = Board::empty();
+    let geometry = board.geometry();
+    let mut target = Board::with_geometry(geometry);
     let mut moves = Vec::new();
     let mut max_distance = 0;
-    for x in 0..BOARD_WIDTH as u8 {
-        let mut destination = BOARD_HEIGHT as u8 - 1;
-        for y in (0..BOARD_HEIGHT as u8).rev() {
+    for x in 0..geometry.width() {
+        let mut destination = geometry.height() - 1;
+        for y in (0..geometry.height()).rev() {
             let from = Coord { x, y };
             let cell = board.get(from);
             if !cell.is_occupied() {

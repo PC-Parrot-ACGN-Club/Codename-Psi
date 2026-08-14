@@ -64,7 +64,7 @@ pub struct Localization {
 
 impl Default for Localization {
     fn default() -> Self {
-        Self::new(DEFAULT_LOCALE, [builtin_english_catalog()])
+        Self::new(DEFAULT_LOCALE, [])
     }
 }
 

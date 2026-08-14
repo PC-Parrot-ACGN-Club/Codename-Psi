@@ -3,7 +3,7 @@ use client::GameInfrastructurePlugin;
 use client::app_state::{AppState, AppTransitionCause, AppTransitionRequests, is_valid_transition};
 use client::bootstrap::{BootstrapStatus, BootstrapTaskState};
 use client::data::{DataCategory, DataErrorCause, DataLoadError, DataResolution};
-use client::i18n::{Localization, builtin_english_catalog};
+use client::i18n::Localization;
 use client::input::{FixedDirection, LocalInputSampler, PhysicalInput, UIAction};
 use client::settings::{PlayerInputBindings, SettingsStore, UserSettings};
 use client::simulation::{FIXED_HZ, FixedGameSet, SimulationProbe};
@@ -18,20 +18,16 @@ fn component_surfaces_are_available_to_external_tests() {
     sampler.press_fixed_direction(0, PhysicalInput::gamepad("DPadLeft"), FixedDirection::Left);
     let sampled = sampler.sample_fixed();
 
-    let localization = Localization::new("en", [builtin_english_catalog()]);
-    let resolution = DataResolution::Fallback {
-        value: localization.text("main_menu.start"),
-        error: DataLoadError {
-            path: "assets/i18n/en.json".into(),
-            category: DataCategory::Localization,
-            cause: DataErrorCause::Io("fixture".into()),
-        },
-    };
+    let resolution: DataResolution<String> = DataResolution::Failed(DataLoadError {
+        path: "assets/i18n/en.json".into(),
+        category: DataCategory::Localization,
+        cause: DataErrorCause::Io("fixture".into()),
+    });
     let tick_inputs = TickInputs::new(sampled).expect("one local participant fits");
 
     assert_eq!(settings.language, "en");
     assert!(tick_inputs.player(0).is_some());
-    assert_eq!(resolution.value(), "Start");
+    assert!(resolution.loaded().is_none());
     assert!(is_valid_transition(AppState::Boot, AppState::MainMenu));
 
     let _ui_action = UIAction::Confirm;

@@ -9,6 +9,7 @@ mod common;
 
 use bevy::prelude::*;
 use client::data::{DataCategory, DataErrorCause, RulesData};
+use game_core::config::RuleProfileId;
 
 use common::{WORKSPACE_ASSETS, controlled_app, controlled_app_with_asset_root};
 
@@ -40,16 +41,28 @@ fn the_root_plugin_publishes_typed_rules_from_the_repository_assets() {
         "the repository's own rules file must load cleanly"
     );
     assert_eq!(
-        data.rules().id,
-        "stub",
+        data.rules()
+            .expect("repository library is loaded")
+            .profile(&RuleProfileId("fever-r1".into()))
+            .expect("profile exists")
+            .id
+            .0,
+        "fever-r1",
         "the consumer reads the parsed document, not the source text"
     );
-    assert_eq!(data.rules().schema_version, 1);
+    assert_eq!(
+        data.rules()
+            .expect("repository library is loaded")
+            .profile(&RuleProfileId("fever-r1".into()))
+            .expect("profile exists")
+            .schema_version,
+        1
+    );
 }
 
 // integration-system/runtime-data::TC-003
 #[test]
-fn a_missing_rules_file_still_leaves_the_consumer_with_typed_data() {
+fn a_missing_rules_file_blocks_match_data_with_a_typed_error() {
     let root = tempfile::tempdir().expect("a temporary asset root");
     let mut app = controlled_app_with_asset_root(root.path().to_string_lossy().to_string());
     run_until_rules_resolved(&mut app);
@@ -57,7 +70,7 @@ fn a_missing_rules_file_still_leaves_the_consumer_with_typed_data() {
     let data = app.world().resource::<RulesData>();
     let error = data
         .error()
-        .expect("a missing file must resolve as a fallback, not as a clean load");
+        .expect("a missing file must resolve as a failure, not as a clean load");
 
     assert_eq!(error.category, DataCategory::Rules);
     assert!(
@@ -66,14 +79,13 @@ fn a_missing_rules_file_still_leaves_the_consumer_with_typed_data() {
         error.cause
     );
     assert!(
-        error.path.ends_with("rules.stub.ron"),
+        error.path.ends_with("rules/profiles/fever.ron"),
         "the diagnostic keeps the resource path: {:?}",
         error.path
     );
-    assert_eq!(
-        data.rules().id,
-        "builtin",
-        "the consumer still gets a usable document"
+    assert!(
+        data.rules().is_none(),
+        "rules failure must not synthesize authority"
     );
 }
 
@@ -91,5 +103,15 @@ fn the_plugin_owns_the_path_so_consumers_never_name_it() {
             .is_none(),
         "the in-flight read is dropped once the resolution is published"
     );
-    assert_eq!(app.world().resource::<RulesData>().rules().id, "stub");
+    assert_eq!(
+        app.world()
+            .resource::<RulesData>()
+            .rules()
+            .expect("library loaded")
+            .profile(&RuleProfileId("fever-r1".into()))
+            .expect("profile exists")
+            .id
+            .0,
+        "fever-r1"
+    );
 }

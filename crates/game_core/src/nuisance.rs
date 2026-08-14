@@ -5,6 +5,22 @@ pub const MAX_NUISANCE_DROP: u32 = 30;
 /// Number of board columns used by the rules kernel.
 pub const BOARD_COLUMNS: u8 = 6;
 
+/// Frozen nuisance values selected from a rule profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NuisanceRules {
+    pub drop_limit: u32,
+    pub columns: u8,
+}
+
+impl Default for NuisanceRules {
+    fn default() -> Self {
+        Self {
+            drop_limit: MAX_NUISANCE_DROP,
+            columns: BOARD_COLUMNS,
+        }
+    }
+}
+
 /// Per-channel deterministic position in the nuisance column sequence.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NuisanceDropState {
@@ -43,21 +59,40 @@ pub struct NuisanceDrop {
 /// Full rows always start at column zero.  The state only determines the
 /// incomplete final row and follows the two documented continuation branches.
 pub fn drop_nuisance(pending: &mut u32, state: &mut NuisanceDropState) -> NuisanceDrop {
-    let dropped = (*pending).min(MAX_NUISANCE_DROP);
+    drop_nuisance_with_rules(pending, state, NuisanceRules::default())
+}
+
+/// Removes a bounded batch using profile-provided board geometry.
+///
+/// `columns == 0` is rejected by profile validation. This function treats it
+/// as a no-op defensively so malformed caller data cannot panic a match.
+pub fn drop_nuisance_with_rules(
+    pending: &mut u32,
+    state: &mut NuisanceDropState,
+    rules: NuisanceRules,
+) -> NuisanceDrop {
+    if rules.columns == 0 {
+        return NuisanceDrop {
+            dropped: 0,
+            columns: Vec::new(),
+            remaining: *pending,
+        };
+    }
+    let dropped = (*pending).min(rules.drop_limit);
     *pending -= dropped;
-    let full_rows = dropped / u32::from(BOARD_COLUMNS);
-    let remainder = (dropped % u32::from(BOARD_COLUMNS)) as u8;
+    let full_rows = dropped / u32::from(rules.columns);
+    let remainder = (dropped % u32::from(rules.columns)) as u8;
     let mut columns = Vec::with_capacity(dropped as usize);
     for _ in 0..full_rows {
-        columns.extend(0..BOARD_COLUMNS);
+        columns.extend(0..rules.columns);
     }
     for offset in 0..remainder {
-        columns.push((state.next_column + offset) % BOARD_COLUMNS);
+        columns.push((state.next_column + offset) % rules.columns);
     }
     if remainder == 1 {
-        state.next_column = (state.next_column + 1) % BOARD_COLUMNS;
+        state.next_column = (state.next_column + 1) % rules.columns;
     } else if remainder >= 2 {
-        state.next_column = (state.next_column + remainder - 1) % BOARD_COLUMNS;
+        state.next_column = (state.next_column + remainder - 1) % rules.columns;
     }
     NuisanceDrop {
         dropped,

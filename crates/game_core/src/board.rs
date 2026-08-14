@@ -1,11 +1,70 @@
 //! Fixed-size, pure in-memory rules board.
 
-/// Board width defined by the current rule family.
+/// Default board width retained for fixtures and the Fever profile.
 pub const BOARD_WIDTH: usize = 6;
-/// Board height including the two hidden rows.
+/// Default board height including the two hidden rows.
 pub const BOARD_HEIGHT: usize = 14;
-/// Rows at the top of the board excluded from resolution.
+/// Default rows at the top of the board excluded from resolution.
 pub const HIDDEN_ROWS: usize = 2;
+
+/// Geometry frozen into a match specification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoardGeometry {
+    width: u8,
+    height: u8,
+    hidden_rows: u8,
+    spawn_column: u8,
+}
+
+impl BoardGeometry {
+    /// Creates valid board geometry.
+    #[must_use]
+    pub fn new(width: u8, height: u8, hidden_rows: u8, spawn_column: u8) -> Option<Self> {
+        (width > 0 && height > hidden_rows && spawn_column < width).then_some(Self {
+            width,
+            height,
+            hidden_rows,
+            spawn_column,
+        })
+    }
+
+    /// Column count.
+    #[must_use]
+    pub const fn width(self) -> u8 {
+        self.width
+    }
+    /// Total row count, including hidden rows.
+    #[must_use]
+    pub const fn height(self) -> u8 {
+        self.height
+    }
+    /// Number of hidden top rows.
+    #[must_use]
+    pub const fn hidden_rows(self) -> u8 {
+        self.hidden_rows
+    }
+    /// Column used to spawn a falling group.
+    #[must_use]
+    pub const fn spawn_column(self) -> u8 {
+        self.spawn_column
+    }
+    /// Whether `coord` belongs to this board.
+    #[must_use]
+    pub const fn contains(self, coord: Coord) -> bool {
+        coord.x < self.width && coord.y < self.height
+    }
+}
+
+impl Default for BoardGeometry {
+    fn default() -> Self {
+        Self {
+            width: BOARD_WIDTH as u8,
+            height: BOARD_HEIGHT as u8,
+            hidden_rows: HIDDEN_ROWS as u8,
+            spawn_column: 2,
+        }
+    }
+}
 
 /// A single occupied or empty board cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -70,7 +129,8 @@ impl Coord {
 /// Board storage with no I/O or presentation state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Board {
-    cells: [[Cell; BOARD_WIDTH]; BOARD_HEIGHT],
+    geometry: BoardGeometry,
+    cells: Vec<Cell>,
 }
 
 impl Default for Board {
@@ -82,9 +142,32 @@ impl Default for Board {
 impl Board {
     /// Creates an empty board.
     #[must_use]
-    pub const fn empty() -> Self {
+    pub fn empty() -> Self {
+        Self::with_geometry(BoardGeometry::default())
+    }
+
+    /// Creates an empty board for frozen match geometry.
+    #[must_use]
+    pub fn with_geometry(geometry: BoardGeometry) -> Self {
         Self {
-            cells: [[Cell::Empty; BOARD_WIDTH]; BOARD_HEIGHT],
+            geometry,
+            cells: vec![Cell::Empty; usize::from(geometry.width) * usize::from(geometry.height)],
+        }
+    }
+
+    /// Frozen geometry for this board.
+    #[must_use]
+    pub const fn geometry(&self) -> BoardGeometry {
+        self.geometry
+    }
+
+    /// Makes an in-range coordinate for this board.
+    #[must_use]
+    pub const fn coord(&self, x: u8, y: u8) -> Option<Coord> {
+        if x < self.geometry.width && y < self.geometry.height {
+            Some(Coord { x, y })
+        } else {
+            None
         }
     }
 
@@ -92,23 +175,27 @@ impl Board {
     /// cannot fail.
     #[must_use]
     pub fn get(&self, coord: Coord) -> Cell {
-        self.cells[coord.y as usize][coord.x as usize]
+        debug_assert!(self.geometry.contains(coord));
+        self.cells[usize::from(coord.y) * usize::from(self.geometry.width) + usize::from(coord.x)]
     }
 
     /// Writes a valid board coordinate.
     pub fn set(&mut self, coord: Coord, cell: Cell) {
-        self.cells[coord.y as usize][coord.x as usize] = cell;
+        debug_assert!(self.geometry.contains(coord));
+        let index = usize::from(coord.y) * usize::from(self.geometry.width) + usize::from(coord.x);
+        self.cells[index] = cell;
     }
 
     /// Iterates visible coordinates in the deterministic scan order.
-    pub fn visible_coords() -> impl Iterator<Item = Coord> {
-        (HIDDEN_ROWS as u8..BOARD_HEIGHT as u8)
-            .flat_map(|y| (0..BOARD_WIDTH as u8).map(move |x| Coord { x, y }))
+    pub fn visible_coords(&self) -> impl Iterator<Item = Coord> + '_ {
+        (self.geometry.hidden_rows..self.geometry.height)
+            .flat_map(move |y| (0..self.geometry.width).map(move |x| Coord { x, y }))
     }
 
     /// Reports whether visible rows are clear; hidden cells do not participate.
     #[must_use]
     pub fn visible_is_empty(&self) -> bool {
-        Self::visible_coords().all(|coord| !self.get(coord).is_occupied())
+        self.visible_coords()
+            .all(|coord| !self.get(coord).is_occupied())
     }
 }

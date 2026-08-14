@@ -13,7 +13,9 @@ use std::time::Duration;
 use bevy::asset::io::Reader;
 use bevy::asset::{Asset, AssetLoader, LoadContext, LoadState};
 use bevy::prelude::*;
-use game_core::config::{ConfigError, RulesStub, STUB_SCHEMA_VERSION, parse_rules_stub};
+use game_core::config::{
+    ConfigError, ValidatedRuleLibrary, parse_character_play, parse_rule_profile,
+};
 
 use crate::i18n::CatalogError;
 
@@ -72,16 +74,16 @@ pub struct DataLoadError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataResolution<T> {
     Loaded(T),
-    Fallback { value: T, error: DataLoadError },
+    Failed(DataLoadError),
 }
 
 impl<T> DataResolution<T> {
-    /// Both variants are resolved, so consumers always get a value; `error`
-    /// distinguishes a clean load from a fallback.
+    /// Returns loaded data when this resolution succeeded.
     #[must_use]
-    pub fn value(&self) -> &T {
+    pub const fn loaded(&self) -> Option<&T> {
         match self {
-            Self::Loaded(value) | Self::Fallback { value, .. } => value,
+            Self::Loaded(value) => Some(value),
+            Self::Failed(_) => None,
         }
     }
 
@@ -89,7 +91,7 @@ impl<T> DataResolution<T> {
     pub fn error(&self) -> Option<&DataLoadError> {
         match self {
             Self::Loaded(_) => None,
-            Self::Fallback { error, .. } => Some(error),
+            Self::Failed(error) => Some(error),
         }
     }
 }
@@ -136,44 +138,36 @@ impl AssetLoader for SourceTextLoader {
 ///
 /// The path belongs here rather than to any consumer: `client::data` owns the
 /// asset root and the load lifecycle, and consumers only read the resolution.
-pub const RULES_PATH: &str = "data/rules.stub.ron";
+pub const RULES_PATHS: [&str; 3] = [
+    "data/rules/profiles/fever.ron",
+    "data/rules/play/fever-r1/psi-a.ron",
+    "data/rules/play/fever-r1/psi-b.ron",
+];
 
 /// How long a data read may hang before it is treated as failed.
-///
-/// Without this a stalled read would leave consumers with no typed data at
-/// all, which is the one outcome the contract rules out. Matches the startup
-/// barrier's timeout; unlike the barrier, this load does not gate `Boot`.
 pub const DATA_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Rules used when the file cannot be read or parsed.
-fn builtin_rules() -> RulesStub {
-    RulesStub {
-        schema_version: STUB_SCHEMA_VERSION,
-        id: "builtin".into(),
-    }
-}
 
 /// A rules read in flight; removed once the resolution is published.
 #[derive(Debug, Resource)]
 pub struct RulesLoad {
-    handle: Handle<SourceText>,
+    handles: Vec<Handle<SourceText>>,
     waited: Duration,
 }
 
 /// The resolved rules document, in the form consumers read.
 ///
-/// Present only once the load settles. Both resolutions carry a usable value,
-/// so a consumer never has to handle "loaded but empty".
+/// Present only once the load settles. A failed rules resolution deliberately
+/// has no substitute: the client must not start a match without authority.
 #[derive(Debug, Resource)]
-pub struct RulesData(pub DataResolution<RulesStub>);
+pub struct RulesData(pub DataResolution<ValidatedRuleLibrary>);
 
 impl RulesData {
     #[must_use]
-    pub fn rules(&self) -> &RulesStub {
-        self.0.value()
+    pub fn rules(&self) -> Option<&ValidatedRuleLibrary> {
+        self.0.loaded()
     }
 
-    /// The read or parse failure behind a fallback, if this is one.
+    /// The read or parse failure, if this is one.
     #[must_use]
     pub fn error(&self) -> Option<&DataLoadError> {
         self.0.error()
@@ -183,7 +177,10 @@ impl RulesData {
 /// Ask Bevy Asset for the rules document.
 pub fn start_rules_load(asset_server: Res<AssetServer>, mut commands: Commands) {
     commands.insert_resource(RulesLoad {
-        handle: asset_server.load::<SourceText>(RULES_PATH),
+        handles: RULES_PATHS
+            .iter()
+            .map(|path| asset_server.load::<SourceText>(*path))
+            .collect(),
         waited: Duration::ZERO,
     });
 }
@@ -202,27 +199,62 @@ pub fn poll_rules(
     load.waited += time.delta();
     let timed_out = load.waited >= DATA_LOAD_TIMEOUT;
 
-    let source = match asset_server.load_state(&load.handle) {
-        LoadState::Loaded => sources
-            .get(&load.handle)
-            .map(|text| Ok(text.0.as_str()))
-            .unwrap_or(Err(DataErrorCause::Io("asset dropped after load".into()))),
-        LoadState::Failed(error) => Err(DataErrorCause::Io(error.to_string())),
-        _ if timed_out => Err(DataErrorCause::Io(format!(
-            "timed out after {}s",
-            DATA_LOAD_TIMEOUT.as_secs()
-        ))),
-        // Still reading: nothing to resolve this frame.
-        _ => return,
+    let source_for = |index: usize| -> Option<Result<&str, DataErrorCause>> {
+        Some(match asset_server.load_state(&load.handles[index]) {
+            LoadState::Loaded => sources
+                .get(&load.handles[index])
+                .map(|text| Ok(text.0.as_str()))
+                .unwrap_or(Err(DataErrorCause::Io("asset dropped after load".into()))),
+            LoadState::Failed(error) => Err(DataErrorCause::Io(error.to_string())),
+            _ if timed_out => Err(DataErrorCause::Io(format!(
+                "timed out after {}s",
+                DATA_LOAD_TIMEOUT.as_secs()
+            ))),
+            _ => return None,
+        })
     };
-
-    commands.insert_resource(RulesData(resolve_source(
-        RULES_PATH,
-        DataCategory::Rules,
-        builtin_rules(),
-        source,
-        |text| parse_rules_stub(text).map_err(DataErrorCause::from),
-    )));
+    let mut source_texts = Vec::with_capacity(RULES_PATHS.len());
+    for index in 0..RULES_PATHS.len() {
+        let Some(source) = source_for(index) else {
+            return;
+        };
+        source_texts.push(source);
+    }
+    let resolution = (|| {
+        let profile = source_texts[0]
+            .as_ref()
+            .map_err(|cause| (0, cause.clone()))
+            .and_then(|text| {
+                parse_rule_profile(text)
+                    .map_err(DataErrorCause::from)
+                    .map_err(|cause| (0, cause))
+            })?;
+        let plays = source_texts[1..]
+            .iter()
+            .enumerate()
+            .map(|(index, source)| {
+                source
+                    .as_ref()
+                    .map_err(|cause| (index + 1, cause.clone()))
+                    .and_then(|text| {
+                        parse_character_play(text)
+                            .map_err(DataErrorCause::from)
+                            .map_err(|cause| (index + 1, cause))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        ValidatedRuleLibrary::new(vec![profile], plays)
+            .map_err(DataErrorCause::from)
+            .map_err(|cause| (0, cause))
+    })();
+    commands.insert_resource(RulesData(match resolution {
+        Ok(library) => DataResolution::Loaded(library),
+        Err((index, cause)) => DataResolution::Failed(DataLoadError {
+            path: RULES_PATHS[index].into(),
+            category: DataCategory::Rules,
+            cause,
+        }),
+    }));
     commands.remove_resource::<RulesLoad>();
 }
 
@@ -246,7 +278,6 @@ impl Plugin for DataPlugin {
 pub fn resolve_source<T>(
     path: impl AsRef<Path>,
     category: DataCategory,
-    fallback: T,
     source: Result<&str, DataErrorCause>,
     parser: impl FnOnce(&str) -> Result<T, DataErrorCause>,
 ) -> DataResolution<T> {
@@ -254,13 +285,10 @@ pub fn resolve_source<T>(
     let outcome = source.and_then(parser);
     match outcome {
         Ok(value) => DataResolution::Loaded(value),
-        Err(cause) => DataResolution::Fallback {
-            value: fallback,
-            error: DataLoadError {
-                path: path.into(),
-                category,
-                cause,
-            },
-        },
+        Err(cause) => DataResolution::Failed(DataLoadError {
+            path: path.into(),
+            category,
+            cause,
+        }),
     }
 }

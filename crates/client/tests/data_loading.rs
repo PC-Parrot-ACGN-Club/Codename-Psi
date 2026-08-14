@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use client::data::{
     DataCategory, DataErrorCause, DataPlugin, DataResolution, SourceText, resolve_source,
 };
-use client::i18n::{Catalog, builtin_english_catalog, parse_catalog};
+use client::i18n::{Catalog, parse_catalog};
 use game_core::config::{RulesStub, parse_rules_stub};
 
 #[derive(Debug, Resource)]
@@ -17,13 +17,6 @@ struct RulesResolutions(Vec<(&'static str, DataResolution<RulesStub>)>);
 
 #[derive(Debug, Resource)]
 struct CatalogResolution(DataResolution<Catalog>);
-
-fn builtin_rules_default() -> RulesStub {
-    RulesStub {
-        schema_version: 1,
-        id: "builtin-default".into(),
-    }
-}
 
 /// Handles requested in `Startup`, resolved once the reads settle.
 #[derive(Debug, Resource)]
@@ -76,7 +69,6 @@ fn resolve_fixtures(
             resolve_source(
                 format!("data/rules.{name}.ron"),
                 DataCategory::Rules,
-                builtin_rules_default(),
                 source,
                 |text| parse_rules_stub(text).map_err(DataErrorCause::from),
             ),
@@ -89,7 +81,6 @@ fn resolve_fixtures(
     let catalog = resolve_source(
         "i18n/invalid.json",
         DataCategory::Localization,
-        builtin_english_catalog(),
         source,
         |text| parse_catalog(text).map_err(DataErrorCause::from),
     );
@@ -165,13 +156,16 @@ fn a_valid_resource_resolves_to_loaded_typed_data() {
     let resolution = rules_resolution(&app, "valid");
 
     assert_eq!(resolution.error(), None);
-    assert_eq!(resolution.value().id, "stub");
+    assert_eq!(
+        resolution.loaded().expect("valid data is present").id,
+        "stub"
+    );
     assert!(matches!(resolution, DataResolution::Loaded(_)));
 }
 
 // integration-system/runtime-data::TC-001
 #[test]
-fn a_missing_resource_falls_back_with_io_context() {
+fn a_missing_resource_is_failed_with_io_context() {
     let (app, _root) = app_with_fixtures();
 
     let resolution = rules_resolution(&app, "missing");
@@ -180,12 +174,13 @@ fn a_missing_resource_falls_back_with_io_context() {
     assert!(matches!(error.cause, DataErrorCause::Io(_)));
     assert_eq!(error.category, DataCategory::Rules);
     assert!(error.path.ends_with("rules.missing.ron"));
-    assert_eq!(resolution.value(), &builtin_rules_default());
+    assert!(resolution.loaded().is_none());
+    assert!(matches!(resolution, DataResolution::Failed(_)));
 }
 
 // integration-system/runtime-data::TC-001
 #[test]
-fn a_malformed_resource_falls_back_with_a_parse_cause() {
+fn a_malformed_resource_is_failed_with_a_parse_cause() {
     let (app, _root) = app_with_fixtures();
 
     let resolution = rules_resolution(&app, "malformed");
@@ -196,12 +191,12 @@ fn a_malformed_resource_falls_back_with_a_parse_cause() {
     assert!(matches!(error.cause, DataErrorCause::Parse(_)));
     assert_eq!(error.category, DataCategory::Rules);
     assert!(error.path.ends_with("rules.malformed.ron"));
-    assert_eq!(resolution.value(), &builtin_rules_default());
+    assert!(resolution.loaded().is_none());
 }
 
 // integration-system/runtime-data::TC-001
 #[test]
-fn an_unsupported_resource_falls_back_while_keeping_the_version() {
+fn an_unsupported_resource_is_failed_while_keeping_the_version() {
     let (app, _root) = app_with_fixtures();
 
     let resolution = rules_resolution(&app, "unsupported");
@@ -216,12 +211,12 @@ fn an_unsupported_resource_falls_back_while_keeping_the_version() {
             supported: 1,
         }
     );
-    assert_eq!(resolution.value(), &builtin_rules_default());
+    assert!(resolution.loaded().is_none());
 }
 
 // integration-system/runtime-data::TC-001
 #[test]
-fn a_semantically_invalid_catalog_falls_back_with_an_invalid_data_cause() {
+fn a_semantically_invalid_catalog_is_failed_with_an_invalid_data_cause() {
     let (app, _root) = app_with_fixtures();
 
     let resolution = app.world().resource::<CatalogResolution>().0.clone();
@@ -238,5 +233,5 @@ fn a_semantically_invalid_catalog_falls_back_with_an_invalid_data_cause() {
         ),
         other => panic!("expected InvalidData, got {other:?}"),
     }
-    assert_eq!(resolution.value(), &builtin_english_catalog());
+    assert!(resolution.loaded().is_none());
 }

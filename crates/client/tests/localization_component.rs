@@ -23,11 +23,11 @@ fn catalog(locale: &str, entries: &[(&str, &str)]) -> Catalog {
 
 // component/localization::TC-001
 #[test]
-fn localization_defaults_to_english_without_a_valid_language_setting() {
+fn localization_defaults_to_english_and_uses_key_without_loaded_catalogs() {
     let localization = Localization::default();
 
     assert_eq!(localization.current_locale, DEFAULT_LOCALE);
-    assert_eq!(localization.text("main_menu.start"), "Start");
+    assert_eq!(localization.text("main_menu.start"), "main_menu.start");
 }
 
 // component/localization::TC-002

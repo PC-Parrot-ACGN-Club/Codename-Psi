@@ -4,7 +4,10 @@ mod common;
 
 use common::{A_FEVER, A_NORMAL, B_FEVER, B_NORMAL, TARGET_POINTS, color_bonus, group_bonus};
 use game_core::{
-    nuisance::{MAX_NUISANCE_DROP, NuisanceDropState, drop_nuisance, offset_attack},
+    nuisance::{
+        MAX_NUISANCE_DROP, NuisanceDropState, NuisanceRules, drop_nuisance,
+        drop_nuisance_with_rules, offset_attack,
+    },
     resolution::ChainLinkFacts,
     rules::{BoardMode, ChainPowerProfile},
     scoring::{AttackFraction, MarginState, ScoreState, ScoringRules},
@@ -12,6 +15,23 @@ use game_core::{
 
 fn profile(normal: [u16; 24], fever: [u16; 24]) -> ChainPowerProfile {
     ChainPowerProfile::new(normal, fever).expect("published table is in domain")
+}
+
+#[test]
+fn profile_nuisance_rules_control_the_batch_limit_without_changing_column_order() {
+    let mut pending = 9;
+    let mut state = NuisanceDropState::at_column(0);
+    let drop = drop_nuisance_with_rules(
+        &mut pending,
+        &mut state,
+        NuisanceRules {
+            drop_limit: 4,
+            columns: 6,
+        },
+    );
+    assert_eq!(drop.dropped, 4);
+    assert_eq!(drop.columns, vec![0, 1, 2, 3]);
+    assert_eq!(drop.remaining, 5);
 }
 
 fn fever_rules() -> ScoringRules {
