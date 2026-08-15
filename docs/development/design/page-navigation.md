@@ -41,6 +41,9 @@
 - 输出：新的焦点项。
 - 错误语义：环内只有一项时焦点不变，不产生诊断。
 
+焦点环的次序即页面的视觉次序。页面分多列排布时，环先走完一列的全部项再进入下一列，
+列内自上而下。
+
 ### 确认
 
 - 输入：一次 `UIAction::Confirm`。
@@ -96,7 +99,7 @@ page entity 以 `DespawnOnExit<AppState>` 绑定所属状态，由状态退出�
 ## 边界
 
 - 本文不定义有效状态边与仲裁（见[应用状态机](application-state-machine.md)）。
-- 本文不定义 `UIAction` 的物理绑定（见[UI 交互动作：物理绑定关系](ui-action-input.md#物理绑定关系)）。
+- 本文不定义 `UIAction` 的物理绑定，也不定义各页面常驻的按键提示（见[UI 交互动作：物理绑定关系](ui-action-input.md#物理绑定关系)、[按键提示](ui-action-input.md#按键提示)）。
 - 本文不定义设置项的取值域、冲突判定与持久化（见[本机用户设置](user-settings.md)）。
 - 本文不定义页面的视觉布局、配色与动效（见[表现与 UI 设计](../../presentation.md)、[表现运行时](presentation-runtime.md)）。
 - 本文不定义对局 HUD 的内容与更新（见[表现运行时](presentation-runtime.md)）。

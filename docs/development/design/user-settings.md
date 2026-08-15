@@ -49,19 +49,25 @@ enum AnimationIntensity {
 | --- | --- | --- | --- |
 | `SoftDrop` | `S` | `↓` | DPadDown |
 | `HardDrop` | `W` | `↑` | DPadUp |
-| `RotateClockwise` | `K` | `Numpad2` | South |
-| `RotateCounterClockwise` | `J` | `Numpad1` | West |
+| `RotateClockwise` | `K` | `Numpad2` | East |
+| `RotateCounterClockwise` | `J` | `Numpad1` | South |
 
-默认绑定不为空：没有设置文件时，键盘与手柄都可以直接产生全部六个规则动作，其中 `Left` / `Right` 来自[UI 交互动作：固定绑定表](ui-action-input.md#固定绑定表)。
+两个旋转动作的绑定同时承担菜单的确认与返回（见[UI 交互动作：绑定来源表](ui-action-input.md#绑定来源表)），默认值按两种用途一并选取：手柄取 South / East，使手柄上的确认与返回保持该平台的惯例。
+
+默认绑定不为空：没有设置文件时，键盘与手柄都可以直接产生全部六个规则动作，其中 `Left` / `Right` 来自同一张表的固定绑定。
 
 下列物理位在默认绑定下被两个领域共用，由输入上下文区分：
 
 ```text
-P1 W / S        Gameplay: HardDrop / SoftDrop    Menu: Up / Down
-P2 ↑ / ↓        Gameplay: HardDrop / SoftDrop    Menu: Up / Down
-DPadUp / Down   Gameplay: HardDrop / SoftDrop    Menu: Up / Down
-South           Gameplay: RotateClockwise        Menu: Confirm
+P1 W / S        Gameplay: HardDrop / SoftDrop         Menu: Up / Down
+P2 ↑ / ↓        Gameplay: HardDrop / SoftDrop         Menu: Up / Down
+DPadUp / Down   Gameplay: HardDrop / SoftDrop         Menu: Up / Down
+P1 J / K        Gameplay: RotateCCW / RotateCW        Menu: Confirm / Back
+P2 Num1 / Num2  Gameplay: RotateCCW / RotateCW        Menu: Confirm / Back
+South / East    Gameplay: RotateCCW / RotateCW        Menu: Confirm / Back
 ```
+
+旋转一行随玩家的绑定移动，其余各行固定。
 
 ## 行为
 
@@ -103,18 +109,18 @@ South           Gameplay: RotateClockwise        Menu: Confirm
   1. 进入捕获态，暂停该设备类别的常规输入消费；
   2. 记录首个属于目标设备类别的物理输入作为候选绑定；
   3. 对候选绑定执行下节的冲突判断；
-  4. 无冲突时写入，有冲突时把冲突结果交给设置 UI，由玩家选择覆盖或取消。
-- 输出：更新后的 `PlayerInputBindings`，或一次被取消的捕获。
+  4. 无冲突时写入并结束捕获，有冲突时不写入、结束捕获并把冲突结果交给设置 UI 展示。
+- 输出：更新后的 `PlayerInputBindings`，或一次未改变绑定表的捕获。
 - 错误语义：捕获期间的返回输入取消本次捕获并保留原绑定；捕获态不产生 `UIAction`，也不产生规则动作。
 
-覆盖生效后立即用于运行时采样，不等待下一次进入对局。
+写入生效后立即用于运行时采样，不等待下一次进入对局。
 
 ### 输入绑定冲突
 
 - 输入：设置页面准备写入的新绑定（仅 `SoftDrop` / `HardDrop` / `RotateClockwise` / `RotateCounterClockwise` 四个可配置动作）。
 - 处理：判断新绑定是否与同一配置范围内已有绑定冲突。配置范围是**同一玩家的同一设备类别**：P1 键盘与 P2 键盘互不冲突，同一玩家的键盘与手柄绑定也互不冲突。
-- 输出：可供设置 UI 判断的冲突结果，包含被占用的动作。
-- 错误语义：冲突属于可处理业务结果，由设置 UI 决定覆盖或重新绑定。覆盖使原先占用该物理位的动作变为未绑定，该动作在重新绑定前不产生输入。
+- 输出：可供设置 UI 展示的冲突结果，包含被占用的动作。
+- 错误语义：冲突时拒绝写入，绑定表保持原样，设置 UI 展示是哪个动作占用了该物理位。占用方不会被夺走绑定：一个动作失去全部绑定就不再产生输入，而两个旋转动作同时承担菜单的确认与返回，失去绑定的玩家将无法操作设置页本身。一个物理位需要改绑到别处时，先把占用方改到其它物理位。
 
 ## 平台目录
 

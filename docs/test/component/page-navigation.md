@@ -31,6 +31,8 @@
 - 各页面焦点项确认后产生对照表规定的 cause（TC-004）。
 - 返回在无返回目标的页面被丢弃，设置页返回目标取自来源（TC-005）。
 - 局域网入口禁用且不进入对局（TC-006）。
+- 分多列排布的页面，焦点环次序与视觉次序一致（TC-010）。
+- 两个下角的按键提示分属两名玩家，给出各自当前的确认与返回键（TC-011）。
 
 ### Component — Input
 
@@ -43,6 +45,8 @@
 | --- | --- | --- |
 | 边界值 | 焦点位于环首、环尾与单项环 | TC-001～TC-002 |
 | 判定表 | 页面 × 焦点项 → cause；来源状态 × 返回目标 | TC-004～TC-005 |
+| 状态转移 | 沿环连续移动一整圈，比对次序与列布局 | TC-010 |
+| 场景法 | 改绑旋转前后的按键提示文本 | TC-011 |
 | 等价类划分 | 启用项与禁用项 | TC-003、TC-006 |
 | 场景法 | 双玩家分别操作角色选择的两个槽位 | TC-007～TC-009 |
 
@@ -59,6 +63,8 @@
 | TC-007 | 角色选择的两个焦点环按玩家隔离 | P0 | Component | — | Input；Client | 本地双人的 CharacterSelect，两个槽位各有独立焦点环 | 只对 P1 施加 `Down`，再只对 P2 施加 `Down` | P1 与 P2 各三项角色环，起始焦点均为索引 0 | 第一次操作后 P1 焦点为索引 1、P2 仍为索引 0；第二次操作后 P2 焦点为索引 1、P1 保持索引 1 | [Confirmed] [页面导航与焦点：页面输入归属](../../development/design/page-navigation.md#页面输入归属) |
 | TC-008 | 非角色选择页面共用一个焦点环，单人模式 P2 输入不驱动焦点 | P1 | Component | — | Input；Client | 分别构造 MainMenu 环与单人模式的 CharacterSelect | 分别以 P1 与 P2 来源施加 `Down` | MainMenu 三项环；单人模式 CharacterSelect | MainMenu 上两个来源都移动同一个焦点环；单人模式下 P2 来源的输入不移动任何焦点环 | [Confirmed] [页面导航与焦点：页面输入归属](../../development/design/page-navigation.md#页面输入归属) |
 | TC-009 | 两个槽位都确认后确认项才可用 | P1 | Component | — | Client；Match Flow | 本地双人的 CharacterSelect，两个槽位均未确认 | 依次确认 P1 槽位、检查确认项、确认 P2 槽位、再检查确认项 | 两槽位各选一个角色，允许相同角色 | 仅 P1 确认时确认项为禁用且 `Confirm` 不产生 `CharacterConfirmed`；两槽位均确认后确认项启用，`Confirm` 产生一次 `CharacterConfirmed`；两槽位选择相同角色时同样可确认 | [Confirmed] [页面导航与焦点：页面输入归属](../../development/design/page-navigation.md#页面输入归属) |
+| TC-010 | 设置页焦点环次序与两列排布一致 | P1 | Component | — | Client | 已构造 Settings 焦点环 | 从环首连续施加 `Down` 走完一整圈，记录经过的项 | 通用设置项、返回项、每玩家每动作每设备的重绑定项 | 先经过全部通用设置项，随后是返回项，最后才是全部重绑定项；返回项不出现在重绑定项之后 | [Confirmed] [页面导航与焦点：焦点移动](../../development/design/page-navigation.md#焦点移动) |
+| TC-011 | 下角按键提示按玩家给出当前确认与返回键 | P1 | Component | — | Client；Input | 使用默认设置与已加载的 `en` 词条，两名玩家均未连接手柄 | 取两名玩家的提示文本；再把 P1 的 `RotateCounterClockwise` 改绑到另一物理键后重取 | 默认 `UserSettings`；改绑后的新键；设置页该重绑定行的标签 | P1 提示含其默认的 `J` 与 `K` 并标明属于 P1，P2 提示标明属于 P2 且与 P1 不同；改绑后提示给出新键、不再给出原键；该重绑定行的标签同时给出规则动作名与菜单动作名 | [Confirmed] [UI 交互动作：按键提示](../../development/design/ui-action-input.md#按键提示)、[绑定来源表](../../development/design/ui-action-input.md#绑定来源表) |
 
 ## 风险查漏
 

@@ -127,7 +127,7 @@ RotateClockwise + RotateCounterClockwise
 
 - 本文不定义互斥逻辑组合的最终含义（见[统一游戏动作与 Tick 输入：逻辑动作归一化](game-action-input.md#逻辑动作归一化)）。采样端只报告该 tick 采样到哪些逻辑动作。
 - 本文不定义绑定编辑、重复物理按键提示与覆盖交互（见[本机用户设置](user-settings.md)）。
-- 本文不定义固定绑定的具体键位（见[UI 交互动作：固定绑定表](ui-action-input.md#固定绑定表)）。
+- 本文不定义固定绑定的具体键位（见[UI 交互动作：绑定来源表](ui-action-input.md#绑定来源表)）。
 - 本文不定义方向移动的重复节奏（见[玩法设计](../../gameplay.md)）。
 - 设备 ID、Bevy 输入类型和物理按键语义只存在于 client，不进入 `game_core`。
 - 普通 `Update` 的执行频率和渲染帧率不改变本文的 fixed tick 输入语义。

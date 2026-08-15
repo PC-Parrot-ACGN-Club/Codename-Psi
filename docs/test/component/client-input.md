@@ -27,6 +27,7 @@
 - 固定与可配置输入、玩家隔离及同义来源合并（TC-001～TC-003）。
 - 持续动作和一次性动作的完整输入时序（TC-004～TC-005）。
 - 相同物理方向在 gameplay 与 UI 上下文中的领域隔离（TC-006）。
+- 确认与返回取自玩家自己的旋转绑定，改绑后随之移动（TC-009）。
 - 摇杆阈值及采样器不提供连发（TC-007～TC-008）。
 
 ## 设计方法与覆盖模型
@@ -34,6 +35,7 @@
 | 方法 | 输入模型 / 风险 | 关联用例 |
 | --- | --- | --- |
 | 等价类划分 | 已绑定、未绑定、固定与可配置输入 | TC-001、TC-006 |
+| 状态迁移 | 改绑旋转前后同一物理键的菜单含义 | TC-009 |
 | 边界值分析 | fixed tick 前后的 press/release；摇杆阈值上下 | TC-004～TC-005、TC-007 |
 | 场景法 | 双玩家隔离与多物理来源合并 | TC-002～TC-003 |
 | 错误猜测 | tick 间短按、持续按住一次性动作 | TC-004～TC-005 |
@@ -50,6 +52,7 @@
 | TC-006 | 同一固定方向输入按上下文产生独立领域动作 | P1 | Component | — | Input；Client | 固定 Left 物理方向输入可在 gameplay 与 UI 输入上下文中解释 | 分别在 Match gameplay context 与 Menu UI context 注入同一固定 Left 方向输入 | context=`Match/Menu`；physical input=`Left direction` | Match 中只产生 `GameAction::Left` 并可进入规则输入；Menu 中只产生 `UIAction::Left` 并用于 UI；两个动作类型和输出容器保持独立；Left 不作为用户可配置绑定 | [Confirmed] [UI 交互动作：物理绑定关系](../../development/design/ui-action-input.md#物理绑定关系)、[边界](../../development/design/ui-action-input.md#边界) |
 | TC-007 | 左摇杆方向按阈值 `0.5` 判定 | P2 | Component | — | Input | 采样器可接收摇杆分量 | 提交阈值上下与边界处的分量后采样 | 分量 `0.4`、`0.5`、`0.6` | `0.4` 与 `0.5` 不产生方向动作，`0.6` 产生；摇杆方向与十字键、键盘方向合并为同一逻辑动作 | [Confirmed] [本地输入采样：摇杆方向判定](../../development/design/local-input-sampling.md#摇杆方向判定) |
 | TC-008 | 持续保持方向输入不产生连发 | P2 | Component | — | Input | 采样器持有已绑定的方向输入 | 保持方向按下并连续采样多个 fixed tick | 保持 `Left` 按下 5 个 tick | 每个 tick 各产生一次 `Left`，采样器不额外插入重复触发 | [Confirmed] [本地输入采样：摇杆方向判定](../../development/design/local-input-sampling.md#摇杆方向判定) |
+| TC-009 | 确认与返回取自玩家自己的旋转绑定并随改绑移动 | P1 | Component | — | Input；Client | 菜单上下文，两名玩家使用默认绑定 | 分别注入两名玩家的默认旋转键与手柄旋转键；再把 P1 的 `RotateCounterClockwise` 改绑到另一物理键，注入新键与原键 | P1 `J` / `K`；P2 `Numpad1` / `Numpad2`；手柄 South / East；改绑后的新键 | 每名玩家的 `RotateCounterClockwise` 键产生该玩家的 `Confirm`、`RotateClockwise` 键产生该玩家的 `Back`，且只归属该玩家；手柄 South 为 `Confirm`、East 为 `Back`；改绑后新键产生 `Confirm`，原键不再产生 `Confirm` | [Confirmed] [UI 交互动作：物理绑定关系](../../development/design/ui-action-input.md#物理绑定关系)、[绑定来源表](../../development/design/ui-action-input.md#绑定来源表) |
 
 ## 风险查漏
 

@@ -32,24 +32,30 @@ enum UIAction {
 
 ## 物理绑定关系
 
-物理绑定分为固定绑定与可配置绑定两类，由设置系统（`client::settings`）在绑定编辑时遵循：
+`UIAction` 的六个成员都不拥有独立的物理绑定，每个成员都是某一路物理输入在 UI 上下文中的含义，由输入上下文决定产生哪个领域类型的动作：
 
-- `UIAction` 的六个成员全部使用固定绑定，不出现在可配置绑定列表中。
-- `Left` / `Right` 与 `GameAction::Left` / `GameAction::Right` 复用同一路物理方向输入，由输入上下文决定产生哪个领域类型的动作，不是各自独立的配置项。
-- `GameAction` 中仅 `SoftDrop` / `HardDrop` / `RotateClockwise` / `RotateCounterClockwise` 保留用户可配置绑定。
+- `Left` / `Right` / `Up` / `Down` 复用固定的物理方向输入，与 `GameAction::Left` / `GameAction::Right` 同源。
+- `Confirm` / `Back` 复用玩家自己的旋转绑定，与 `GameAction::RotateCounterClockwise` / `GameAction::RotateClockwise` 同源。玩家改绑旋转键，菜单键随之改变。
+- `GameAction` 中仅 `SoftDrop` / `HardDrop` / `RotateClockwise` / `RotateCounterClockwise` 保留用户可配置绑定，`UIAction` 不出现在可配置绑定列表中。
 
-### 固定绑定表
+### 绑定来源表
 
-固定绑定对每名本地玩家分别成立：
+绑定对每名本地玩家分别成立：
 
-| 逻辑动作 | P1 键盘 | P2 键盘 | 手柄 |
-| --- | --- | --- | --- |
-| `Left` / `Right` | `A` / `D` | `←` / `→` | 十字键、左摇杆对应方向 |
-| `Up` / `Down` | `W` / `S` | `↑` / `↓` | 十字键、左摇杆对应方向 |
-| `Confirm` | `Space` | `Enter` | South |
-| `Back` | `LeftShift` | `RightShift` | East |
+| 逻辑动作 | 来源 | P1 键盘 | P2 键盘 | 手柄 |
+| --- | --- | --- | --- | --- |
+| `Left` / `Right` | 固定 | `A` / `D` | `←` / `→` | 十字键、左摇杆对应方向 |
+| `Up` / `Down` | 固定 | `W` / `S` | `↑` / `↓` | 十字键、左摇杆对应方向 |
+| `Confirm` | `RotateCounterClockwise` 的绑定 | `J` | `Numpad1` | South |
+| `Back` | `RotateClockwise` 的绑定 | `K` | `Numpad2` | East |
 
-左摇杆的方向判定阈值与连发语义见[本地输入采样：摇杆方向判定](local-input-sampling.md#摇杆方向判定)。
+`Confirm` / `Back` 一列给出的是[默认输入绑定](user-settings.md#默认输入绑定)下的取值，随该绑定变化；其余各列不可配置。左摇杆的方向判定阈值与连发语义见[本地输入采样：摇杆方向判定](local-input-sampling.md#摇杆方向判定)。
+
+因为 `Confirm` / `Back` 没有独立后备键，旋转绑定不允许为空：[输入绑定冲突](user-settings.md#输入绑定冲突)拒绝任何会使某个动作失去绑定的编辑。
+
+### 按键提示
+
+各菜单页面在画面左下角与右下角常驻按键提示，左角属于 P1、右角属于 P2，各自给出该玩家当前 `Confirm` 与 `Back` 的实际按键名。玩家持有手柄时提示给出手柄按键，否则给出键盘按键。提示随绑定与设备变化即时更新，因此不看设置页也能知道当前如何确认与返回。
 
 ## 边界
 
