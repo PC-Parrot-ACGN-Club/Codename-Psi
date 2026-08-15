@@ -41,6 +41,16 @@
     "match.feedback.attack": "攻击",
     "match.feedback.offset": "抵消",
     "match.feedback.all_clear": "全消",
+    "settings.on": "开",
+    "settings.off": "关",
+    "settings.window_mode.windowed": "窗口",
+    "settings.window_mode.borderless": "无边框全屏",
+    "settings.window_mode.fullscreen": "全屏",
+    "settings.animation_intensity.full": "完整",
+    "settings.animation_intensity.reduced": "精简",
+    "mode_select.lan_unavailable": "R2 提供",
+    "language.en": "English",
+    "language.zh-CN": "简体中文",
     "ui_action.down": "下"
   }
 }

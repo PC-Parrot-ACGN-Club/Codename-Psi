@@ -93,7 +93,7 @@ page entity 以 `DespawnOnExit<AppState>` 绑定所属状态，由状态退出�
 | `UIAction` | [UI 交互动作](ui-action-input.md) | 本主题 | 携带来源本地玩家 |
 | `AppTransitionRequest` | 本主题 | [应用状态机](application-state-machine.md) | 页面动作的唯一迁移出口 |
 | `SettingsOrigin` | 本主题 | 应用状态机 | 提出 `SettingsOpened` 前写入 |
-| 焦点项文本 | [本地化运行时](localization-runtime.md) | 本主题 | 按稳定 key 查询 |
+| 焦点项文本 | [本地化运行时](localization-runtime.md) | 本主题 | 按稳定 key 查询；项名、不可用原因与设置项的值都是 key，只有数值（音量百分比、按键名）直接显示 |
 | 冻结的 `LockedMatchSpec` | `CharacterSelect`、`Result` 页面 | [规则配置与开局规格冻结](rule-configuration.md) | 在提出 `CharacterConfirmed` 或 `RematchRequested` 前完成 |
 
 ## 边界

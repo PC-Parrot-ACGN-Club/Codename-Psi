@@ -41,6 +41,16 @@
     "match.feedback.attack": "Attack",
     "match.feedback.offset": "Offset",
     "match.feedback.all_clear": "All Clear",
+    "settings.on": "On",
+    "settings.off": "Off",
+    "settings.window_mode.windowed": "Windowed",
+    "settings.window_mode.borderless": "Borderless",
+    "settings.window_mode.fullscreen": "Fullscreen",
+    "settings.animation_intensity.full": "Full",
+    "settings.animation_intensity.reduced": "Reduced",
+    "mode_select.lan_unavailable": "available in R2",
+    "language.en": "English",
+    "language.zh-CN": "简体中文",
     "ui_action.down": "Down"
   }
 }

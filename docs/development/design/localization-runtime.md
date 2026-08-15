@@ -19,7 +19,9 @@
 
 `Localization` 作为客户端 Resource 提供只读查询能力。默认 locale 为 `en`。
 
-localization key 使用 `<域>.<条目>` 形式的稳定标识：页面文本的域是页面名（`main_menu`、`mode_select`、`character_select`、`settings`、`pause`、`result`），对局内文本的域是 `hud`，角色文本的域是 `character.<character_id>`。key 只由代码与数据文件引用，不随语言变化。
+localization key 使用 `<域>.<条目>` 形式的稳定标识：页面文本的域是页面名（`main_menu`、`mode_select`、`character_select`、`settings`、`pause`、`result`），对局内文本的域是 `match`，角色文本的域是 `character.<character_id>`，语言自称的域是 `language`。key 只由代码与数据文件引用，不随语言变化。
+
+`language.<locale>` 在每份 catalog 中取值相同：语言列表要让读不懂当前语言的玩家也能找到自己的语言。没有任何 catalog 命名的 locale 回退到 locale 代码本身，而不是回退到 key。
 
 ## 存储格式
 
@@ -65,9 +67,11 @@ key
 ### 切换语言
 
 - 输入：用户设置中的目标 locale。
-- 处理：根据当前语言设置更新当前 locale。
-- 输出：后续文本查询使用新的 current catalog。
+- 处理：根据当前语言设置更新当前 locale，并重写当前页面上已经写好的文本。
+- 输出：后续文本查询使用新的 current catalog；当前页面的标题与各行文字立即变为新语言。
 - 错误语义：目标 locale 的 catalog 不可用时该目录视为缺失，查询按替补链继续，并保留加载诊断。
+
+切换语言不重建页面实体：页面文本在生成时写入一次，切换语言是唯一会同时改动全部这些文本的事件，因此由一次重写覆盖，玩家不必离开设置页再回来。
 
 ### 加载文本目录
 

@@ -57,6 +57,7 @@ impl Plugin for UiPlugin {
                 (
                     refresh_focus_visuals,
                     refresh_slot_visuals,
+                    refresh_page_text,
                     refresh_setting_values,
                     refresh_key_legend,
                     refresh_binding_rejection,
@@ -97,6 +98,14 @@ struct PageRoot;
 /// One focusable row, tagged with the model item it mirrors.
 #[derive(Debug, Component)]
 struct PageItemNode(PageItem);
+
+/// The text naming one row, tagged so a language change can rewrite it.
+#[derive(Debug, Component)]
+struct PageItemLabel(PageItem);
+
+/// The page heading, which a language change rewrites from the current state.
+#[derive(Debug, Component)]
+struct PageTitle;
 
 /// Scales the 1920x1080 design canvas into the real window.
 ///
@@ -150,6 +159,26 @@ const fn label_key(item: PageItem) -> &'static str {
     }
 }
 
+/// The text naming one row, in the current language.
+///
+/// An item the page refuses to enable says why in the same line, so the reason
+/// travels with the name instead of needing a place of its own.
+#[must_use]
+pub fn item_label(localization: &Localization, item: &crate::page::FocusItem) -> String {
+    let mut label = match item.id {
+        PageItem::Rebind {
+            player,
+            action,
+            device,
+        } => rebind_label(localization, player, action, device),
+        id => localization.text(label_key(id)),
+    };
+    if let Some(reason) = &item.unavailable_reason {
+        label.push_str(&format!("  ({})", localization.text(reason)));
+    }
+    label
+}
+
 /// Localization key for a page's heading.
 const fn title_key(state: AppState) -> &'static str {
     match state {
@@ -197,20 +226,7 @@ fn spawn_page(world: &mut World, state: AppState) {
         model
             .items()
             .iter()
-            .map(|item| {
-                let mut label = match item.id {
-                    PageItem::Rebind {
-                        player,
-                        action,
-                        device,
-                    } => rebind_label(localization, player, action, device),
-                    id => localization.text(label_key(id)),
-                };
-                if let Some(reason) = &item.unavailable_reason {
-                    label.push_str(&format!("  ({reason})"));
-                }
-                (item.id, label, item.enabled)
-            })
+            .map(|item| (item.id, item_label(localization, item), item.enabled))
             .collect()
     };
     let title = world.resource::<Localization>().text(title_key(state));
@@ -237,6 +253,7 @@ fn spawn_page(world: &mut World, state: AppState) {
 
     let heading = world
         .spawn((
+            PageTitle,
             Text::new(title),
             TextFont {
                 font: FontSource::Handle(font.clone()),
@@ -360,23 +377,33 @@ pub fn key_display(name: &str) -> String {
 }
 
 /// How a setting currently reads on the page.
-fn setting_value(item: PageItem, settings: &crate::settings::UserSettings) -> String {
+/// The value shown beside one setting's name, in the current language.
+///
+/// Numbers stay numbers; everything a player picks from a fixed set is named in
+/// their own language, because the value is as much a word as the name is.
+#[must_use]
+pub fn setting_value(
+    item: PageItem,
+    settings: &crate::settings::UserSettings,
+    localization: &Localization,
+) -> String {
     use crate::settings::{AnimationIntensity, WindowModeSetting};
+    let switch = |on: bool| localization.text(if on { "settings.on" } else { "settings.off" });
     match item {
-        PageItem::Language => settings.language.clone(),
-        PageItem::WindowMode => match settings.window_mode {
-            WindowModeSetting::Windowed => "Windowed".into(),
-            WindowModeSetting::BorderlessFullscreen => "Borderless".into(),
-            WindowModeSetting::Fullscreen => "Fullscreen".into(),
-        },
+        PageItem::Language => language_name(localization, &settings.language),
+        PageItem::WindowMode => localization.text(match settings.window_mode {
+            WindowModeSetting::Windowed => "settings.window_mode.windowed",
+            WindowModeSetting::BorderlessFullscreen => "settings.window_mode.borderless",
+            WindowModeSetting::Fullscreen => "settings.window_mode.fullscreen",
+        }),
         PageItem::MasterVolume => format!("{:.0}%", settings.master_volume * 100.0),
         PageItem::SfxVolume => format!("{:.0}%", settings.sfx_volume * 100.0),
-        PageItem::Vibration => if settings.vibration { "On" } else { "Off" }.into(),
-        PageItem::AnimationIntensity => match settings.animation_intensity {
-            AnimationIntensity::Full => "Full".into(),
-            AnimationIntensity::Reduced => "Reduced".into(),
-        },
-        PageItem::ColorAssist => if settings.color_assist { "On" } else { "Off" }.into(),
+        PageItem::Vibration => switch(settings.vibration),
+        PageItem::AnimationIntensity => localization.text(match settings.animation_intensity {
+            AnimationIntensity::Full => "settings.animation_intensity.full",
+            AnimationIntensity::Reduced => "settings.animation_intensity.reduced",
+        }),
+        PageItem::ColorAssist => switch(settings.color_assist),
         PageItem::Rebind {
             player,
             action,
@@ -388,6 +415,19 @@ fn setting_value(item: PageItem, settings: &crate::settings::UserSettings) -> St
             .map_or_else(|| "--".to_owned(), |input| key_display(input.name())),
         _ => String::new(),
     }
+}
+
+/// A language's own name for itself.
+///
+/// Every catalog spells every language the same way, so the list reads the same
+/// whichever language is currently selected -- which is the point: a player who
+/// cannot read the current one still has to find their own. A locale no catalog
+/// names falls back to its code, which is at least selectable.
+#[must_use]
+pub fn language_name(localization: &Localization, code: &str) -> String {
+    let key = format!("language.{code}");
+    let name = localization.text(&key);
+    if name == key { code.to_owned() } else { name }
 }
 
 /// Label for a rebinding row, which names a player, action and device.
@@ -428,6 +468,16 @@ fn spawn_settings_rows(
     rows: &[(PageItem, String, bool)],
 ) {
     let settings = world.resource::<crate::settings::UserSettings>().clone();
+    // Resolved before the first spawn: writing entities needs the world
+    // exclusively, and the values need the catalogs while they are still
+    // borrowable.
+    let values: Vec<(PageItem, String)> = {
+        let localization = world.resource::<Localization>();
+        rows.iter()
+            .filter(|(id, _, _)| id.is_setting())
+            .map(|(id, _, _)| (*id, setting_value(*id, &settings, localization)))
+            .collect()
+    };
 
     let columns = world
         .spawn((
@@ -483,6 +533,7 @@ fn spawn_settings_rows(
 
         let name = world
             .spawn((
+                PageItemLabel(*id),
                 Text::new(label),
                 TextFont {
                     font: FontSource::Handle(font.clone()),
@@ -498,7 +549,12 @@ fn spawn_settings_rows(
             let value = world
                 .spawn((
                     SettingValueText(*id),
-                    Text::new(setting_value(*id, &settings)),
+                    Text::new(
+                        values
+                            .iter()
+                            .find_map(|(candidate, value)| (candidate == id).then(|| value.clone()))
+                            .unwrap_or_default(),
+                    ),
                     TextFont {
                         font: FontSource::Handle(font.clone()),
                         font_size: FontSize::Px(22.0),
@@ -1016,6 +1072,7 @@ fn complete_binding_capture(
 /// Keep the value column showing what the settings actually hold.
 fn refresh_setting_values(
     settings: Res<crate::settings::UserSettings>,
+    localization: Res<Localization>,
     capture: Option<Res<crate::settings::BindingCapture>>,
     mut values: Query<(&SettingValueText, &mut Text)>,
 ) {
@@ -1027,8 +1084,45 @@ fn refresh_setting_values(
         let shown = if awaiting {
             "...".to_owned()
         } else {
-            setting_value(value.0, &settings)
+            setting_value(value.0, &settings, &localization)
         };
+        if text.0 != shown {
+            text.0 = shown;
+        }
+    }
+}
+
+/// Rewrite every baked page string after a language change.
+///
+/// Row names and the heading are written once at spawn, which is enough for
+/// every change except the one that alters all of them at once. Switching the
+/// language must not require leaving and re-entering the page to take effect.
+fn refresh_page_text(
+    localization: Res<Localization>,
+    state: Res<State<AppState>>,
+    origin: Option<Res<SettingsOrigin>>,
+    mut titles: Query<&mut Text, (With<PageTitle>, Without<PageItemLabel>)>,
+    mut labels: Query<(&PageItemLabel, &mut Text), Without<PageTitle>>,
+) {
+    if !localization.is_changed() {
+        return;
+    }
+    let state = *state.get();
+    let Some(model) = PageModel::for_state(state, origin.as_deref().copied()) else {
+        return;
+    };
+
+    let title = localization.text(title_key(state));
+    for mut text in &mut titles {
+        if text.0 != title {
+            text.0.clone_from(&title);
+        }
+    }
+    for (label, mut text) in &mut labels {
+        let Some(item) = model.items().iter().find(|item| item.id == label.0) else {
+            continue;
+        };
+        let shown = item_label(&localization, item);
         if text.0 != shown {
             text.0 = shown;
         }

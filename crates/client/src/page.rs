@@ -119,6 +119,7 @@ impl PageCommand {
 pub struct FocusItem {
     pub id: PageItem,
     pub enabled: bool,
+    /// Localization key naming why the item is unavailable.
     pub unavailable_reason: Option<String>,
     pub focused: bool,
     command: Option<PageCommand>,
@@ -253,7 +254,7 @@ impl PageModel {
                     AppState::CharacterSelect,
                     AppTransitionCause::ModeConfirmed,
                 ),
-                FocusItem::new(PageItem::Lan, false, Some("available in R2")),
+                FocusItem::new(PageItem::Lan, false, Some("mode_select.lan_unavailable")),
                 action_item(
                     PageItem::Back,
                     AppState::MainMenu,
