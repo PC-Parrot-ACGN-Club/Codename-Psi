@@ -10,6 +10,7 @@ pub mod app_state;
 pub mod bootstrap;
 pub mod character_presentation;
 pub mod data;
+pub mod effects;
 pub mod feedback;
 pub mod hud;
 pub mod i18n;
@@ -52,6 +53,7 @@ impl Plugin for GameInfrastructurePlugin {
             simulation::SimulationPlugin,
             ui::UiPlugin,
             hud::HudPlugin,
+            effects::EffectsPlugin,
             feedback::FeedbackPlugin,
         ));
     }

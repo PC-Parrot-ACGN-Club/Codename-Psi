@@ -118,15 +118,30 @@ struct MatchFeedback(FeedbackLines);
 
 /// Root of the HUD, tagged with the instance it belongs to.
 #[derive(Debug, Component)]
-struct HudRoot(MatchInstanceId);
+pub struct HudRoot(MatchInstanceId);
 
 /// One board cell.
+///
+/// Visible to the transient layer, which hangs its disposable marks off the
+/// cell they belong to rather than computing screen positions of its own.
 #[derive(Debug, Component)]
-struct BoardCell {
-    slot: usize,
-    column: u8,
+pub struct BoardCell {
+    pub slot: usize,
+    pub column: u8,
     /// Visible row, counted from the top.
-    row: u8,
+    pub row: u8,
+}
+
+/// The fill one ball colour is drawn with.
+#[must_use]
+pub fn ball_color(id: u8) -> Color {
+    BALL_COLORS[usize::from(id) % BALL_COLORS.len()]
+}
+
+/// The fill nuisance is drawn with.
+#[must_use]
+pub const fn nuisance_color() -> Color {
+    NUISANCE_COLOR
 }
 
 /// One icon slot of one queue.

@@ -3,8 +3,9 @@
 mod presentation_common;
 
 use client::presentation::{
-    FEEDBACK_TICKS, FeedbackLine, FeedbackLines, MatchPresentationFrame, NUISANCE_ICON_SLOTS,
-    NUISANCE_UNITS, PresentationEventConsumer, build_snapshot, nuisance_icons, publish_events,
+    FEEDBACK_TICKS, FeedbackLine, FeedbackLines, MARKS_PER_CELL, MatchPresentationFrame,
+    NUISANCE_ICON_SLOTS, NUISANCE_UNITS, PresentationEffects, PresentationEventConsumer,
+    build_snapshot, nuisance_icons, publish_events,
 };
 use client::settings::AnimationIntensity;
 use game_core::{
@@ -453,5 +454,23 @@ fn a_loaded_fever_puzzle_marks_its_preset_cells() {
     assert!(
         snapshot.players[0].preset_cells.is_empty(),
         "a puzzle the book does not hold marks nothing rather than refusing the snapshot"
+    );
+}
+
+// component/presentation-snapshot::TC-007
+#[test]
+fn the_density_setting_decides_how_many_marks_a_clear_leaves() {
+    let full = PresentationEffects::of(AnimationIntensity::Full);
+    let reduced = PresentationEffects::of(AnimationIntensity::Reduced);
+
+    assert_eq!(full.marks_per_cell(), MARKS_PER_CELL);
+    assert_eq!(
+        reduced.marks_per_cell(),
+        0,
+        "reduced spends nothing per cell; the caller keeps one hint for the whole fact"
+    );
+    assert!(
+        full.particle_density > reduced.particle_density,
+        "the two settings differ in the parameter the marks are spent from"
     );
 }

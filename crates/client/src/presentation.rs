@@ -310,7 +310,21 @@ impl PresentationEffects {
             },
         }
     }
+
+    /// Marks one cleared ball leaves.
+    ///
+    /// Zero is not the absence of feedback: the caller still leaves one mark
+    /// for the whole clear, which is the single hint per fact the reduced
+    /// setting keeps. Spending the density per cell is what makes a large
+    /// clear look large at full intensity.
+    #[must_use]
+    pub const fn marks_per_cell(self) -> usize {
+        self.particle_density as usize * MARKS_PER_CELL / 100
+    }
 }
+
+/// Marks one cleared ball leaves at full intensity.
+pub const MARKS_PER_CELL: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresentationEvent {
