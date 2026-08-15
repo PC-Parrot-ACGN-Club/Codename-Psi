@@ -3,8 +3,8 @@
 mod presentation_common;
 
 use client::presentation::{
-    FEEDBACK_TICKS, FeedbackLine, FeedbackLines, MatchPresentationFrame, PresentationEventConsumer,
-    build_snapshot, publish_events,
+    FEEDBACK_TICKS, FeedbackLine, FeedbackLines, MatchPresentationFrame, NUISANCE_ICON_SLOTS,
+    NUISANCE_UNITS, PresentationEventConsumer, build_snapshot, nuisance_icons, publish_events,
 };
 use client::settings::AnimationIntensity;
 use game_core::{
@@ -367,4 +367,43 @@ fn observing_the_same_tick_twice_shows_the_same_line() {
     twice.observe(&facts);
 
     assert_eq!(once, twice, "the HUD refreshes faster than the rules tick");
+}
+
+// component/presentation-snapshot::TC-009
+#[test]
+fn a_queue_reads_as_tier_icons_heaviest_first() {
+    assert!(nuisance_icons(0).is_empty(), "an empty queue shows no icon");
+    assert_eq!(nuisance_icons(1), vec![1]);
+    assert_eq!(nuisance_icons(5), vec![1, 1, 1, 1, 1]);
+    assert_eq!(
+        nuisance_icons(6),
+        vec![6],
+        "a full row is one icon, not six"
+    );
+    assert_eq!(nuisance_icons(35), vec![30, 1, 1, 1, 1, 1]);
+    assert_eq!(
+        nuisance_icons(2531),
+        vec![1440, 720, 360, 6, 1, 1, 1, 1],
+        "every unit is spent before a lighter one is used"
+    );
+
+    for count in [0, 1, 29, 30, 179, 1441, 100_000] {
+        let icons = nuisance_icons(count);
+        assert!(
+            icons.len() <= NUISANCE_ICON_SLOTS,
+            "{count} spelled out to {} icons",
+            icons.len()
+        );
+        assert!(
+            icons.windows(2).all(|pair| pair[0] >= pair[1]),
+            "{count} produced icons out of order: {icons:?}"
+        );
+        assert!(
+            icons.iter().sum::<u32>() <= count,
+            "{count} produced icons standing for more than the queue holds"
+        );
+    }
+
+    // The units are exactly the ones the presentation contract names.
+    assert_eq!(NUISANCE_UNITS, [1440, 720, 360, 180, 30, 6, 1]);
 }

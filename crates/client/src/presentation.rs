@@ -130,6 +130,33 @@ pub fn build_snapshot(
     })
 }
 
+/// Icon units a nuisance queue is read in, heaviest first.
+///
+/// A greedy walk therefore spends the heaviest symbols first, and a queue too
+/// large to spell out loses only its lightest icons.
+pub const NUISANCE_UNITS: [u32; 7] = [1440, 720, 360, 180, 30, 6, 1];
+
+/// How many icons one queue has room for.
+pub const NUISANCE_ICON_SLOTS: usize = 8;
+
+/// The tier units standing for `count`, heaviest first.
+///
+/// The exact count is shown beside the icons, so truncating at
+/// [`NUISANCE_ICON_SLOTS`] hides no information: it keeps the panel a fixed
+/// size while the number stays exact.
+#[must_use]
+pub fn nuisance_icons(count: u32) -> Vec<u32> {
+    let mut remaining = count;
+    let mut icons = Vec::new();
+    for unit in NUISANCE_UNITS {
+        while remaining >= unit && icons.len() < NUISANCE_ICON_SLOTS {
+            icons.push(unit);
+            remaining -= unit;
+        }
+    }
+    icons
+}
+
 /// One line of transient text a tick's facts put over a player's board.
 ///
 /// The exact numbers are the rules' own, not a projection of them: the queue

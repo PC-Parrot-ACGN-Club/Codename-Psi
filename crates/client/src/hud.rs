@@ -14,7 +14,8 @@ use crate::app_state::AppState;
 use crate::i18n::Localization;
 use crate::match_flow::MatchInstanceId;
 use crate::presentation::{
-    FeedbackLines, MatchPresentationSnapshot, PresentationEffects, build_snapshot,
+    FeedbackLines, MatchPresentationSnapshot, NUISANCE_ICON_SLOTS, PresentationEffects,
+    build_snapshot, nuisance_icons,
 };
 use crate::settings::UserSettings;
 use crate::simulation::{LatestStepReport, RulesSimulation};
@@ -53,7 +54,28 @@ const NUISANCE_COLOR: Color = Color::srgb(0.42, 0.44, 0.48);
 /// Nuisance keeps its mark unconditionally: it is not one colour among the
 /// five but a different kind of ball, and neutral grey alone reads as an empty
 /// cell at a glance.
-const NUISANCE_GLYPH: &str = "✕";
+///
+/// U+00D7, not one of the heavier multiplication crosses: the shipped font has
+/// no glyph for those, and a symbol the font cannot draw is a blank cell.
+const NUISANCE_GLYPH: &str = "×";
+
+/// The symbol standing for one queue tier, in `NUISANCE_UNITS` order.
+///
+/// The set is ordered by visual weight so a heavier queue reads as heavier
+/// without the player having to recall which unit each symbol carries, and it
+/// shares no symbol with the ball cues above.
+const NUISANCE_TIER_GLYPHS: [&str; 7] = [
+    "\u{2297}", "\u{25a9}", "\u{25c8}", "\u{2606}", "\u{25c9}", "\u{25ce}", "\u{25cb}",
+];
+
+/// The symbol for a queue tier unit.
+fn tier_glyph(unit: u32) -> &'static str {
+    crate::presentation::NUISANCE_UNITS
+        .iter()
+        .position(|candidate| *candidate == unit)
+        .and_then(|index| NUISANCE_TIER_GLYPHS.get(index).copied())
+        .unwrap_or("")
+}
 
 /// The glyph a cell shows, given whether the player asked for the extra cue.
 fn cell_glyph(occupant: Cell, color_assist: bool) -> &'static str {
@@ -105,6 +127,18 @@ struct BoardCell {
     column: u8,
     /// Visible row, counted from the top.
     row: u8,
+}
+
+/// One icon slot of one queue.
+///
+/// The slots are spawned once and then only written, so a queue that grows or
+/// shrinks changes glyphs rather than the entity tree.
+#[derive(Debug, Component)]
+struct QueueIcon {
+    slot: usize,
+    /// Board channel the queue belongs to: normal, then Fever.
+    channel: usize,
+    index: usize,
 }
 
 /// A HUD text whose content is written from the snapshot.
@@ -184,6 +218,7 @@ struct HudCells<'w, 's> {
         Without<BoardCell>,
     >,
     texts: Query<'w, 's, (&'static HudText, &'static mut Text)>,
+    queue_icons: Query<'w, 's, (&'static QueueIcon, &'static mut Text), Without<HudText>>,
     glyphs: Query<'w, 's, &'static mut Text, GlyphOnly>,
 }
 
@@ -191,7 +226,12 @@ struct HudCells<'w, 's> {
 ///
 /// A glyph node is the child of a cell, so it is excluded from both cell
 /// queries by the components it does not have.
-type GlyphOnly = (Without<HudText>, Without<BoardCell>, Without<NextCell>);
+type GlyphOnly = (
+    Without<HudText>,
+    Without<BoardCell>,
+    Without<NextCell>,
+    Without<QueueIcon>,
+);
 
 /// Write the latest snapshot onto the HUD.
 fn refresh_hud(
@@ -299,6 +339,22 @@ fn refresh_hud(
             {
                 text.0 = glyph.to_owned();
             }
+        }
+    }
+
+    let icons: [[Vec<u32>; 2]; 2] = std::array::from_fn(|slot| {
+        let player = &snapshot.players[slot];
+        [
+            nuisance_icons(player.pending_garbage),
+            nuisance_icons(player.fever_garbage),
+        ]
+    });
+    for (icon, mut text) in &mut cells.queue_icons {
+        let glyph = icons[icon.slot][icon.channel]
+            .get(icon.index)
+            .map_or("", |unit| tier_glyph(*unit));
+        if text.0 != glyph {
+            text.0 = glyph.to_owned();
         }
     }
 
@@ -713,45 +769,85 @@ fn build_hud(commands: &mut Commands, instance: MatchInstanceId, font: &Handle<F
 fn queue_panel(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
     let panel = panel(commands, 300.0, 4.0);
     let heading = label(commands, font, 20.0, "NUISANCE");
-    let pending_row = commands
-        .spawn((
-            Node {
-                width: px(260),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-        ))
-        .id();
-    let pending_label = label(commands, font, 20.0, "PENDING");
-    let pending = value_text(commands, font, 24.0, HudText::PendingGarbage(slot));
-    commands
-        .entity(pending_row)
-        .add_children(&[pending_label, pending]);
-
-    let fever_row = commands
-        .spawn((
-            Node {
-                width: px(260),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-        ))
-        .id();
-    let fever_label = label(commands, font, 20.0, "FEVER");
-    let fever = value_text(commands, font, 24.0, HudText::FeverGarbage(slot));
-    commands
-        .entity(fever_row)
-        .add_children(&[fever_label, fever]);
-
+    let pending_row = queue_row(commands, font, slot, 0, "PENDING");
+    let fever_row = queue_row(commands, font, slot, 1, "FEVER");
     let score = value_text(commands, font, 22.0, HudText::Score(slot));
     commands
         .entity(panel)
         .add_children(&[heading, pending_row, fever_row, score]);
     panel
+}
+
+/// One queue: its name and exact count, with the tiered icons under them.
+///
+/// The number and the icons say the same thing at two reading speeds -- the
+/// icons carry the magnitude at a glance, the number stays exact.
+fn queue_row(
+    commands: &mut Commands,
+    font: &Handle<Font>,
+    slot: usize,
+    channel: usize,
+    name: &str,
+) -> Entity {
+    let row = column(commands, 2.0);
+    let counted = commands
+        .spawn((
+            Node {
+                width: px(260),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+    let name = label(commands, font, 20.0, name);
+    let count = value_text(
+        commands,
+        font,
+        24.0,
+        if channel == 0 {
+            HudText::PendingGarbage(slot)
+        } else {
+            HudText::FeverGarbage(slot)
+        },
+    );
+    commands.entity(counted).add_children(&[name, count]);
+
+    let icons = commands
+        .spawn((
+            Node {
+                width: px(260),
+                height: px(24),
+                flex_direction: FlexDirection::Row,
+                column_gap: px(4),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+    for index in 0..NUISANCE_ICON_SLOTS {
+        let icon = commands
+            .spawn((
+                QueueIcon {
+                    slot,
+                    channel,
+                    index,
+                },
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(22.0),
+                    ..default()
+                },
+                TextColor(TEXT),
+            ))
+            .id();
+        commands.entity(icons).add_child(icon);
+    }
+
+    commands.entity(row).add_children(&[counted, icons]);
+    row
 }
 
 /// The next three hands, first one largest.
