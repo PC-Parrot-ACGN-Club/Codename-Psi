@@ -229,7 +229,14 @@ fn animation_intensity_changes_only_disposable_effect_parameters() {
         AnimationIntensity::Reduced,
     )
     .expect("snapshot");
-    assert_eq!(full_snapshot, reduced_snapshot);
+    // The effect parameters are the one field the setting is allowed to move:
+    // the resident layer reads them off the snapshot so that rebuilding the
+    // screen from a single snapshot stays sufficient. Normalising just that
+    // field and comparing the rest proves no rule fact rode along with it.
+    assert_ne!(full_snapshot.effects, reduced_snapshot.effects);
+    let mut rule_fields = reduced_snapshot.clone();
+    rule_fields.effects = full_snapshot.effects;
+    assert_eq!(full_snapshot, rule_fields);
 
     let full = publish_events(&report, AnimationIntensity::Full);
     let reduced = publish_events(&report, AnimationIntensity::Reduced);

@@ -4,7 +4,7 @@
 //! events. Entities are spawned once per match instance and then only have
 //! their values written, so a high-feedback tick does not churn the ECS.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 use bevy::text::FontSource;
@@ -12,7 +12,7 @@ use game_core::board::{Cell, Coord};
 
 use crate::app_state::AppState;
 use crate::match_flow::MatchInstanceId;
-use crate::presentation::{MatchPresentationSnapshot, build_snapshot};
+use crate::presentation::{MatchPresentationSnapshot, PresentationEffects, build_snapshot};
 use crate::settings::UserSettings;
 use crate::simulation::{LatestStepReport, RulesSimulation};
 use crate::ui::UiFont;
@@ -155,6 +155,7 @@ struct HudCells<'w, 's> {
             &'static BoardCell,
             &'static mut BackgroundColor,
             &'static mut BorderColor,
+            &'static mut UiTransform,
             &'static Children,
         ),
         Without<NextCell>,
@@ -209,20 +210,43 @@ fn refresh_hud(
     };
 
     let overlays: [SlotOverlay; 2] =
-        std::array::from_fn(|slot| slot_overlay(&snapshot.players[slot]));
+        std::array::from_fn(|slot| slot_overlay(&snapshot.players[slot], snapshot.effects));
 
-    for (cell, mut background, mut border, children) in &mut cells.board {
+    for (cell, mut background, mut border, mut transform, children) in &mut cells.board {
         let player = &snapshot.players[cell.slot];
         let overlay = &overlays[cell.slot];
         let y = player.board.geometry().hidden_rows() + cell.row;
         let key = (cell.column, y);
 
-        let occupant = overlay.active.get(&key).map_or_else(
-            || Coord::new(cell.column, y).map_or(Cell::Empty, |coord| player.board.get(coord)),
-            |color| Cell::Color(*color),
-        );
-        background.0 = cell_color(occupant);
+        let moving = overlay.moving.get(&key);
+        let occupant = if let Some(moving) = moving {
+            moving.occupant
+        } else if overlay.hidden.contains(&key) {
+            Cell::Empty
+        } else {
+            overlay.active.get(&key).map_or_else(
+                || Coord::new(cell.column, y).map_or(Cell::Empty, |coord| player.board.get(coord)),
+                |color| Cell::Color(*color),
+            )
+        };
+        let mut color = cell_color(occupant);
         let glyph = cell_glyph(occupant, settings.color_assist);
+
+        // Reset first: a cell that was posed last frame has to return to rest
+        // on its own, since nothing else clears what a finished phase left.
+        *transform = UiTransform::IDENTITY;
+        if let Some(moving) = moving {
+            // The fraction of a cell the ball has travelled is spent here, so
+            // it slides between rows instead of jumping a whole cell at a time.
+            transform.translation.y = px(moving.offset * (CELL + CELL_GAP));
+        } else if overlay.clearing.contains(&key) {
+            let pose = overlay.clear_pose;
+            color = color
+                .mix(&Color::WHITE, pose.flash * 0.8)
+                .with_alpha(pose.alpha);
+            transform.scale = Vec2::splat(pose.scale);
+        }
+        background.0 = color;
         // Priority: danger line, then the landing outline, then plain grid.
         *border = BorderColor::all(if cell.row == 0 && player.overflow_risk {
             DANGER
@@ -293,10 +317,153 @@ fn preview_occupant(hand: &game_core::drop_stream::PendingHand, dx: i8, dy: i8) 
 struct SlotOverlay {
     active: HashMap<(u8, u8), u8>,
     landing: HashMap<(u8, u8), u8>,
+    /// Balls in flight during `Gravity`, keyed by the cell they are drawn in.
+    moving: HashMap<(u8, u8), MovingBall>,
+    /// Cells the resolver has already accounted for elsewhere this phase.
+    hidden: HashSet<(u8, u8)>,
+    /// Cells being previewed for a clear.
+    clearing: HashSet<(u8, u8)>,
+    /// The pose those cells are drawn with this frame.
+    clear_pose: ClearPose,
 }
 
-fn slot_overlay(player: &crate::presentation::PlayerPresentationSnapshot) -> SlotOverlay {
+/// A ball partway between two cells.
+#[derive(Debug, Clone, Copy)]
+struct MovingBall {
+    occupant: Cell,
+    /// How far past the drawn cell the ball has travelled, in cells.
+    ///
+    /// A grid can only place a ball on whole cells, so the fraction is carried
+    /// here and spent as a render offset. Without it a ball would jump a whole
+    /// cell at a time and the phase would read as a series of teleports.
+    offset: f32,
+}
+
+/// How a ball being cleared is drawn at one instant.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ClearPose {
+    scale: f32,
+    /// How far the fill is mixed toward white.
+    flash: f32,
+    alpha: f32,
+}
+
+impl Default for ClearPose {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            flash: 0.0,
+            alpha: 1.0,
+        }
+    }
+}
+
+/// Fraction of the preview spent on the hit before the ball starts leaving.
+const CLEAR_HIT_SHARE: f32 = 0.35;
+/// How much of its size a cleared ball keeps at the end of the preview.
+const CLEAR_END_SCALE: f32 = 0.35;
+
+impl ClearPose {
+    /// The pose for one point of the clear preview.
+    ///
+    /// Full intensity plays the whole beat the presentation contract asks for:
+    /// the hit lands and flashes, then the ball shrinks and fades so it is gone
+    /// by the moment the rules commit the clear. Reduced holds a single steady
+    /// highlight instead -- the fact is still shown, just not animated.
+    fn of(progress: f32, interpolate: bool) -> Self {
+        if !interpolate {
+            return Self {
+                scale: 1.0,
+                flash: 1.0,
+                alpha: 1.0,
+            };
+        }
+        let progress = progress.clamp(0.0, 1.0);
+        let flash = (progress / CLEAR_HIT_SHARE).min(1.0);
+        let tail = ((progress - CLEAR_HIT_SHARE) / (1.0 - CLEAR_HIT_SHARE)).clamp(0.0, 1.0);
+        Self {
+            scale: 1.0 - (1.0 - CLEAR_END_SCALE) * tail,
+            flash,
+            alpha: 1.0 - tail,
+        }
+    }
+}
+
+/// Place the resolving phases' balls for this frame.
+///
+/// The rules own the timing: this only reads `elapsed / duration` and poses the
+/// balls accordingly. It never reports completion back, so no animation here
+/// can hold up a tick.
+fn resolve_overlay(
+    overlay: &mut SlotOverlay,
+    player: &crate::presentation::PlayerPresentationSnapshot,
+    effects: PresentationEffects,
+) {
+    use game_core::view::ResolutionStage;
+
+    let Some(resolution) = player.resolution.as_ref() else {
+        return;
+    };
+    let progress = if resolution.duration_ticks == 0 {
+        1.0
+    } else {
+        f32::from(resolution.elapsed_ticks) / f32::from(resolution.duration_ticks)
+    };
+
+    match resolution.stage {
+        ResolutionStage::ClearPreview => {
+            overlay.clear_pose = ClearPose::of(progress, effects.interpolate);
+            for coord in &resolution.clear_cells {
+                overlay.clearing.insert((coord.x(), coord.y()));
+            }
+        }
+        ResolutionStage::Gravity => {
+            // The board still holds the pre-gravity arrangement, so each moving
+            // ball is hidden at its source and drawn at its current position.
+            for step in &resolution.gravity_moves {
+                let (row, offset) =
+                    fall_position(step.from.y(), step.to.y(), progress, effects.interpolate);
+                let occupant = Coord::new(step.from.x(), step.from.y())
+                    .map_or(Cell::Empty, |coord| player.board.get(coord));
+                overlay.hidden.insert((step.from.x(), step.from.y()));
+                overlay
+                    .moving
+                    .insert((step.from.x(), row), MovingBall { occupant, offset });
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Where a falling ball is partway through the gravity phase.
+///
+/// Returns the cell it is drawn in and how far past that cell it has travelled,
+/// so the caller can spend the fraction as a render offset. Reduced intensity
+/// holds the ball at its source and snaps to the target when the phase ends,
+/// which is the documented substitute for interpolating.
+fn fall_position(from: u8, to: u8, progress: f32, interpolate: bool) -> (u8, f32) {
+    let progress = progress.clamp(0.0, 1.0);
+    if !interpolate {
+        return (if progress >= 1.0 { to } else { from }, 0.0);
+    }
+    let span = f32::from(to) - f32::from(from);
+    let exact = f32::from(from) + span * progress;
+    let row = exact.floor();
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the interpolant stays between two valid board rows"
+    )]
+    let cell = row as u8;
+    (cell, exact - row)
+}
+
+fn slot_overlay(
+    player: &crate::presentation::PlayerPresentationSnapshot,
+    effects: PresentationEffects,
+) -> SlotOverlay {
     let mut overlay = SlotOverlay::default();
+    resolve_overlay(&mut overlay, player, effects);
     let Some(group) = player.active_drop.as_ref() else {
         return overlay;
     };
@@ -716,6 +883,9 @@ fn board_grid(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Enti
                     },
                     BorderColor::all(GRID),
                     BackgroundColor(GRID),
+                    // Posed by `refresh_hud` during the resolve phases. Present
+                    // from the start so a phase never spawns components mid-play.
+                    UiTransform::IDENTITY,
                 ))
                 .id();
             // Every cell owns a glyph node so a ball's non-colour cue is a
@@ -744,7 +914,7 @@ mod tests {
     use game_core::config::{DropShape, DropTemplate};
     use game_core::drop_stream::PendingHand;
 
-    use super::{Cell, cell_glyph, preview_occupant};
+    use super::{CLEAR_HIT_SHARE, Cell, ClearPose, cell_glyph, fall_position, preview_occupant};
 
     fn hand(shape: DropShape, colors: [u8; 2]) -> PendingHand {
         PendingHand {
@@ -823,6 +993,90 @@ mod tests {
             for dy in [0, -1] {
                 assert_eq!(preview_occupant(&mono, dx, dy), Some(Cell::Color(3)));
             }
+        }
+    }
+
+    // integration-system/presentation-runtime::TC-012
+    #[test]
+    fn a_falling_ball_slides_between_its_ends_without_overshooting() {
+        // Endpoints are exact and land on a whole cell, so the ball starts where
+        // the rules put it and finishes exactly where the committed board draws it.
+        assert_eq!(fall_position(2, 8, 0.0, true), (2, 0.0));
+        assert_eq!(fall_position(2, 8, 1.0, true), (8, 0.0));
+
+        // A distance whose midpoint falls between two rows is drawn between
+        // them: that offset is the whole difference from snapping cell to cell.
+        let (row, offset) = fall_position(2, 7, 0.5, true);
+        assert_eq!(row, 4);
+        assert!(
+            (offset - 0.5).abs() < f32::EPSILON,
+            "expected half a cell, got {offset}"
+        );
+
+        // Motion is monotonic, so a ball never appears to travel back up.
+        let mut previous = (0, 0.0);
+        for step in 0..=10 {
+            #[expect(clippy::cast_precision_loss, reason = "ten steps")]
+            let position = fall_position(0, 10, step as f32 / 10.0, true);
+            assert!(
+                position >= previous,
+                "position went backwards at step {step}"
+            );
+            previous = position;
+        }
+
+        // Out-of-range progress is clamped rather than running off the board.
+        assert_eq!(fall_position(3, 5, 2.0, true), (5, 0.0));
+
+        // Reduced intensity holds the start and snaps at the end: the two
+        // endpoints are shown and nothing between them.
+        assert_eq!(fall_position(2, 8, 0.5, false), (2, 0.0));
+        assert_eq!(fall_position(2, 8, 0.99, false), (2, 0.0));
+        assert_eq!(fall_position(2, 8, 1.0, false), (8, 0.0));
+    }
+
+    // integration-system/presentation-runtime::TC-012
+    #[test]
+    fn a_cleared_ball_flashes_then_leaves_before_the_rules_remove_it() {
+        // The hit lands at full size, so the player sees which balls were hit
+        // before anything starts moving.
+        let start = ClearPose::of(0.0, true);
+        assert_eq!(start.scale, 1.0);
+        assert_eq!(start.alpha, 1.0);
+        assert_eq!(start.flash, 0.0);
+
+        // The flash comes up during the hit and is complete by the time the
+        // ball starts to go.
+        assert_eq!(ClearPose::of(CLEAR_HIT_SHARE, true).flash, 1.0);
+        assert_eq!(ClearPose::of(CLEAR_HIT_SHARE, true).scale, 1.0);
+
+        // By the end the ball has shrunk and faded out, so the commit that
+        // removes it has nothing left to pop away.
+        let end = ClearPose::of(1.0, true);
+        assert_eq!(end.alpha, 0.0);
+        assert!(end.scale < 1.0);
+
+        // Shrinking and fading are monotonic across the phase.
+        let mut previous = ClearPose::of(0.0, true);
+        for step in 1..=10 {
+            #[expect(clippy::cast_precision_loss, reason = "ten steps")]
+            let pose = ClearPose::of(step as f32 / 10.0, true);
+            assert!(pose.scale <= previous.scale, "scale grew at step {step}");
+            assert!(pose.alpha <= previous.alpha, "alpha rose at step {step}");
+            previous = pose;
+        }
+
+        // Reduced keeps one steady highlight for the whole phase: the fact is
+        // still reported, it just is not animated.
+        let steady = ClearPose {
+            scale: 1.0,
+            flash: 1.0,
+            alpha: 1.0,
+        };
+        for step in 0..=10 {
+            #[expect(clippy::cast_precision_loss, reason = "ten steps")]
+            let pose = ClearPose::of(step as f32 / 10.0, false);
+            assert_eq!(pose, steady);
         }
     }
 }

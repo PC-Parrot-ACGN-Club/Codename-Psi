@@ -48,6 +48,12 @@ pub struct MatchPresentationSnapshot {
     pub phase: MatchPhase,
     pub result: Option<MatchOutcome>,
     pub momentum: Momentum,
+    /// How much disposable motion this snapshot may be drawn with.
+    ///
+    /// Carried by the snapshot rather than read from settings at draw time so
+    /// that rebuilding the screen from one snapshot stays sufficient, which is
+    /// the property the whole resident layer is built on.
+    pub effects: PresentationEffects,
 }
 
 #[must_use]
@@ -55,7 +61,7 @@ pub fn build_snapshot(
     view: Option<&MatchView>,
     report: Option<&MatchStepReport>,
     _spec: &LockedMatchSpec,
-    _intensity: AnimationIntensity,
+    intensity: AnimationIntensity,
 ) -> Option<MatchPresentationSnapshot> {
     let view = view?;
     let players = std::array::from_fn(|slot| {
@@ -120,6 +126,7 @@ pub fn build_snapshot(
             pressure,
             advantage_side,
         },
+        effects: PresentationEffects::of(intensity),
     })
 }
 
@@ -135,6 +142,27 @@ pub struct PresentationEffects {
     pub interpolate: bool,
 }
 
+impl PresentationEffects {
+    /// The disposable motion one intensity setting allows.
+    ///
+    /// `Reduced` drops to a single cue per fact and stops interpolating, so a
+    /// phase shows its start and its end and nothing between. Neither setting
+    /// touches `duration_ticks` or any other rule timing.
+    #[must_use]
+    pub const fn of(intensity: AnimationIntensity) -> Self {
+        match intensity {
+            AnimationIntensity::Full => Self {
+                particle_density: 100,
+                interpolate: true,
+            },
+            AnimationIntensity::Reduced => Self {
+                particle_density: 1,
+                interpolate: false,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresentationEvent {
     pub id: PresentationEventId,
@@ -147,16 +175,7 @@ pub fn publish_events(
     report: &MatchStepReport,
     intensity: AnimationIntensity,
 ) -> Vec<PresentationEvent> {
-    let effects = match intensity {
-        AnimationIntensity::Full => PresentationEffects {
-            particle_density: 100,
-            interpolate: true,
-        },
-        AnimationIntensity::Reduced => PresentationEffects {
-            particle_density: 1,
-            interpolate: false,
-        },
-    };
+    let effects = PresentationEffects::of(intensity);
     report
         .events
         .iter()
