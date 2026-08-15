@@ -115,15 +115,24 @@ impl MatchEvent {
     }
 
     const fn slot(&self) -> usize {
+        match self.participant() {
+            Some(slot) => slot,
+            None => 0,
+        }
+    }
+
+    /// The participant a fact belongs to, or `None` for a match-level fact.
+    #[must_use]
+    pub const fn participant(&self) -> Option<usize> {
         match self {
             Self::GroupLocked(slot)
             | Self::PlayerDefeated(slot)
             | Self::FeverEntered(slot)
-            | Self::FeverExited(slot) => *slot,
+            | Self::FeverExited(slot) => Some(*slot),
             Self::ChainSettled { slot, .. }
             | Self::AttackArbitrated { slot, .. }
-            | Self::NuisanceDropped { slot, .. } => *slot,
-            Self::RoundEnded(_) | Self::MatchEnded(_) => 0,
+            | Self::NuisanceDropped { slot, .. } => Some(*slot),
+            Self::RoundEnded(_) | Self::MatchEnded(_) => None,
         }
     }
 }

@@ -1,11 +1,12 @@
 //! In-memory presentation runtime coverage from `integration-system/presentation-runtime.md`.
 
+mod common;
 mod presentation_common;
 
 use client::app_state::AppState;
 use client::presentation::{
-    AudioAvailability, EntityLifecycle, FeedbackBudget, FeedbackRuntime, PresentationRuntime,
-    VirtualCanvas, build_snapshot, publish_events,
+    AudioAvailability, AudioGains, EntityLifecycle, FeedbackBudget, FeedbackRuntime,
+    PresentationRuntime, VirtualCanvas, build_snapshot, publish_events,
 };
 use client::settings::AnimationIntensity;
 use game_core::match_state::{MatchEvent, MatchPhase, MatchStepReport};
@@ -126,7 +127,7 @@ fn unavailable_audio_is_non_fatal_and_diagnosed_once() {
     let mut runtime =
         FeedbackRuntime::new(AudioAvailability::Unavailable, 0, FeedbackBudget::default());
     for _ in 0..10 {
-        runtime.consume(&events(1));
+        runtime.consume(&events(1), AudioGains::FULL, true);
     }
     assert_eq!(runtime.audio_requests(), 0);
     assert_eq!(runtime.diagnostics().len(), 1);
@@ -137,7 +138,7 @@ fn unavailable_audio_is_non_fatal_and_diagnosed_once() {
 fn no_gamepads_means_no_vibration_and_no_diagnostic() {
     let mut runtime =
         FeedbackRuntime::new(AudioAvailability::Available, 0, FeedbackBudget::default());
-    runtime.consume(&events(4));
+    runtime.consume(&events(4), AudioGains::FULL, true);
     assert_eq!(runtime.vibration_requests(), 0);
     assert!(runtime.diagnostics().is_empty());
 }
@@ -150,7 +151,7 @@ fn high_feedback_is_merged_under_budgets_without_touching_rules() {
         concurrent_cues: 2,
     };
     let mut runtime = FeedbackRuntime::new(AudioAvailability::Available, 2, budget);
-    runtime.consume(&events(38));
+    runtime.consume(&events(38), AudioGains::FULL, true);
     assert!(runtime.live_transient_entities() <= 4);
     assert!(runtime.concurrent_cues() <= 2);
     assert_eq!(
@@ -215,7 +216,11 @@ fn all_optional_presentation_outputs_can_be_absent_while_rules_advance() {
         FeedbackRuntime::new(AudioAvailability::Unavailable, 0, FeedbackBudget::default());
     for _ in 0..120 {
         let report = state.step(&presentation_common::idle()).expect("tick");
-        feedback.consume(&publish_events(&report, AnimationIntensity::Reduced));
+        feedback.consume(
+            &publish_events(&report, AnimationIntensity::Reduced),
+            AudioGains::FULL,
+            true,
+        );
     }
     assert_eq!(state.match_tick(), 120);
     assert_eq!(feedback.audio_requests(), 0);
@@ -228,5 +233,232 @@ fn all_optional_presentation_outputs_can_be_absent_while_rules_advance() {
             AnimationIntensity::Reduced
         )
         .is_some()
+    );
+}
+
+/// Every kind of rule fact, in one report.
+fn every_fact() -> MatchStepReport {
+    MatchStepReport {
+        match_tick: 12,
+        phase: MatchPhase::Playing,
+        events: vec![
+            MatchEvent::GroupLocked(0),
+            MatchEvent::ChainSettled {
+                slot: 0,
+                links: 3,
+                all_clear: false,
+            },
+            MatchEvent::ChainSettled {
+                slot: 1,
+                links: 5,
+                all_clear: true,
+            },
+            MatchEvent::AttackArbitrated {
+                slot: 0,
+                offset: 0,
+                sent: 12,
+            },
+            MatchEvent::AttackArbitrated {
+                slot: 1,
+                offset: 6,
+                sent: 0,
+            },
+            MatchEvent::FeverEntered(0),
+            MatchEvent::FeverExited(1),
+            MatchEvent::NuisanceDropped { slot: 1, count: 6 },
+            MatchEvent::PlayerDefeated(1),
+            MatchEvent::RoundEnded(game_core::match_state::RoundOutcome::Decided(0)),
+        ],
+    }
+}
+
+// integration-system/presentation-runtime::TC-013
+#[test]
+fn every_fact_asks_for_one_cue_of_its_own_kind_at_its_own_tick() {
+    use client::presentation::AudioCue;
+
+    let report = every_fact();
+    let mut runtime =
+        FeedbackRuntime::new(AudioAvailability::Available, 2, FeedbackBudget::default());
+    let requests = runtime.consume(
+        &publish_events(&report, AnimationIntensity::Full),
+        AudioGains::FULL,
+        true,
+    );
+
+    assert_eq!(
+        requests.len(),
+        report.events.len(),
+        "one cue per confirmed fact"
+    );
+    assert!(
+        requests.iter().all(|request| request.id.match_tick == 12),
+        "every cue is asked for at the tick its fact happened on"
+    );
+    let kinds: Vec<AudioCue> = requests.iter().map(|request| request.cue).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            AudioCue::Lock,
+            AudioCue::Chain,
+            AudioCue::AllClear,
+            AudioCue::Attack,
+            AudioCue::Offset,
+            AudioCue::FeverEntered,
+            AudioCue::FeverExited,
+            AudioCue::NuisanceLanded,
+            AudioCue::Defeat,
+            AudioCue::RoundEnded,
+        ]
+    );
+
+    // The same report offered again is the same facts, not new ones.
+    let repeated = runtime.consume(
+        &publish_events(&report, AnimationIntensity::Full),
+        AudioGains::FULL,
+        true,
+    );
+    assert!(
+        repeated.is_empty(),
+        "a fact is cued once, not once per frame"
+    );
+}
+
+// integration-system/presentation-runtime::TC-013
+#[test]
+fn both_volume_sliders_reach_the_cue_gain_without_cancelling_it() {
+    for (master, sfx, expected) in [
+        (1.0, 1.0, 1.0),
+        (0.5, 0.5, 0.25),
+        (0.0, 1.0, 0.0),
+        (1.0, 0.0, 0.0),
+    ] {
+        let mut runtime =
+            FeedbackRuntime::new(AudioAvailability::Available, 0, FeedbackBudget::default());
+        let requests = runtime.consume(&events(1), AudioGains { master, sfx }, true);
+        let request = requests.first().expect("one fact asks for one cue");
+        assert!(
+            (request.gain - expected).abs() < f32::EPSILON,
+            "master {master} and sfx {sfx} should multiply to {expected}, got {}",
+            request.gain
+        );
+    }
+
+    // Silence is a gain, not a cancellation: what was triggered stays readable.
+    let mut muted =
+        FeedbackRuntime::new(AudioAvailability::Available, 0, FeedbackBudget::default());
+    assert_eq!(
+        muted
+            .consume(
+                &events(1),
+                AudioGains {
+                    master: 0.0,
+                    sfx: 0.0
+                },
+                true
+            )
+            .len(),
+        1
+    );
+
+    // No device silences the cue the same way, and still reports it once.
+    let mut deaf =
+        FeedbackRuntime::new(AudioAvailability::Unavailable, 0, FeedbackBudget::default());
+    let requests = deaf.consume(&events(1), AudioGains::FULL, true);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].gain, 0.0);
+    assert_eq!(deaf.diagnostics().len(), 1);
+}
+
+// integration-system/presentation-runtime::TC-013
+#[test]
+fn vibration_needs_the_setting_a_pad_and_a_fact_worth_feeling() {
+    use client::presentation::VibrationPattern;
+
+    let report = every_fact();
+    let published = publish_events(&report, AnimationIntensity::Full);
+
+    let mut both_pads =
+        FeedbackRuntime::new(AudioAvailability::Available, 2, FeedbackBudget::default());
+    let requests = both_pads.consume(&published, AudioGains::FULL, true);
+    let felt: Vec<(Option<usize>, VibrationPattern)> = requests
+        .iter()
+        .filter_map(|request| request.vibration.map(|pattern| (request.slot, pattern)))
+        .collect();
+    assert_eq!(
+        felt,
+        vec![
+            (Some(0), VibrationPattern::Chain),
+            (Some(1), VibrationPattern::Chain),
+            (Some(0), VibrationPattern::FeverEntered),
+            (Some(1), VibrationPattern::NuisanceLanded),
+        ],
+        "only chains, nuisance landing and entering Fever are felt, each on its own pad"
+    );
+
+    let mut setting_off =
+        FeedbackRuntime::new(AudioAvailability::Available, 2, FeedbackBudget::default());
+    assert!(
+        setting_off
+            .consume(&published, AudioGains::FULL, false)
+            .iter()
+            .all(|request| request.vibration.is_none()),
+        "the setting turns vibration off without touching the cues"
+    );
+
+    let mut one_pad =
+        FeedbackRuntime::new(AudioAvailability::Available, 1, FeedbackBudget::default());
+    assert!(
+        one_pad
+            .consume(&published, AudioGains::FULL, true)
+            .iter()
+            .filter_map(|request| request.vibration.map(|_| request.slot))
+            .all(|slot| slot == Some(0)),
+        "a player with no pad feels nothing, and nobody else's pad buzzes for them"
+    );
+}
+
+// integration-system/presentation-runtime::TC-013
+#[test]
+fn a_running_match_asks_for_cues_at_the_ticks_its_facts_happen_on() {
+    let mut app = common::controlled_app();
+    app.insert_resource(client::match_flow::FrozenMatch(presentation_common::spec(
+        5,
+    )));
+    common::advance_to(&mut app, AppState::Match);
+
+    // Far enough in for the countdown to end and for both sides to lock a
+    // group, which is the first fact any match produces.
+    for _ in 0..600 {
+        app.update();
+        common::run_fixed_tick(&mut app);
+        if app
+            .world()
+            .resource::<client::feedback::MatchFeedback>()
+            .requested()
+            > 0
+        {
+            break;
+        }
+    }
+
+    let feedback = app.world().resource::<client::feedback::MatchFeedback>();
+    assert!(
+        feedback.requested() > 0,
+        "a running match produced no cue at all"
+    );
+    let tick = feedback
+        .last_tick()
+        .expect("cues carry the tick they came from");
+    assert!(
+        feedback
+            .recent()
+            .all(|request| request.id.match_tick <= tick),
+        "no cue is asked for ahead of the tick it belongs to"
+    );
+    assert_eq!(
+        feedback.diagnostics().len(),
+        1,
+        "a headless build has no audio device and says so once"
     );
 }

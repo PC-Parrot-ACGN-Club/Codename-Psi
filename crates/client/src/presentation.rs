@@ -356,6 +356,119 @@ impl PresentationEventConsumer {
     }
 }
 
+/// The cue one rule fact plays.
+///
+/// One kind per fact, fixed before there is any sample to play: R1 ships no
+/// audio (see [PRD §4.2]), so what has to be right now is the interface and
+/// the tick each cue is asked for, not the sound.
+///
+/// [PRD §4.2]: ../../../docs/PRD.md
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AudioCue {
+    Lock,
+    Chain,
+    AllClear,
+    Attack,
+    Offset,
+    NuisanceLanded,
+    FeverEntered,
+    FeverExited,
+    Defeat,
+    RoundEnded,
+    MatchEnded,
+}
+
+impl AudioCue {
+    /// The cue a fact plays.
+    #[must_use]
+    pub const fn of(fact: &MatchEvent) -> Self {
+        match fact {
+            MatchEvent::GroupLocked(_) => Self::Lock,
+            MatchEvent::ChainSettled {
+                all_clear: true, ..
+            } => Self::AllClear,
+            MatchEvent::ChainSettled { .. } => Self::Chain,
+            MatchEvent::AttackArbitrated { sent, .. } if *sent > 0 => Self::Attack,
+            MatchEvent::AttackArbitrated { .. } => Self::Offset,
+            MatchEvent::NuisanceDropped { .. } => Self::NuisanceLanded,
+            MatchEvent::FeverEntered(_) => Self::FeverEntered,
+            MatchEvent::FeverExited(_) => Self::FeverExited,
+            MatchEvent::PlayerDefeated(_) => Self::Defeat,
+            MatchEvent::RoundEnded(_) => Self::RoundEnded,
+            MatchEvent::MatchEnded(_) => Self::MatchEnded,
+        }
+    }
+}
+
+/// The short vibration patterns the presentation contract names.
+///
+/// Only four kinds of fact vibrate; everything else is heard and seen but not
+/// felt, so a busy tick does not turn into a continuous buzz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VibrationPattern {
+    Chain,
+    NuisanceLanded,
+    FeverEntered,
+    RoundDecided,
+}
+
+impl VibrationPattern {
+    /// The pattern a cue vibrates with, if it vibrates at all.
+    #[must_use]
+    pub const fn of(cue: AudioCue) -> Option<Self> {
+        match cue {
+            AudioCue::Chain | AudioCue::AllClear => Some(Self::Chain),
+            AudioCue::NuisanceLanded => Some(Self::NuisanceLanded),
+            AudioCue::FeverEntered => Some(Self::FeverEntered),
+            AudioCue::RoundEnded | AudioCue::MatchEnded => Some(Self::RoundDecided),
+            AudioCue::Lock
+            | AudioCue::Attack
+            | AudioCue::Offset
+            | AudioCue::FeverExited
+            | AudioCue::Defeat => None,
+        }
+    }
+}
+
+/// The two volume settings an effect cue passes through.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AudioGains {
+    pub master: f32,
+    pub sfx: f32,
+}
+
+impl AudioGains {
+    /// Both sliders at full.
+    pub const FULL: Self = Self {
+        master: 1.0,
+        sfx: 1.0,
+    };
+
+    /// The gain one effect cue plays at.
+    ///
+    /// The two sliders multiply, and either at zero silences the cue without
+    /// cancelling it: the request still happens, so what was triggered and when
+    /// stays observable however the sliders are set.
+    #[must_use]
+    pub fn effect(self) -> f32 {
+        (self.master * self.sfx).clamp(0.0, 1.0)
+    }
+}
+
+/// One cue asked for by one confirmed fact.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CueRequest {
+    pub id: PresentationEventId,
+    pub cue: AudioCue,
+    /// The participant the fact belongs to, or `None` for a match-level fact.
+    pub slot: Option<usize>,
+    /// Gain after both volume settings; zero when there is no audio output.
+    pub gain: f32,
+    /// Pattern to play on this participant's pad, once the setting and the
+    /// connected pads have had their say.
+    pub vibration: Option<VibrationPattern>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchPresentationFrame {
     pub snapshot: MatchPresentationSnapshot,
@@ -536,13 +649,28 @@ impl FeedbackRuntime {
         }
     }
 
-    pub fn consume(&mut self, events: &[PresentationEvent]) {
+    /// How many local pads are connected, which is what vibration reaches.
+    pub const fn set_gamepads(&mut self, gamepads: usize) {
+        self.gamepads = gamepads;
+    }
+
+    /// Turns confirmed facts into cue requests, once each.
+    ///
+    /// The requests are returned rather than played here: R1 has no samples,
+    /// and returning them is what makes the cue kinds and their ticks
+    /// observable without an audio device.
+    pub fn consume(
+        &mut self,
+        events: &[PresentationEvent],
+        gains: AudioGains,
+        vibration_enabled: bool,
+    ) -> Vec<CueRequest> {
         let fresh: Vec<_> = events
             .iter()
             .filter(|event| self.seen.insert(event.id))
             .collect();
         if fresh.is_empty() {
-            return;
+            return Vec::new();
         }
         let batches = if fresh.len() > 1 {
             self.merged_batches += 1;
@@ -564,6 +692,30 @@ impl FeedbackRuntime {
         if self.gamepads > 0 {
             self.vibration_requests += batches.min(self.gamepads);
         }
+
+        let gain = match self.audio {
+            AudioAvailability::Available => gains.effect(),
+            AudioAvailability::Unavailable => 0.0,
+        };
+        fresh
+            .into_iter()
+            .map(|event| {
+                let cue = AudioCue::of(&event.fact);
+                let slot = event.fact.participant();
+                // A pad only buzzes for the player holding it, so a fact with
+                // no participant -- a round or match ending -- reaches nobody's
+                // pad through this path.
+                let reaches_a_pad =
+                    slot.is_some_and(|slot| slot < self.gamepads) && vibration_enabled;
+                CueRequest {
+                    id: event.id,
+                    cue,
+                    slot,
+                    gain,
+                    vibration: reaches_a_pad.then(|| VibrationPattern::of(cue)).flatten(),
+                }
+            })
+            .collect()
     }
 
     #[must_use]
@@ -581,6 +733,11 @@ impl FeedbackRuntime {
     #[must_use]
     pub const fn live_transient_entities(&self) -> usize {
         self.transient_entities
+    }
+    /// Whether an audio device is present.
+    #[must_use]
+    pub const fn audio(&self) -> AudioAvailability {
+        self.audio
     }
     #[must_use]
     pub const fn concurrent_cues(&self) -> usize {
