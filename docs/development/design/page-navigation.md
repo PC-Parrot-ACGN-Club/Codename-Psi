@@ -21,7 +21,7 @@
 | 页面（`AppState`） | 可聚焦项 | 可提出的 cause |
 | --- | --- | --- |
 | `MainMenu` | 开始游戏、设置、退出 | `StartGame`、`SettingsOpened` |
-| `ModeSelect` | 单人、本地双人、局域网对战、返回 | `ModeConfirmed`、`BackRequested` |
+| `ModeSelect` | 单人、本地双人、AI 对战 AI、局域网对战、返回 | `ModeConfirmed`、`BackRequested` |
 | `CharacterSelect` | 每个槽位的角色项、确认、返回 | `CharacterConfirmed`、`BackRequested` |
 | `Settings` | 各设置项、返回 | `SettingsClosed` |
 | `Match` | 无 | `PauseRequested` |
@@ -65,7 +65,9 @@
 - 输出：对应焦点环的移动或确认。
 - 错误语义：单人模式下 P2 的物理输入不驱动任何焦点环。
 
-单人模式的 `CharacterSelect` 由 P1 先后为自己和 AI 槽位各确认一个角色，两个槽位允许相同角色；本地双人由两名玩家各自确认自己的槽位。两个槽位都确认后「确认」项才可用。
+单人与 AI 对战 AI 模式的 `CharacterSelect` 由 P1 先后为两个槽位各确认一个角色，两个槽位允许相同角色；本地双人由两名玩家各自确认自己的槽位。两个槽位都确认后「确认」项才可用。
+
+槽位归属由模式决定：只有本地双人存在第二名本地玩家，其余模式下 P2 的物理输入不驱动任何焦点环。AI 驱动的槽位是模式的函数——单人为槽位 1，AI 对战 AI 为两个槽位，本地双人为空。
 
 ### 页面实体生命周期
 

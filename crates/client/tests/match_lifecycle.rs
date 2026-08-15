@@ -9,8 +9,9 @@ use client::data::{DataResolution, RulesData};
 use client::input::LocalInputSampler;
 use client::match_flow::{
     AiPlanState, FrozenMatch, MatchFlowPlugin, MatchInstanceId, MatchLifecycleDiagnostics,
-    MatchPresentationResources, MatchSelection, RematchIntent,
+    MatchPresentationResources, MatchSelection, RematchIntent, SelectedMode,
 };
+use client::page::MatchMode;
 use client::simulation::{RulesSimulation, SimulationPlugin};
 use game_core::{
     board::{Board, Cell, Coord},
@@ -442,13 +443,12 @@ fn single_player_and_local_versus_can_both_complete_a_bo3_to_result() {
             ],
         );
         selection.handle_player(0, client::input::UIAction::Confirm);
-        match mode {
-            client::page::MatchMode::SinglePlayer => {
-                selection.handle_player(0, client::input::UIAction::Confirm);
-            }
-            client::page::MatchMode::LocalVersus => {
-                selection.handle_player(1, client::input::UIAction::Confirm);
-            }
+        // The second slot is picked by whoever owns it: the one player present
+        // when there is no second human, and player 2 otherwise.
+        if mode.one_selector() {
+            selection.handle_player(0, client::input::UIAction::Confirm);
+        } else {
+            selection.handle_player(1, client::input::UIAction::Confirm);
         }
         assert!(selection.confirm_enabled());
 
@@ -475,5 +475,60 @@ fn single_player_and_local_versus_can_both_complete_a_bo3_to_result() {
         );
         commit(&mut app);
         assert_eq!(current(&app), AppState::MainMenu);
+    }
+}
+
+// integration-system/match-lifecycle::TC-011
+#[test]
+fn each_mode_hands_the_ai_exactly_the_slots_no_local_player_owns() {
+    for (mode, expected) in [
+        (MatchMode::SinglePlayer, vec![1]),
+        (MatchMode::LocalVersus, vec![]),
+        (MatchMode::AiVersus, vec![0, 1]),
+    ] {
+        let mut app = app();
+        app.insert_resource(SelectedMode(mode));
+        to_character_select(&mut app);
+        start_match(&mut app, 21, AppTransitionCause::CharacterConfirmed);
+
+        let driven: Vec<usize> = app
+            .world()
+            .resource::<AiPlanState>()
+            .0
+            .keys()
+            .copied()
+            .collect();
+        assert_eq!(driven, expected, "{mode:?} drives the wrong slots");
+    }
+}
+
+// integration-system/match-lifecycle::TC-011
+#[test]
+fn one_selector_modes_let_a_single_player_pick_both_characters() {
+    let roster = vec![
+        game_core::config::CharacterId("psi-a".into()),
+        game_core::config::CharacterId("psi-b".into()),
+    ];
+
+    for mode in [MatchMode::SinglePlayer, MatchMode::AiVersus] {
+        assert!(mode.one_selector(), "{mode:?} has no second local player");
+        let mut page = client::page::CharacterSelectPage::new(mode, roster.clone());
+
+        // Player 2 owns no slot here, so their input has to be inert.
+        page.handle_player(1, client::input::UIAction::Confirm);
+        assert!(!page.confirm_enabled(), "{mode:?} took player 2's confirm");
+
+        page.handle_player(0, client::input::UIAction::Confirm);
+        page.handle_player(0, client::input::UIAction::Down);
+        page.handle_player(0, client::input::UIAction::Confirm);
+        assert!(page.confirm_enabled(), "{mode:?} left a slot unpicked");
+        assert_eq!(
+            page.selected()
+                .iter()
+                .map(|id| id.as_ref().map(|id| id.0.as_str()))
+                .collect::<Vec<_>>(),
+            vec![Some("psi-a"), Some("psi-b")],
+            "{mode:?} did not let one player pick two different characters"
+        );
     }
 }

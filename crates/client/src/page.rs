@@ -14,6 +14,7 @@ pub enum PageItem {
     Exit,
     SinglePlayer,
     LocalVersus,
+    AiVersus,
     Lan,
     ConfirmCharacters,
     Back,
@@ -254,6 +255,11 @@ impl PageModel {
                     AppState::CharacterSelect,
                     AppTransitionCause::ModeConfirmed,
                 ),
+                action_item(
+                    PageItem::AiVersus,
+                    AppState::CharacterSelect,
+                    AppTransitionCause::ModeConfirmed,
+                ),
                 FocusItem::new(PageItem::Lan, false, Some("mode_select.lan_unavailable")),
                 action_item(
                     PageItem::Back,
@@ -384,6 +390,25 @@ pub enum MatchMode {
     #[default]
     SinglePlayer,
     LocalVersus,
+    /// Both sides are driven by the AI; nobody plays.
+    ///
+    /// It exists to make the presentation observable: a match runs to its end
+    /// without a hand on the keyboard, so the animations can be watched
+    /// instead of played through.
+    AiVersus,
+}
+
+impl MatchMode {
+    /// Whether one local player picks the characters for both slots.
+    ///
+    /// True wherever slot 1 is not a second person at the keyboard: the AI
+    /// opponent of [`Self::SinglePlayer`] and both AI sides of
+    /// [`Self::AiVersus`] still need a character, and the one player present
+    /// chooses it.
+    #[must_use]
+    pub const fn one_selector(self) -> bool {
+        matches!(self, Self::SinglePlayer | Self::AiVersus)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -407,11 +432,11 @@ impl CharacterSelectPage {
     }
 
     pub fn handle_player(&mut self, player: usize, action: UIAction) {
-        if player >= 2 || (self.mode == MatchMode::SinglePlayer && player == 1) {
+        if player >= 2 || (self.mode.one_selector() && player == 1) {
             return;
         }
         let controlled_slot =
-            if self.mode == MatchMode::SinglePlayer && player == 0 && self.selected[0].is_some() {
+            if self.mode.one_selector() && player == 0 && self.selected[0].is_some() {
                 1
             } else {
                 player
@@ -432,7 +457,7 @@ impl CharacterSelectPage {
             }
             UIAction::Back => {
                 self.selected[controlled_slot] = None;
-                if self.mode == MatchMode::SinglePlayer && controlled_slot == 1 {
+                if self.mode.one_selector() && controlled_slot == 1 {
                     self.selected[0] = None;
                 }
             }

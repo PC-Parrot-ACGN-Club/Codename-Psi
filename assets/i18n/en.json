@@ -11,6 +11,7 @@
     "mode_select.title": "Select Mode",
     "mode_select.single_player": "Single Player",
     "mode_select.local_versus": "Local Versus",
+    "mode_select.ai_versus": "AI vs AI",
     "mode_select.lan": "LAN Versus",
     "character_select.title": "Select Character",
     "character_select.confirm": "Confirm",

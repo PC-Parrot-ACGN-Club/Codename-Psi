@@ -31,6 +31,7 @@
 - 创建失败不留下半初始化实例（TC-007）。
 - 比赛结束只进入一次 `Result`（TC-008）。
 - 冻结规格随对局释放，不为后续对局提供种子（TC-010；Concern: Determinism）。
+- 每种模式把 AI 交给恰好没有本地玩家的槽位（TC-011）。
 
 ### System — Match Flow
 
@@ -45,6 +46,7 @@
 | 错误猜测 | 冻结失败与结束 tick 后继续推进 | TC-007～TC-008 |
 | 生命周期 | 冻结规格在实例化与释放两端的存活范围 | TC-010 |
 | 场景 / 协作路径 | 两种模式的完整对局流程 | TC-009 |
+| 判定表 | 模式 × 槽位归属（AI 驱动、本地玩家驱动） | TC-011 |
 
 ## 测试用例列表
 
@@ -60,6 +62,7 @@
 | TC-008 | 比赛结束只进入一次 Result | P1 | Component Integration | — | Match Flow；Client | Match 中一方即将达到两胜 | 推进到比赛结束 tick，并在其后继续提供若干 fixed 执行机会 | 结束后 10 个 fixed 执行机会 | `Match → Result` 只提交一次；后续执行机会不再产生迁移请求；`Result` 的 `OnEnter` 只触发一次 | [Confirmed] [应用状态机：请求处理](../../development/design/application-state-machine.md#请求处理)；[小局、BO3 与安全点：完成态](../../development/design/match-and-round.md#完成态) |
 | TC-009 | 单人与本地双人均可从主菜单完成 BO3 并回到赛果 | P0 | System | Smoke | Match Flow；Client | 已装配客户端，规则数据可用 | 分别以两种模式走完整流程：主菜单 → 模式 → 选角 → BO3 → 赛果 → 返回主菜单 | 单人（P1 + AI）；本地双人（P1 + P2）；每种模式打到某一方两胜 | 两种模式均能完成 BO3；某一方达到两胜后进入 `Result` 并显示获胜方与局分；「返回主菜单」回到 `MainMenu`；全程只有一个当前 `AppState`；单人模式下 AI 只控制自己的槽位 | [Confirmed] [PRD §8](../../PRD.md)；[页面导航与焦点：页面与迁移](../../development/design/page-navigation.md#页面与迁移) |
 | TC-010 | 冻结规格不为它之外的对局提供种子 | P1 | Component Integration | Determinism | Match Flow；Client | 最小客户端 app，选择可被 client 自行冻结 | 进入 Match 后检查冻结规格；放弃对局回到主菜单，改用另一份选择再走一次开局 | 第一场 `seed=7`；第二场选择的种子为 `41` | 实例建立后不残留冻结规格；退出 Match 到主菜单后同样不残留；第二场使用 `seed=41` 而非 `seed=7` | [Confirmed] [固定频率规则调度：对局实例生命周期](../../development/design/fixed-tick-simulation.md#对局实例生命周期) |
+| TC-011 | 每种模式把 AI 交给恰好没有本地玩家的槽位 | P1 | Component Integration | — | Match Flow；Client | 最小客户端 app，可指定已选模式 | 参数化以三种模式进入 Match，读取 AI 驱动的槽位集合；并在选角页参数化两种单人选择模式的槽位归属 | 单人；本地双人；AI 对战 AI | 单人只驱动槽位 1；本地双人不驱动任何槽位；AI 对战 AI 驱动两个槽位；单人与 AI 对战 AI 下 P2 的确认不产生任何选择，且 P1 可先后为两个槽位选定不同角色 | [Confirmed] [页面导航与焦点：页面与迁移](../../development/design/page-navigation.md#页面与迁移)；[PRD §4.1](../../PRD.md) |
 
 ## 风险查漏
 

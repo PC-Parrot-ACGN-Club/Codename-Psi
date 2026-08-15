@@ -11,6 +11,7 @@
     "mode_select.title": "选择模式",
     "mode_select.single_player": "单人",
     "mode_select.local_versus": "本地双人",
+    "mode_select.ai_versus": "AI 对战 AI",
     "mode_select.lan": "局域网对战",
     "character_select.title": "选择角色",
     "character_select.confirm": "确认",

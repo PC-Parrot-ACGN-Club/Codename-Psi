@@ -141,6 +141,7 @@ const fn label_key(item: PageItem) -> &'static str {
         PageItem::Exit => "main_menu.exit",
         PageItem::SinglePlayer => "mode_select.single_player",
         PageItem::LocalVersus => "mode_select.local_versus",
+        PageItem::AiVersus => "mode_select.ai_versus",
         PageItem::Lan => "mode_select.lan",
         PageItem::ConfirmCharacters => "character_select.confirm",
         PageItem::Back => "common.back",
@@ -912,6 +913,7 @@ fn drive_focused_page(
                 match confirmed {
                     PageItem::SinglePlayer => *mode = SelectedMode(MatchMode::SinglePlayer),
                     PageItem::LocalVersus => *mode = SelectedMode(MatchMode::LocalVersus),
+                    PageItem::AiVersus => *mode = SelectedMode(MatchMode::AiVersus),
                     _ => {}
                 }
                 // Recorded before the request so the settings page knows where

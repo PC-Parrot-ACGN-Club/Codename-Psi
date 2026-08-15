@@ -252,6 +252,9 @@ fn ai_slots(mode: MatchMode) -> BTreeMap<usize, AiControllerState> {
     match mode {
         MatchMode::SinglePlayer => BTreeMap::from([(1, AiControllerState::new())]),
         MatchMode::LocalVersus => BTreeMap::new(),
+        MatchMode::AiVersus => {
+            BTreeMap::from([(0, AiControllerState::new()), (1, AiControllerState::new())])
+        }
     }
 }
 
