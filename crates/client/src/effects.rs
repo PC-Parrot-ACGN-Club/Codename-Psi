@@ -81,8 +81,11 @@ impl EffectState {
 }
 
 /// One disposable mark left where a ball was cleared.
+///
+/// Public so a test can count what a clear left and watch it expire; nothing
+/// outside this module writes one.
 #[derive(Debug, Component)]
-struct ClearMark {
+pub struct ClearMark {
     born_tick: u64,
     drift: Vec2,
 }

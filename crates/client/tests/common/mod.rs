@@ -63,6 +63,25 @@ pub const WORKSPACE_ASSETS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../a
 /// assertion about whatever the developer running the suite last saved, and a
 /// test that requested a save would overwrite their real settings file.
 pub fn controlled_app_with_asset_root(root: impl Into<String>) -> App {
+    assemble(root, false)
+}
+
+/// A controlled app with Bevy's UI stack installed, so pages and the HUD are
+/// built as entities instead of being skipped.
+///
+/// The stack goes in before the project plugin on purpose: the client's UI, HUD
+/// and effects plugins decide at build time whether there is a UI stack to draw
+/// into, so one added afterwards would arrive too late to change their minds.
+///
+/// No renderer is involved. Layout and entity lifecycle run headlessly; only
+/// putting pixels on a screen needs a GPU.
+pub fn ui_app() -> App {
+    let mut app = assemble(WORKSPACE_ASSETS, true);
+    run_until_bootstrap_ready(&mut app);
+    app
+}
+
+fn assemble(root: impl Into<String>, ui: bool) -> App {
     let mut app = App::new();
     app.insert_resource(client::bootstrap::BootstrapPaths {
         settings: Some(unused_settings_path()),
@@ -73,8 +92,22 @@ pub fn controlled_app_with_asset_root(root: impl Into<String>) -> App {
             file_path: root.into(),
             ..default()
         },
-        GameInfrastructurePlugin,
     ));
+    if ui {
+        app.add_plugins((
+            bevy::window::WindowPlugin::default(),
+            bevy::picking::DefaultPickingPlugins,
+            bevy::input_focus::InputFocusPlugin,
+            bevy::input_focus::InputDispatchPlugin,
+            bevy::text::TextPlugin,
+            bevy::ui::UiPlugin,
+        ));
+        // Text layout reaches for the glyph atlas, which lives in image
+        // assets; with no render plugin nothing else registers them.
+        app.init_asset::<bevy::image::Image>();
+        app.init_asset::<bevy::image::TextureAtlasLayout>();
+    }
+    app.add_plugins(GameInfrastructurePlugin);
     app.init_resource::<client::simulation::SimulationProbe>();
     app.world_mut().resource_mut::<Time<Virtual>>().pause();
     app
