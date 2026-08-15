@@ -32,6 +32,7 @@
 - 丢弃全部事件后快照仍完整表达对局状态（TC-005）。
 - 优势状态由规则事实推导（TC-006）。
 - 两档动画强度不改变快照中的规则事实（TC-007；Concern: Determinism）。
+- 一次性事实留下的文字行的取舍、本地化与到期（TC-008）。
 
 ## 设计方法与覆盖模型
 
@@ -43,6 +44,8 @@
 | 错误猜测 | 同一事件被重复消费 | TC-004 |
 | 判定表 | 待接收垃圾、溢出风险、净攻击与 Fever 状态的组合 | TC-006 |
 | 对比测试 | `Full` 与 `Reduced` 两档下的同一规则输入 | TC-007 |
+| 判定表 | 全消 × 送出攻击 × 抵消三种事实的同 tick 组合 | TC-008 |
+| 边界值 | 文字行存活期的最后一 tick 与其后一 tick | TC-008 |
 
 ## 测试用例列表
 
@@ -55,7 +58,8 @@
 | TC-005 | 丢弃全部表现事件后快照仍完整表达对局状态 | P0 | Component | — | Client | 一段含消除、垃圾入队与 Fever 进入的 tick 序列 | 推进该序列，丢弃全部 `PresentationEvent`，只保留最后一份快照 | 连续 30 tick，其间发生连锁、垃圾入队与 Fever 进入 | 最终快照的棋盘、两条队列数量、Fever 状态、分数与比分与逐 tick 消费事件的结果一致；不存在只能由事件得知的常驻信息 | [Confirmed] [表现运行时：画面重建](../../development/design/presentation-runtime.md#画面重建) |
 | TC-006 | 优势状态由待接收垃圾、溢出风险、净攻击与 Fever 状态推导 | P2 | Component | — | Client | 可构造双方的规则事实 | 参数化构造四组局面并读取 `momentum` | 本方净攻击为正且对方待接收垃圾多；本方待接收垃圾多且接近溢出；双方对称；一方处于 Fever | 前两组的 `advantage_side` 分别指向本方与对方；对称局面不指向任一方；`momentum` 只由列出的规则事实决定，不受角色表现数据或动画强度影响 | [Confirmed] [表现与 UI 设计 §3.1](../../presentation.md)；[表现运行时：快照构造](../../development/design/presentation-runtime.md#快照构造) |
 | TC-007 | 两档动画强度不改变快照中的规则事实 | P0 | Component | Determinism | Client；Rules | 同一 `MatchView` 与 `MatchStepReport` | 分别以 `Full` 与 `Reduced` 构造快照与事件 | `AnimationIntensity::Full`；`AnimationIntensity::Reduced` | 两档产生的快照除演出参数外逐字段相同，把演出参数归一后整份快照相等；两档的演出参数本身不同；事件的种类、顺序与 `(match_tick, ordinal)` 相同；结算阶段的 `duration_ticks` 相同 | [Confirmed] [表现运行时：动画强度](../../development/design/presentation-runtime.md#动画强度)；[表现与 UI 设计 §6.1](../../presentation.md) |
+| TC-008 | 一次性事实留下的文字行按优先级取舍并按 tick 到期 | P1 | Component | — | Client | 可构造含任意事实的 `MatchStepReport` 与两份语言词条 | 参数化三组同 tick 事实各观察一次，再推进到存活期两端，并把同一份报告重复观察一次 | 组一：slot 0 送出 12 且抵消 2，slot 1 抵消 6 且送出 0；组二：slot 0 同 tick 全消并送出 30；组三：一个无可说事实的 tick | 组一的两侧分别显示送出量与抵消量；组二显示全消；组三保留上一行不清屏；文字为本地化的事实名称加精确数量，`zh-CN` 下抵消行为「抵消 6」；存活期最后一 tick 仍显示、其后一 tick 消失；重复观察同一份报告不改变任何一行 | [Confirmed] [表现运行时：文字反馈](../../development/design/presentation-runtime.md#文字反馈)；[表现与 UI 设计 §3](../../presentation.md) |
 
 ## 风险查漏
 
-快照完整性、事件编号与去重、可重建性、优势推导与动画强度不变性均有直接用例；跳帧采样、降级与整局 checksum 一致性由集成测试稿覆盖。
+快照完整性、事件编号与去重、可重建性、优势推导、文字反馈取舍与动画强度不变性均有直接用例；跳帧采样、降级与整局 checksum 一致性由集成测试稿覆盖。

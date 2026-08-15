@@ -11,8 +11,11 @@ use bevy::text::FontSource;
 use game_core::board::{Cell, Coord};
 
 use crate::app_state::AppState;
+use crate::i18n::Localization;
 use crate::match_flow::MatchInstanceId;
-use crate::presentation::{MatchPresentationSnapshot, PresentationEffects, build_snapshot};
+use crate::presentation::{
+    FeedbackLines, MatchPresentationSnapshot, PresentationEffects, build_snapshot,
+};
 use crate::settings::UserSettings;
 use crate::simulation::{LatestStepReport, RulesSimulation};
 use crate::ui::UiFont;
@@ -78,9 +81,18 @@ impl Plugin for HudPlugin {
         if !app.is_plugin_added::<bevy::ui::UiPlugin>() {
             return;
         }
-        app.add_systems(Update, (spawn_hud, release_hud, refresh_hud).chain());
+        app.init_resource::<MatchFeedback>()
+            .add_systems(Update, (spawn_hud, release_hud, refresh_hud).chain());
     }
 }
+
+/// What each side is currently being told about the last few ticks.
+///
+/// One-shot facts do not survive in the snapshot, so the lines they leave are
+/// kept here and expire on their own; everything else the HUD draws is read
+/// back out of the snapshot every frame.
+#[derive(Debug, Default, Resource)]
+struct MatchFeedback(FeedbackLines);
 
 /// Root of the HUD, tagged with the instance it belongs to.
 #[derive(Debug, Component)]
@@ -105,6 +117,7 @@ enum HudText {
     FeverTime(usize),
     FeverTarget(usize),
     Chain(usize),
+    Feedback(usize),
     Character(usize),
     Scoreline,
     Phase,
@@ -186,6 +199,8 @@ fn refresh_hud(
     simulation: Option<Res<RulesSimulation>>,
     report: Res<LatestStepReport>,
     settings: Res<UserSettings>,
+    localization: Res<Localization>,
+    mut feedback: ResMut<MatchFeedback>,
     mut cells: HudCells,
 ) {
     // The pause and settings pages sit over a live board, so the HUD keeps
@@ -208,6 +223,10 @@ fn refresh_hud(
     ) else {
         return;
     };
+
+    if let Some(report) = report.0.as_ref() {
+        feedback.0.observe(report);
+    }
 
     let overlays: [SlotOverlay; 2] =
         std::array::from_fn(|slot| slot_overlay(&snapshot.players[slot], snapshot.effects));
@@ -284,7 +303,7 @@ fn refresh_hud(
     }
 
     for (field, mut text) in &mut cells.texts {
-        let value = hud_value(field, &snapshot);
+        let value = hud_value(field, &snapshot, &feedback.0, &localization);
         if text.0 != value {
             text.0 = value;
         }
@@ -485,7 +504,12 @@ fn slot_overlay(
     overlay
 }
 
-fn hud_value(field: &HudText, snapshot: &MatchPresentationSnapshot) -> String {
+fn hud_value(
+    field: &HudText,
+    snapshot: &MatchPresentationSnapshot,
+    feedback: &FeedbackLines,
+    localization: &Localization,
+) -> String {
     let player = |slot: usize| &snapshot.players[slot];
     match *field {
         HudText::Score(slot) => format!("{}", player(slot).score),
@@ -511,6 +535,9 @@ fn hud_value(field: &HudText, snapshot: &MatchPresentationSnapshot) -> String {
                 String::new()
             }
         }
+        HudText::Feedback(slot) => feedback
+            .line(slot, snapshot.match_tick)
+            .map_or_else(String::new, |line| line.text(localization)),
         HudText::Character(slot) => player(slot).drop_set_id.0.clone(),
         HudText::Scoreline => format!(
             "ROUND {} · BO3 · {} : {}",
@@ -656,8 +683,13 @@ fn build_hud(commands: &mut Commands, instance: MatchInstanceId, font: &Handle<F
     let side = |commands: &mut Commands, slot: usize| {
         let side = column(commands, 10.0);
         let queue = queue_panel(commands, font, slot);
+        // Directly over the board it belongs to, so a glance at one side reads
+        // that side's queue, what just happened to it, and the board itself.
+        let feedback = value_text(commands, font, 28.0, HudText::Feedback(slot));
         let board = board_grid(commands, font, slot);
-        commands.entity(side).add_children(&[queue, board]);
+        commands
+            .entity(side)
+            .add_children(&[queue, feedback, board]);
         side
     };
     let middle = |commands: &mut Commands, slot: usize| {

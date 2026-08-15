@@ -38,6 +38,9 @@
     "ui_action.confirm": "Confirm",
     "ui_action.back": "Back",
     "ui_action.up": "Up",
+    "match.feedback.attack": "Attack",
+    "match.feedback.offset": "Offset",
+    "match.feedback.all_clear": "All Clear",
     "ui_action.down": "Down"
   }
 }

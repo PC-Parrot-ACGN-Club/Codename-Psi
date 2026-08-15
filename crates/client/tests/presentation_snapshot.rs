@@ -3,7 +3,8 @@
 mod presentation_common;
 
 use client::presentation::{
-    MatchPresentationFrame, PresentationEventConsumer, build_snapshot, publish_events,
+    FEEDBACK_TICKS, FeedbackLine, FeedbackLines, MatchPresentationFrame, PresentationEventConsumer,
+    build_snapshot, publish_events,
 };
 use client::settings::AnimationIntensity;
 use game_core::{
@@ -250,4 +251,120 @@ fn animation_intensity_changes_only_disposable_effect_parameters() {
             .collect::<Vec<_>>()
     );
     assert_ne!(full[0].effects, reduced[0].effects);
+}
+
+/// A localization holding the real shipped catalogs.
+fn localization(locale: &str) -> client::i18n::Localization {
+    client::i18n::Localization::new(
+        locale,
+        [
+            client::i18n::parse_catalog(include_str!("../../../assets/i18n/en.json"))
+                .expect("the shipped English catalog parses"),
+            client::i18n::parse_catalog(include_str!("../../../assets/i18n/zh-CN.json"))
+                .expect("the shipped Chinese catalog parses"),
+        ],
+    )
+}
+
+// component/presentation-snapshot::TC-008
+#[test]
+fn one_ticks_facts_leave_one_localized_line_per_participant() {
+    let en = localization("en");
+    let zh = localization("zh-CN");
+
+    // What reached the opponent outranks what was cancelled.
+    let mut lines = FeedbackLines::default();
+    lines.observe(&report(
+        10,
+        vec![
+            MatchEvent::AttackArbitrated {
+                slot: 0,
+                offset: 2,
+                sent: 12,
+            },
+            MatchEvent::AttackArbitrated {
+                slot: 1,
+                offset: 6,
+                sent: 0,
+            },
+        ],
+    ));
+    assert_eq!(
+        lines.line(0, 10).expect("slot 0 has a line").text(&en),
+        "Attack 12"
+    );
+    assert_eq!(
+        lines.line(1, 10).expect("slot 1 has a line").text(&en),
+        "Offset 6"
+    );
+    assert_eq!(
+        lines.line(1, 10).expect("slot 1 has a line").text(&zh),
+        "抵消 6",
+        "the fact's name is localized and its count is the rules' own integer"
+    );
+
+    // An all clear outranks the attack the same chain produced.
+    let mut clearing = FeedbackLines::default();
+    clearing.observe(&report(
+        10,
+        vec![
+            MatchEvent::ChainSettled {
+                slot: 0,
+                links: 4,
+                all_clear: true,
+            },
+            MatchEvent::AttackArbitrated {
+                slot: 0,
+                offset: 0,
+                sent: 30,
+            },
+        ],
+    ));
+    assert_eq!(
+        clearing.line(0, 10).expect("slot 0 has a line").text(&zh),
+        "全消"
+    );
+}
+
+// component/presentation-snapshot::TC-008
+#[test]
+fn a_line_expires_on_its_own_clock_and_an_empty_tick_leaves_it_alone() {
+    let mut lines = FeedbackLines::default();
+    lines.observe(&report(
+        10,
+        vec![MatchEvent::AttackArbitrated {
+            slot: 0,
+            offset: 0,
+            sent: 5,
+        }],
+    ));
+
+    // A tick with nothing to say is not an instruction to clear the screen.
+    lines.observe(&report(11, vec![MatchEvent::GroupLocked(0)]));
+    assert_eq!(lines.line(0, 11), Some(FeedbackLine::Attack(5)));
+
+    let last = 10 + FEEDBACK_TICKS - 1;
+    assert_eq!(lines.line(0, last), Some(FeedbackLine::Attack(5)));
+    assert_eq!(lines.line(0, last + 1), None, "the line expires on time");
+    assert_eq!(lines.line(1, 10), None, "the other slot said nothing");
+}
+
+// component/presentation-snapshot::TC-008
+#[test]
+fn observing_the_same_tick_twice_shows_the_same_line() {
+    let facts = report(
+        10,
+        vec![MatchEvent::AttackArbitrated {
+            slot: 0,
+            offset: 3,
+            sent: 0,
+        }],
+    );
+    let mut once = FeedbackLines::default();
+    once.observe(&facts);
+    let mut twice = FeedbackLines::default();
+    twice.observe(&facts);
+    twice.observe(&facts);
+
+    assert_eq!(once, twice, "the HUD refreshes faster than the rules tick");
 }

@@ -130,6 +130,110 @@ pub fn build_snapshot(
     })
 }
 
+/// One line of transient text a tick's facts put over a player's board.
+///
+/// The exact numbers are the rules' own, not a projection of them: the queue
+/// panel already shows what is pending, and this says what just moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedbackLine {
+    /// An attack reached the opponent.
+    Attack(u32),
+    /// An attack was fully cancelled against queued nuisance.
+    Offset(u32),
+    /// The visible board ended empty.
+    AllClear,
+}
+
+impl FeedbackLine {
+    /// The localization key naming this fact.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Attack(_) => "match.feedback.attack",
+            Self::Offset(_) => "match.feedback.offset",
+            Self::AllClear => "match.feedback.all_clear",
+        }
+    }
+
+    /// The line as shown: the fact's name, then its exact count.
+    #[must_use]
+    pub fn text(self, localization: &crate::i18n::Localization) -> String {
+        let name = localization.text(self.key());
+        match self {
+            Self::Attack(amount) | Self::Offset(amount) => format!("{name} {amount}"),
+            Self::AllClear => name,
+        }
+    }
+}
+
+/// How long one line stays up, in rule ticks.
+///
+/// Counted in ticks rather than seconds so the line is up for the same span of
+/// play at any frame rate, and so a paused match holds what it was showing.
+pub const FEEDBACK_TICKS: u64 = 90;
+
+/// The line each participant is currently showing, and since when.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct FeedbackLines {
+    lines: [Option<(FeedbackLine, u64)>; 2],
+}
+
+impl FeedbackLines {
+    /// Records what one tick's facts put on screen.
+    ///
+    /// A tick with nothing to say leaves the previous line alone: lines expire
+    /// on their own clock, so an uneventful tick is not an instruction to clear
+    /// the screen.
+    pub fn observe(&mut self, report: &MatchStepReport) {
+        for (slot, line) in self.lines.iter_mut().enumerate() {
+            if let Some(fact) = tick_line(report, slot) {
+                *line = Some((fact, report.match_tick));
+            }
+        }
+    }
+
+    /// The line a slot still shows at `match_tick`, if it has not expired.
+    #[must_use]
+    pub fn line(&self, slot: usize, match_tick: u64) -> Option<FeedbackLine> {
+        let (line, since) = (*self.lines.get(slot)?)?;
+        (match_tick.saturating_sub(since) < FEEDBACK_TICKS).then_some(line)
+    }
+}
+
+/// The one line a tick's facts leave for a slot.
+///
+/// An all clear outranks the attack it produced: the attack is already legible
+/// in the opponent's queue, and the empty board is the rarer fact. Between the
+/// remaining two, what reached the opponent outranks what was cancelled, so a
+/// partially offset attack still reads as pressure sent.
+fn tick_line(report: &MatchStepReport, slot: usize) -> Option<FeedbackLine> {
+    let mut all_clear = false;
+    let mut arbitrated = None;
+    for event in &report.events {
+        match event {
+            MatchEvent::ChainSettled {
+                slot: event_slot,
+                all_clear: cleared,
+                ..
+            } if *event_slot == slot => all_clear |= cleared,
+            MatchEvent::AttackArbitrated {
+                slot: event_slot,
+                offset,
+                sent,
+            } if *event_slot == slot => arbitrated = Some((*offset, *sent)),
+            _ => {}
+        }
+    }
+    if all_clear {
+        return Some(FeedbackLine::AllClear);
+    }
+    match arbitrated? {
+        (_, sent) if sent > 0 => Some(FeedbackLine::Attack(sent)),
+        (offset, _) if offset > 0 => Some(FeedbackLine::Offset(offset)),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PresentationEventId {
     pub match_tick: u64,

@@ -38,6 +38,9 @@
     "ui_action.confirm": "确定",
     "ui_action.back": "返回",
     "ui_action.up": "上",
+    "match.feedback.attack": "攻击",
+    "match.feedback.offset": "抵消",
+    "match.feedback.all_clear": "全消",
     "ui_action.down": "下"
   }
 }
