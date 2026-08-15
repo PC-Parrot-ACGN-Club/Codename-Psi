@@ -29,6 +29,8 @@ ron = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 directories = { workspace = true }
+# Feature-only dependency; see the workspace manifest for why it is here.
+icu_provider = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

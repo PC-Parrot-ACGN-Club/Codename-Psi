@@ -6,15 +6,32 @@
 use bevy::prelude::*;
 use client::GameInfrastructurePlugin;
 
+/// Log targets silenced on top of Bevy's own defaults.
+///
+/// Laying out any CJK text asks ICU for the Chinese/Japanese line-breaking
+/// dictionary, which the shipped ICU data does not carry. The lookup fails and
+/// warns once per text run, so a `zh-CN` start prints a wall of identical
+/// warnings. Line breaking falls back to breaking between characters, which is
+/// what CJK does anyway, so the warning reports nothing the player or the
+/// developer can act on.
+const EXTRA_LOG_FILTER: &str = "icu_provider=off";
+
 fn main() {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Codename Psi".into(),
-            ..default()
-        }),
-        ..default()
-    }))
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Codename Psi".into(),
+                    ..default()
+                }),
+                ..default()
+            })
+            .set(bevy::log::LogPlugin {
+                filter: format!("{},{EXTRA_LOG_FILTER}", bevy::log::DEFAULT_FILTER),
+                ..default()
+            }),
+    )
     .add_plugins(GameInfrastructurePlugin)
     .add_systems(Startup, setup);
 

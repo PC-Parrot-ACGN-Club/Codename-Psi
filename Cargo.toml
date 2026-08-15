@@ -42,6 +42,14 @@ rand_chacha = "0.10"
 # Platform config directory for persisted settings
 directories = "6"
 
+# Not called by any of our code: this turns on the `logging` feature of the ICU
+# data provider Bevy's text stack pulls in. Without it, and with debug
+# assertions on, that provider prints its warnings with `eprintln!` -- so a dev
+# build laying out CJK text writes an unfilterable wall of identical lines. With
+# it, the same warnings become ordinary `log` records, which the client's log
+# filter can silence. Release builds never had the problem.
+icu_provider = { version = "2", features = ["logging"] }
+
 # Test-only scratch directories for settings persistence and asset-root fixtures
 tempfile = "3"
 
