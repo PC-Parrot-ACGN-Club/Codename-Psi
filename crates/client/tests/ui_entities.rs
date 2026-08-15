@@ -256,3 +256,61 @@ fn both_portraits_are_drawn_from_the_catalogs_own_colours_and_badges() {
         );
     }
 }
+
+// integration-system/presentation-runtime::TC-015
+#[test]
+fn the_portrait_name_is_the_localized_roster_name_not_the_drop_set_id() {
+    let mut app = ui_app();
+    app.insert_resource(client::match_flow::FrozenMatch(presentation_common::spec(
+        5,
+    )));
+    advance_to(&mut app, AppState::Match);
+
+    // The roster arrives with the rest of the runtime data, so the name settles
+    // on the data's schedule rather than on the first frame in `Match`.
+    for _ in 0..2000 {
+        app.update();
+        if app
+            .world()
+            .get_resource::<client::data::RulesData>()
+            .is_some_and(|data| data.rules().is_some())
+        {
+            break;
+        }
+    }
+    app.update();
+
+    let localization = app.world().resource::<client::i18n::Localization>();
+    let expected: Vec<String> = ["character.psi_a.name", "character.psi_b.name"]
+        .into_iter()
+        .map(|key| localization.text(key))
+        .collect();
+    // A key that resolved to itself would make the assertions below vacuous.
+    for (key, name) in ["character.psi_a.name", "character.psi_b.name"]
+        .into_iter()
+        .zip(&expected)
+    {
+        assert_ne!(name, key, "{key} has no entry in the active catalog");
+    }
+
+    let shown: Vec<String> = app
+        .world_mut()
+        .query::<&Text>()
+        .iter(app.world())
+        .map(|text| text.0.clone())
+        .collect();
+
+    for name in &expected {
+        assert!(
+            shown.contains(name),
+            "the roster name {name:?} is not on screen: {shown:?}"
+        );
+    }
+    // `drop_set_id` is what used to be drawn here; it must not be any more.
+    for id in ["psi-a", "psi-b"] {
+        assert!(
+            !shown.iter().any(|text| text == id),
+            "{id:?} is still drawn as a name: {shown:?}"
+        );
+    }
+}

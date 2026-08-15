@@ -318,38 +318,48 @@ type GlyphOnly = (
     Without<QueueIcon>,
 );
 
+/// Everything one HUD refresh reads.
+///
+/// Bundled for the same reason as [`PortraitInputs`]: the refresh needs the
+/// rules instance, the last report, the settings, the locale and the roster at
+/// once, and listing them individually puts the system over the argument
+/// budget without making any of them easier to find.
+#[derive(bevy::ecs::system::SystemParam)]
+struct HudInputs<'w> {
+    state: Res<'w, State<AppState>>,
+    simulation: Option<Res<'w, RulesSimulation>>,
+    report: Res<'w, LatestStepReport>,
+    settings: Res<'w, UserSettings>,
+    localization: Res<'w, Localization>,
+    rules: Option<Res<'w, crate::data::RulesData>>,
+}
+
 /// Write the latest snapshot onto the HUD.
-fn refresh_hud(
-    state: Res<State<AppState>>,
-    simulation: Option<Res<RulesSimulation>>,
-    report: Res<LatestStepReport>,
-    settings: Res<UserSettings>,
-    localization: Res<Localization>,
-    mut feedback: ResMut<MatchFeedback>,
-    mut cells: HudCells,
-) {
+fn refresh_hud(inputs: HudInputs, mut feedback: ResMut<MatchFeedback>, mut cells: HudCells) {
     // The pause and settings pages sit over a live board, so the HUD keeps
     // showing the last snapshot rather than blanking while they are up.
     if !matches!(
-        state.get(),
+        inputs.state.get(),
         AppState::Match | AppState::Paused | AppState::Settings
     ) {
         return;
     }
-    let Some(simulation) = simulation else {
+    let Some(simulation) = inputs.simulation.as_ref() else {
         return;
     };
+    let settings = &inputs.settings;
+    let localization = &inputs.localization;
     let view = simulation.0.view();
     let Some(snapshot) = build_snapshot(
         Some(&view),
-        report.0.as_ref(),
+        inputs.report.0.as_ref(),
         simulation.0.spec(),
         settings.animation_intensity,
     ) else {
         return;
     };
 
-    if let Some(report) = report.0.as_ref() {
+    if let Some(report) = inputs.report.0.as_ref() {
         feedback.0.observe(report);
     }
 
@@ -448,8 +458,21 @@ fn refresh_hud(
         }
     }
 
+    // Resolved once per refresh rather than once per text node: both portraits
+    // ask for a name, and the roster lookup is the same walk either time.
+    let names: [String; 2] = std::array::from_fn(|slot| {
+        simulation
+            .0
+            .spec()
+            .characters
+            .get(slot)
+            .map_or_else(String::new, |id| {
+                character_name(inputs.rules.as_deref(), id, localization)
+            })
+    });
+
     for (field, mut text) in &mut cells.texts {
-        let value = hud_value(field, &snapshot, &feedback.0, &localization);
+        let value = hud_value(field, &snapshot, &feedback.0, localization, &names);
         if text.0 != value {
             text.0 = value;
         }
@@ -792,11 +815,41 @@ fn slot_overlay(
     overlay
 }
 
+/// The name shown under a portrait.
+///
+/// The roster owns the display name key and the catalog owns the text, so the
+/// two are joined here rather than at portrait resolution: resolution happens
+/// once per match, and a name resolved there would keep the language it was
+/// resolved in after the player switched locales.
+///
+/// Without a roster the id stands in directly instead of being passed to the
+/// catalog, so a missing roster does not also register a missing key.
+fn character_name(
+    rules: Option<&crate::data::RulesData>,
+    id: &game_core::config::CharacterId,
+    localization: &Localization,
+) -> String {
+    rules
+        .and_then(crate::data::RulesData::rules)
+        .and_then(|library| {
+            library
+                .roster()
+                .characters
+                .iter()
+                .find(|identity| identity.id == *id)
+        })
+        .map_or_else(
+            || id.0.clone(),
+            |identity| localization.text(&identity.display_name_key),
+        )
+}
+
 fn hud_value(
     field: &HudText,
     snapshot: &MatchPresentationSnapshot,
     feedback: &FeedbackLines,
     localization: &Localization,
+    names: &[String; 2],
 ) -> String {
     let player = |slot: usize| &snapshot.players[slot];
     match *field {
@@ -831,7 +884,7 @@ fn hud_value(
         HudText::Track => (0..2)
             .find_map(|slot| feedback.line(slot, snapshot.match_tick))
             .map_or_else(String::new, |line| line.text(localization)),
-        HudText::Character(slot) => player(slot).drop_set_id.0.clone(),
+        HudText::Character(slot) => names.get(slot).cloned().unwrap_or_default(),
         HudText::Scoreline => format!(
             "ROUND {} · BO3 · {} : {}",
             snapshot.round + 1,
