@@ -30,6 +30,12 @@ pub struct PlayerPresentationSnapshot {
     pub overflow_risk: bool,
     pub chain_count: u8,
     pub resolution: Option<ResolutionView>,
+    /// Cells the loaded Fever puzzle put on the board.
+    ///
+    /// Drawn as translucent starting markers so the preset chain is not read as
+    /// balls the player stacked. The list is the puzzle's own cells, so a
+    /// preset ball that has been cleared simply leaves an empty cell behind.
+    pub preset_cells: Vec<Coord>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +66,7 @@ pub struct MatchPresentationSnapshot {
 pub fn build_snapshot(
     view: Option<&MatchView>,
     report: Option<&MatchStepReport>,
-    _spec: &LockedMatchSpec,
+    spec: &LockedMatchSpec,
     intensity: AnimationIntensity,
 ) -> Option<MatchPresentationSnapshot> {
     let view = view?;
@@ -84,6 +90,18 @@ pub fn build_snapshot(
             overflow_risk: risk,
             chain_count: player.chain_count,
             resolution: player.resolution.clone(),
+            preset_cells: player
+                .fever_puzzle_id
+                .as_deref()
+                .and_then(|id| game_core::fever::puzzle_by_id(&spec.fever.puzzles, id))
+                .map(|puzzle| {
+                    puzzle
+                        .cells
+                        .iter()
+                        .filter_map(|cell| Coord::new(cell.x, cell.y))
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     });
     let mut net_attack = [0_u32; 2];

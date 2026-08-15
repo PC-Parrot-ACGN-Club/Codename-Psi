@@ -289,6 +289,11 @@ fn refresh_hud(
             )
         };
         let mut color = cell_color(occupant);
+        // The preset a Fever puzzle starts with is drawn back, so the chain the
+        // player is handed does not read as balls they stacked themselves.
+        if occupant.is_occupied() && overlay.preset.contains(&key) {
+            color = color.with_alpha(PRESET_ALPHA);
+        }
         let glyph = cell_glyph(occupant, settings.color_assist);
 
         // Reset first: a cell that was posed last frame has to return to rest
@@ -398,6 +403,8 @@ struct SlotOverlay {
     hidden: HashSet<(u8, u8)>,
     /// Cells being previewed for a clear.
     clearing: HashSet<(u8, u8)>,
+    /// Cells the loaded Fever puzzle preset put on the board.
+    preset: HashSet<(u8, u8)>,
     /// The pose those cells are drawn with this frame.
     clear_pose: ClearPose,
 }
@@ -432,6 +439,9 @@ impl Default for ClearPose {
         }
     }
 }
+
+/// How opaque a puzzle's preset ball is drawn.
+const PRESET_ALPHA: f32 = 0.55;
 
 /// Fraction of the preview spent on the hit before the ball starts leaving.
 const CLEAR_HIT_SHARE: f32 = 0.35;
@@ -539,6 +549,9 @@ fn slot_overlay(
 ) -> SlotOverlay {
     let mut overlay = SlotOverlay::default();
     resolve_overlay(&mut overlay, player, effects);
+    for coord in &player.preset_cells {
+        overlay.preset.insert((coord.x(), coord.y()));
+    }
     let Some(group) = player.active_drop.as_ref() else {
         return overlay;
     };

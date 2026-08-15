@@ -153,6 +153,12 @@ pub struct PlayerView {
     pub in_fever: bool,
     /// Target chain level of the current Fever puzzle.
     pub fever_target: Option<u8>,
+    /// Puzzle currently loaded on the Fever board.
+    ///
+    /// The preset it put there is public information: it is drawn differently
+    /// from what the player stacked, and the cells are frozen data anyone
+    /// holding the specification can look up.
+    pub fever_puzzle_id: Option<String>,
     /// Displayed score.
     pub score: u64,
     /// Turn the active group belongs to.
@@ -184,6 +190,9 @@ impl PlayerView {
             fever_time_ticks: player.fever().time_ticks(),
             in_fever: player.fever().active(),
             fever_target: player.session().map(|session| session.target_level()),
+            fever_puzzle_id: player
+                .session()
+                .map(|session| session.current_puzzle_id().to_owned()),
             score: player.score().displayed(),
             turn_id: player.active_group().map_or(0, FallingGroup::turn_id),
             defeated: player.is_defeated(),

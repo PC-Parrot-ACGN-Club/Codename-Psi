@@ -407,3 +407,51 @@ fn a_queue_reads_as_tier_icons_heaviest_first() {
     // The units are exactly the ones the presentation contract names.
     assert_eq!(NUISANCE_UNITS, [1440, 720, 360, 180, 30, 6, 1]);
 }
+
+// component/presentation-snapshot::TC-010
+#[test]
+fn a_loaded_fever_puzzle_marks_its_preset_cells() {
+    let state = presentation_common::state(7);
+    let spec = state.spec().clone();
+    let puzzle = spec
+        .fever
+        .puzzles
+        .puzzles
+        .first()
+        .expect("the repository book has puzzles")
+        .clone();
+
+    let outside_fever = state.view();
+    let snapshot = build_snapshot(Some(&outside_fever), None, &spec, AnimationIntensity::Full)
+        .expect("a match produces a snapshot");
+    assert!(
+        snapshot.players[0].preset_cells.is_empty(),
+        "a player with no puzzle loaded has no preset to mark"
+    );
+
+    let mut in_fever = outside_fever.clone();
+    in_fever.players[0].in_fever = true;
+    in_fever.players[0].fever_puzzle_id = Some(puzzle.id.clone());
+    let snapshot = build_snapshot(Some(&in_fever), None, &spec, AnimationIntensity::Full)
+        .expect("a match produces a snapshot");
+    let marked: Vec<(u8, u8)> = snapshot.players[0]
+        .preset_cells
+        .iter()
+        .map(|coord| (coord.x(), coord.y()))
+        .collect();
+    let expected: Vec<(u8, u8)> = puzzle.cells.iter().map(|cell| (cell.x, cell.y)).collect();
+    assert_eq!(marked, expected, "the marks are the puzzle's own cells");
+    assert!(
+        snapshot.players[1].preset_cells.is_empty(),
+        "the other side is not in Fever and has nothing marked"
+    );
+
+    let mut unknown = outside_fever;
+    unknown.players[0].fever_puzzle_id = Some("no-such-puzzle".into());
+    let snapshot = build_snapshot(Some(&unknown), None, &spec, AnimationIntensity::Full)
+        .expect("a match produces a snapshot");
+    assert!(
+        snapshot.players[0].preset_cells.is_empty(),
+        "a puzzle the book does not hold marks nothing rather than refusing the snapshot"
+    );
+}
