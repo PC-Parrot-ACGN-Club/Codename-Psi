@@ -37,6 +37,7 @@
 - 一名玩家处于结算阶段而另一名操控活动组时，两方状态各自正确推进（TC-013）。
 - 双方同安全点攻击、双方各有旧队列、单方与双方无连锁的组合矩阵（TC-014）。
 - participant slot 对调后，镜像初始状态得到镜像结果（TC-015）。
+- 释放的垃圾占用重力时长，下一活动组与失败判定都推迟到它停稳（TC-016）。
 
 ## 设计方法与覆盖模型
 
@@ -46,7 +47,7 @@
 | 状态迁移 | `RoundIntro → Playing → RoundOutro → Completed` 的守卫、重复事件与完成态 | TC-003、TC-008～TC-012 |
 | 变形测试 | 迭代顺序、slot 对调与镜像输入下的结果关系 | TC-001、TC-015 |
 | 场景法 | 2:0 与 2:1 两条完整 BO3 路径；和局重打 | TC-006、TC-008～TC-009 |
-| 边界值分析 | 胜场 0/1/2；失败错开 0 与 1 tick | TC-005、TC-007 |
+| 边界值分析 | 胜场 0/1/2；失败错开 0 与 1 tick；垃圾落下时长的首尾 tick | TC-005、TC-007、TC-016 |
 | 错误猜测 | 槽位数量错误、完成态继续推进、双方阶段错位 | TC-002、TC-012～TC-013 |
 
 ## 测试用例列表
@@ -68,6 +69,7 @@
 | TC-013 | 一方结算而另一方操控时两方状态各自推进 | P1 | Component Integration | — | Rules；Match Flow | slot 0 已进入结算，slot 1 持有活动组 | 推进跨越 slot 0 完整结算过程的 tick 序列，slot 1 每 tick 提交操控动作 | slot 0：二连锁，`clear_preview_ticks=12`、重力时长查表；slot 1：持续 `Left` 与一次 `RotateCW` | slot 0 的结算阶段按自身 tick 序列推进，不被 slot 1 的输入改变；slot 1 的横移与旋转按操控规则生效，不因对方结算而暂停或延迟；两方的 Fever 与 margin 时钟在此期间都继续推进 | [Confirmed] [连锁结算：协作](../../development/design/chain-resolution.md#协作)；[小局、BO3 与安全点：一个规则 tick](../../development/design/match-and-round.md#一个规则-tick) |
 | TC-014 | 双方攻防的四种组合在同一安全点得到确定结果 | P0 | Component Integration | — | Rules；Match Flow | 可构造双方连锁与旧队列的任意组合 | 参数化四组局面各推进到同一安全点并读取双方队列与落盘 | 组一：双方均连锁，攻击 5 与 3，旧队列均 0；组二：双方均连锁，攻击 5 与 3，旧队列 4 与 6；组三：slot 0 连锁攻击 5、slot 1 无连锁且旧队列 6；组四：双方均无连锁，旧队列 6 与 8 | 组一：双方各自无可抵消队列，slot 0 队列变 3、slot 1 变 5，本安全点不落下；组二：各自只抵消进入安全点时已有的量，slot 0 队列变 0、slot 1 变 4，本安全点不落下；组三：slot 0 队列变 0，slot 1 未连锁并在第 4 步只落下进入安全点时已有的 6 颗，本安全点收到的 5 颗留在队列等待下一个安全点；组四：双方分别落下 6 与 8 颗，不产生新攻击 | [Confirmed] [小局、BO3 与安全点：安全点](../../development/design/match-and-round.md#安全点) |
 | TC-015 | slot 对调后镜像初始状态得到镜像结果 | P1 | Component Integration | Determinism | Rules；Match Flow | 两份由构造给定的 `MatchState`（盘面、队列与计时器直接设定，不经随机流生成），第二份是第一份按 slot 对调的镜像 | 对两份状态提交互为镜像的逐 tick 输入并推进到同一安全点 | 60 tick 输入日志；初始队列 4 与 6、量表 3 与 5、待消盘面各自给定 | 第二份的 slot 0 结果等于第一份的 slot 1 结果，slot 1 亦然；分数、队列、量表、Fever 时间与 `RoundOutcome` 逐项镜像；事件序列在按 slot 重映射后相同 | [Confirmed] [小局、BO3 与安全点：安全点](../../development/design/match-and-round.md#安全点) |
+| TC-016 | 释放的垃圾先落完再供给下一活动组 | P0 | Component Integration | — | Rules；Match Flow | 一方未触发连锁且进入安全点时队列非零 | 参数化两种落点各推进到释放所在 tick，再逐 tick 推进到垃圾停稳 | 局面一：空盘释放 6 颗；局面二：出生列上方留空、其余堆满，释放后出生列被埋 | 两种局面在释放 tick 都只把垃圾放在各列最高空格，且该 tick 不供给活动组、不判负；此后每 tick 无活动组，直到查表得到的重力时长走完；停稳 tick 原子提交落点盘面，局面一在该 tick 生成活动组，局面二在该 tick 判负并形成 `Decided(slot 1)` | [Confirmed] [得分、攻击与垃圾攻防：垃圾落下](../../development/design/offense-and-nuisance.md#垃圾落下)；[小局、BO3 与安全点：安全点](../../development/design/match-and-round.md#安全点) |
 
 ## 风险查漏
 

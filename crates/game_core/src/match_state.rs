@@ -381,11 +381,13 @@ impl MatchState {
         if settlements.iter().any(Option::is_some) {
             self.run_safety_point(settlements, &mut events);
         }
+        self.supply_and_conclude(&mut events);
 
         Ok(self.report(events))
     }
 
-    /// The six ordered steps of a safety point.
+    /// The first four ordered steps of a safety point; the last two are
+    /// [`MatchState::supply_and_conclude`].
     ///
     /// The order lives in this one function rather than in system registration
     /// order, and every cross-player value is read from the snapshot taken on
@@ -507,16 +509,24 @@ impl MatchState {
                 self.round.players[opponent].receive(facts.sent, limit);
             }
         }
+    }
 
-        // 5. Check defeat: the next group is supplied here, and failing to
-        //    supply it is the only way to lose.
+    /// Steps 5 and 6 of the safety point, run once per playing tick.
+    ///
+    /// Supplying the next group is the only way to lose, so this is also the
+    /// defeat check. A player whose released batch is still falling is not
+    /// waiting for a group yet and reaches this step on the tick that batch
+    /// lands instead, which is why the two steps are not inside the safety
+    /// point that released it.
+    fn supply_and_conclude(&mut self, events: &mut Vec<MatchEvent>) {
+        // 5. Check defeat.
         let mut defeated = [false; PARTICIPANT_SLOTS];
-        for slot in 0..PARTICIPANT_SLOTS {
-            if settlements[slot].is_none() {
+        for (slot, lost) in defeated.iter_mut().enumerate() {
+            if !self.round.players[slot].needs_group() {
                 continue;
             }
             if !self.round.players[slot].supply_next(&self.spec) {
-                defeated[slot] = true;
+                *lost = true;
                 events.push(MatchEvent::PlayerDefeated(slot));
             }
         }

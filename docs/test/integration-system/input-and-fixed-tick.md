@@ -29,6 +29,7 @@
 - simulation 仅在 Match 运行，并在暂停后停止、恢复后延续（TC-006～TC-008）。
 - 手柄 Start 与键盘 Escape 的暂停请求路径（TC-009～TC-010）。
 - 生产主调度的同帧可见性、单帧多 tick、press edge 与设备生命周期（TC-011～TC-015）。
+- 两个本地玩家的键盘默认绑定各自驱动自己的槽位（TC-016）。
 
 ## 设计方法与覆盖模型
 
@@ -38,6 +39,7 @@
 | 变形测试 | Update 次数变化时 fixed 规则结果保持一致 | TC-005 |
 | 边界值分析 | 帧边界、单帧 tick 数和同帧 press/release | TC-011～TC-013 |
 | 错误猜测 | 设备断开残留与接入顺序变化 | TC-014～TC-015 |
+| 场景 / 协作路径 | 本地双人下两套键盘默认绑定各自到达自己的槽位 | TC-016 |
 
 ## 测试用例列表
 
@@ -58,6 +60,7 @@
 | TC-013 | 设备适配层保留同帧内完成的 press edge | P0 | Component Integration | — | Input；Client | 最小客户端 app 使用真实 `ButtonInput` 与生产设备捕获路径 | 在同一帧内对一次性动作的默认绑定执行按下并松开，随后推进 fixed tick | 参数化 `HardDrop`、`RotateClockwise`、`RotateCounterClockwise`；每组在同一帧内完成 press 与 release | 每组在随后的 fixed tick 产生一次对应动作；采样依据 press edge 而非采样时刻的按住状态；持续按住不因此重复产生 | [Confirmed] [本地输入采样：一次性动作采样](../../development/design/local-input-sampling.md#一次性动作采样)；[Inferred] [捕获物理输入](../../development/design/local-input-sampling.md#捕获物理输入) |
 | TC-014 | 手柄断开清除该设备在采样状态中的残留 | P1 | Component Integration | — | Input；Client | 已接入手柄并绑定到某本地玩家槽位，采样结果可观测 | 参数化三种断开情形后继续推进 fixed tick | 按住方向时断开；无输入时断开；断开后重新接入且不按任何键 | 断开后的 fixed tick 不再产生该方向动作；无输入断开不改变其它玩家的采样结果；重连不带入断开前的按下状态 | [Inferred] [本地输入采样：设备与玩家绑定](../../development/design/local-input-sampling.md#设备与玩家绑定) |
 | TC-015 | 手柄接入顺序变化不改变已绑定玩家的槽位 | P2 | Component Integration | — | Input；Client | 两个手柄可分别接入与断开，各自可注入可区分输入 | 依次接入两个手柄，断开先接入的一个，再接入第三个，并在各阶段采样 | pad A→最小空闲槽位、pad B→次一槽位；A 断开后接入 pad C | B 在 A 断开后保持原槽位；C 取得空出的槽位；采样结果不随设备遍历顺序改变 | [Inferred] [本地输入采样：设备与玩家绑定](../../development/design/local-input-sampling.md#设备与玩家绑定) |
+| TC-016 | 本地双人下每个玩家的键盘默认绑定只驱动自己的槽位 | P0 | Component Integration | — | Input；Client | 生产主调度、本地双人模式、真实规则实例已进入可操作阶段 | 分别按下 P1 与 P2 的默认键，各推进一帧 | P1 固定方向 `KeyA`；P2 固定方向 `ArrowLeft` 与 P2 自己的旋转绑定 `Numpad1` | 按下者槽位的 canonical input 含对应动作且活动组横移一格；另一槽位的 canonical input 为空且活动组不动 | [Confirmed] [本地输入采样：设备与玩家绑定](../../development/design/local-input-sampling.md#设备与玩家绑定) |
 
 ## 风险查漏
 

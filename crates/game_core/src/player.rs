@@ -13,7 +13,7 @@ use crate::{
     fever::{FeverSession, FeverState, PuzzleBags, load_puzzle, next_target_level, puzzle_by_id},
     input::PlayerActions,
     match_spec::LockedMatchSpec,
-    nuisance::{NuisanceDropState, NuisanceLanding, release_nuisance},
+    nuisance::{NuisanceDropState, NuisanceFall, NuisanceLanding, release_nuisance},
     resolution::{ChainReport, ResolutionPhase, ResolutionState},
     rules::BoardMode,
     scoring::{AttackFraction, MarginState, ScoreState},
@@ -54,6 +54,7 @@ pub struct PlayerBattleState {
     active: Option<FallingGroup>,
     control: ControlState,
     split: Option<SplitState>,
+    nuisance_fall: Option<NuisanceFall>,
     resolution: Option<ResolutionState>,
     score: ScoreState,
     fraction: AttackFraction,
@@ -93,6 +94,7 @@ impl PlayerBattleState {
             active: None,
             control: ControlState::new(),
             split: None,
+            nuisance_fall: None,
             resolution: None,
             score: ScoreState::default(),
             fraction: AttackFraction::default(),
@@ -187,6 +189,12 @@ impl PlayerBattleState {
         self.split.as_ref()
     }
 
+    /// Released nuisance still falling.
+    #[must_use]
+    pub const fn nuisance_fall(&self) -> Option<&NuisanceFall> {
+        self.nuisance_fall.as_ref()
+    }
+
     /// Chain resolution in progress.
     #[must_use]
     pub const fn resolution(&self) -> Option<&ResolutionState> {
@@ -266,6 +274,7 @@ impl PlayerBattleState {
         self.active_channel = FEVER_CHANNEL;
         self.active = None;
         self.split = None;
+        self.nuisance_fall = None;
         self.resolution = None;
         true
     }
@@ -314,6 +323,7 @@ impl PlayerBattleState {
         self.active_channel = NORMAL_CHANNEL;
         self.active = None;
         self.split = None;
+        self.nuisance_fall = None;
         self.resolution = None;
     }
 
@@ -365,6 +375,18 @@ impl PlayerBattleState {
             if split.is_complete() {
                 self.split = None;
                 self.begin_resolution(spec);
+            }
+            return false;
+        }
+
+        // A batch released at the last safety point is still on its way down.
+        // The next group is not supplied until it lands, so this player has
+        // nothing to control and no input to consume meanwhile.
+        if let Some(fall) = &mut self.nuisance_fall {
+            fall.tick();
+            if fall.is_complete() {
+                let landed = self.nuisance_fall.take().expect("the fall was just ticked");
+                self.boards[self.active_channel] = landed.into_target_board();
             }
             return false;
         }
@@ -501,19 +523,28 @@ impl PlayerBattleState {
     }
 
     /// Releases a nuisance batch when this turn triggered no chain.
+    ///
+    /// The batch enters at the top of its columns and starts falling; it is on
+    /// the board from here on, but the board does not reach its resting shape
+    /// until the fall completes.
     pub fn release(
         &mut self,
         spec: &LockedMatchSpec,
         chain_triggered: bool,
     ) -> Option<NuisanceLanding> {
         let channel = self.active_channel;
-        release_nuisance(
+        let landing = release_nuisance(
             &mut self.boards[channel],
             &mut self.pending[channel],
             &mut self.drop_state[channel],
             spec.nuisance,
             chain_triggered,
-        )
+        )?;
+        self.nuisance_fall = NuisanceFall::plan(
+            &mut self.boards[channel],
+            &spec.resolution.gravity_ticks_by_distance,
+        );
+        Some(landing)
     }
 
     /// Supplies the next group, marking the player defeated when it cannot.
@@ -540,9 +571,16 @@ impl PlayerBattleState {
     }
 
     /// Whether the player is waiting for a new group.
+    ///
+    /// This is what the safety point's supply step reads, so released nuisance
+    /// still in the air holds the next group back until it has landed.
     #[must_use]
     pub const fn needs_group(&self) -> bool {
-        self.active.is_none() && self.split.is_none() && self.resolution.is_none() && !self.defeated
+        self.active.is_none()
+            && self.split.is_none()
+            && self.nuisance_fall.is_none()
+            && self.resolution.is_none()
+            && !self.defeated
     }
 
     /// The nuisance stream, reserved for garbage-column allocation.
@@ -584,6 +622,13 @@ impl crate::digest::Digestible for PlayerBattleState {
             Some(split) => {
                 writer.u8(1);
                 split.digest_into(writer);
+            }
+            None => writer.u8(0),
+        }
+        match &self.nuisance_fall {
+            Some(fall) => {
+                writer.u8(1);
+                fall.digest_into(writer);
             }
             None => writer.u8(0),
         }

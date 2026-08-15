@@ -280,12 +280,7 @@ impl ResolutionState {
     /// `ClearCommit` end action: plan the gravity moves and their duration.
     fn plan_gravity(&mut self) {
         let (moves, target_board, max_distance) = gravity_plan(&self.board);
-        let duration_ticks = self
-            .rules
-            .gravity_ticks_by_distance
-            .get(max_distance as usize)
-            .copied()
-            .unwrap_or_else(|| *self.rules.gravity_ticks_by_distance.last().unwrap_or(&0));
+        let duration_ticks = gravity_duration(&self.rules.gravity_ticks_by_distance, max_distance);
         // Keep the target private to the presentation-facing phase. Recompute
         // from the unchanged board at the atomic commit boundary.
         self.phase = ResolutionPhase::Gravity {
@@ -404,7 +399,17 @@ fn visible_neighbors(board: &Board, coord: Coord) -> impl Iterator<Item = Coord>
     })
 }
 
-fn gravity_plan(board: &Board) -> (Vec<GravityMove>, Board, u8) {
+/// Gravity duration for a fall distance, saturating at the table tail.
+pub(crate) fn gravity_duration(table: &[u16], distance: u8) -> u16 {
+    table
+        .get(usize::from(distance))
+        .or_else(|| table.last())
+        .copied()
+        .unwrap_or(0)
+}
+
+/// Compacts every column and reports the moves, the target and the longest fall.
+pub(crate) fn gravity_plan(board: &Board) -> (Vec<GravityMove>, Board, u8) {
     // Every column compacts over its full height. Hidden rows are excluded from
     // scanning, adjacent-nuisance clearing and `all_clear`, but not from
     // gravity: a ball parked in a hidden row falls into the visible region and

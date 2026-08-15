@@ -38,6 +38,21 @@ pub struct ResolutionView {
 }
 
 impl ResolutionView {
+    /// Released nuisance falling, projected as the gravity stage it is.
+    ///
+    /// A falling batch is not a chain link, but it is the same fall over the
+    /// same table, so presentation reads it through one shape instead of two.
+    fn of_nuisance_fall(fall: &crate::nuisance::NuisanceFall) -> Self {
+        Self {
+            stage: ResolutionStage::Gravity,
+            chain_index: 0,
+            elapsed_ticks: fall.elapsed_ticks(),
+            duration_ticks: fall.duration_ticks(),
+            clear_cells: Vec::new(),
+            gravity_moves: fall.moves().to_vec(),
+        }
+    }
+
     fn of(phase: &ResolutionPhase) -> Self {
         match phase {
             ResolutionPhase::Idle => Self {
@@ -175,7 +190,8 @@ impl PlayerView {
             chain_count: player.chain_count(),
             resolution: player
                 .resolution()
-                .map(|resolution| ResolutionView::of(resolution.phase())),
+                .map(|resolution| ResolutionView::of(resolution.phase()))
+                .or_else(|| player.nuisance_fall().map(ResolutionView::of_nuisance_fall)),
         }
     }
 }

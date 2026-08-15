@@ -6,6 +6,7 @@
 //! loop. These run the production schedule and let Bevy order the two.
 
 mod common;
+mod presentation_common;
 
 use bevy::input::ButtonState;
 use bevy::prelude::*;
@@ -19,6 +20,10 @@ use common::{FRAME, advance_to, production_schedule_app, send_key};
 /// P1 keyboard defaults: `A`/`D` move, `W` hard drops.
 const LEFT: KeyCode = KeyCode::KeyA;
 const HARD_DROP: KeyCode = KeyCode::KeyW;
+
+/// P2 keyboard defaults: arrows move, `Numpad1` rotates counter-clockwise.
+const P2_LEFT: KeyCode = KeyCode::ArrowLeft;
+const P2_ROTATE_CCW: KeyCode = KeyCode::Numpad1;
 
 /// The canonical actions the last fixed tick consumed.
 fn last_tick(app: &App) -> PlayerActions {
@@ -130,4 +135,107 @@ fn a_press_that_ends_in_the_same_frame_still_reaches_the_rules_layer() {
             "{action:?} must not repeat after its single press edge was consumed"
         );
     }
+}
+
+/// A local-versus app already running a real rules instance, under the
+/// production schedule.
+///
+/// The mode matters: under `SinglePlayer` slot 1 is overwritten by the AI, so
+/// nothing the second player pressed would be visible in the tick's inputs.
+fn local_versus_app(seed: u64) -> App {
+    let mut app = production_schedule_app();
+    app.insert_resource(client::match_flow::SelectedMode(
+        client::page::MatchMode::LocalVersus,
+    ));
+    app.insert_resource(client::match_flow::FrozenMatch(presentation_common::spec(
+        seed,
+    )));
+    advance_to(&mut app, AppState::Match);
+
+    // The round opens with a countdown, during which no action is consumed.
+    for _ in 0..600 {
+        if app
+            .world()
+            .resource::<client::simulation::RulesSimulation>()
+            .0
+            .phase()
+            .is_playing()
+        {
+            return app;
+        }
+        app.update();
+    }
+    panic!("the round never opened for play");
+}
+
+/// The column each slot's active group currently pivots on.
+fn pivot_columns(app: &App) -> [u8; 2] {
+    let simulation = app
+        .world()
+        .resource::<client::simulation::RulesSimulation>();
+    [0, 1].map(|slot| {
+        simulation
+            .0
+            .active_group(slot)
+            .expect("both slots control a group while playing")
+            .pivot()
+            .x()
+    })
+}
+
+// integration-system/input-and-fixed-tick::TC-016
+#[test]
+fn player_twos_keys_drive_slot_one_and_leave_slot_zero_alone() {
+    let mut app = local_versus_app(31);
+    let before = pivot_columns(&app);
+
+    send_key(&mut app, P2_LEFT, ButtonState::Pressed);
+    send_key(&mut app, P2_ROTATE_CCW, ButtonState::Pressed);
+    app.update();
+
+    let tick = app.world().resource::<CurrentTickInputs>().inputs;
+    let p2 = tick.player(1).expect("player 1 must exist");
+    assert!(
+        p2.contains(GameAction::Left) && p2.contains(GameAction::RotateCounterClockwise),
+        "P2's fixed direction and P2's own configurable binding both reach slot 1: {p2:?}"
+    );
+    assert_eq!(
+        tick.player(0),
+        Some(PlayerActions::EMPTY),
+        "no key P2 pressed may reach slot 0"
+    );
+
+    let after = pivot_columns(&app);
+    assert_eq!(
+        after[1],
+        before[1] - 1,
+        "slot 1's group moved one column left"
+    );
+    assert_eq!(after[0], before[0], "slot 0's group did not move");
+}
+
+// integration-system/input-and-fixed-tick::TC-016
+#[test]
+fn player_ones_keys_drive_slot_zero_and_leave_slot_one_alone() {
+    let mut app = local_versus_app(31);
+    let before = pivot_columns(&app);
+
+    send_key(&mut app, LEFT, ButtonState::Pressed);
+    app.update();
+
+    let tick = app.world().resource::<CurrentTickInputs>().inputs;
+    assert!(
+        tick.player(0)
+            .expect("player 0 must exist")
+            .contains(GameAction::Left)
+    );
+    assert_eq!(tick.player(1), Some(PlayerActions::EMPTY));
+
+    let after = pivot_columns(&app);
+    assert_eq!(
+        after[0],
+        before[0] - 1,
+        "slot 0's group moved one column left"
+    );
+    assert_eq!(after[1], before[1], "slot 1's group did not move");
 }

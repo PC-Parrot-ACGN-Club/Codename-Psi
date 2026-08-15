@@ -4,6 +4,7 @@
 //! icons are a projection of that integer, and the integer is the only truth.
 
 use crate::board::{Board, Cell, Coord};
+use crate::resolution::GravityMove;
 
 /// Maximum nuisance count released by one no-chain drop.
 pub const MAX_NUISANCE_DROP: u32 = 30;
@@ -167,10 +168,10 @@ pub fn offset_attack(attack: u32, active: &mut u32, other: &mut u32) -> OffsetFa
     }
 }
 
-/// Where a released nuisance batch came to rest.
+/// Where a released nuisance batch entered the board.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NuisanceLanding {
-    /// Landing cells in release order.
+    /// Entry cells in release order, at the top of each column.
     pub coords: Vec<Coord>,
     /// Balls removed from the queue.
     pub dropped: u32,
@@ -178,11 +179,85 @@ pub struct NuisanceLanding {
     pub remaining: u32,
 }
 
+/// A released batch on its way down, before the next group is supplied.
+///
+/// Released nuisance falls through the same gravity flow a chain link's balls
+/// do, so it spends the same per-distance duration and the board only changes
+/// when the batch comes to rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NuisanceFall {
+    moves: Vec<GravityMove>,
+    target_board: Board,
+    elapsed_ticks: u16,
+    duration_ticks: u16,
+}
+
+impl NuisanceFall {
+    /// Plans the fall of a batch sitting at its entry cells.
+    ///
+    /// Returns `None` when the batch is already at rest, in which case the board
+    /// stays as the entry placement left it and nothing has to be timed.
+    #[must_use]
+    pub fn plan(board: &mut Board, gravity_ticks_by_distance: &[u16]) -> Option<Self> {
+        let (moves, target_board, max_distance) = crate::resolution::gravity_plan(board);
+        let duration_ticks =
+            crate::resolution::gravity_duration(gravity_ticks_by_distance, max_distance);
+        if moves.is_empty() || duration_ticks == 0 {
+            *board = target_board;
+            return None;
+        }
+        Some(Self {
+            moves,
+            target_board,
+            elapsed_ticks: 0,
+            duration_ticks,
+        })
+    }
+
+    /// Source and destination of every ball still falling.
+    #[must_use]
+    pub fn moves(&self) -> &[GravityMove] {
+        &self.moves
+    }
+
+    /// Ticks spent falling so far.
+    #[must_use]
+    pub const fn elapsed_ticks(&self) -> u16 {
+        self.elapsed_ticks
+    }
+
+    /// Frozen duration of the fall.
+    #[must_use]
+    pub const fn duration_ticks(&self) -> u16 {
+        self.duration_ticks
+    }
+
+    /// Whether the batch has come to rest.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.elapsed_ticks >= self.duration_ticks
+    }
+
+    /// Advances one tick.
+    pub const fn tick(&mut self) {
+        self.elapsed_ticks = self.elapsed_ticks.saturating_add(1);
+    }
+
+    /// The board the batch comes to rest on, committed atomically.
+    #[must_use]
+    pub fn into_target_board(self) -> Board {
+        self.target_board
+    }
+}
+
 /// Releases one batch onto the active board, if this turn releases at all.
 ///
 /// A turn that triggered any chain releases nothing: the queue stays put and
 /// the player simply gets the next group. That is the continuous-offset rule,
 /// not an optimisation.
+///
+/// The batch enters at the top of its columns rather than at its resting cells,
+/// because it still has to fall: [`NuisanceFall`] is what carries it down.
 pub fn release_nuisance(
     board: &mut Board,
     pending: &mut u32,
@@ -196,7 +271,7 @@ pub fn release_nuisance(
     let batch = drop_nuisance_with_rules(pending, state, rules);
     let mut coords = Vec::with_capacity(batch.columns.len());
     for column in &batch.columns {
-        if let Some(coord) = lowest_free_cell(board, *column) {
+        if let Some(coord) = highest_free_cell(board, *column) {
             board.set(coord, Cell::Nuisance);
             coords.push(coord);
         }
@@ -208,10 +283,13 @@ pub fn release_nuisance(
     })
 }
 
-/// Lowest empty cell in a column, or `None` when the column is full.
-fn lowest_free_cell(board: &Board, column: u8) -> Option<Coord> {
+/// Highest empty cell in a column, or `None` when the column is full.
+///
+/// A stable board has all its free cells above its stack, so this is where a
+/// ball entering the column starts its fall. A column with no room at all
+/// swallows the ball, exactly as a column filled to the top always has.
+fn highest_free_cell(board: &Board, column: u8) -> Option<Coord> {
     (0..board.geometry().height())
-        .rev()
         .filter_map(|y| board.coord(column, y))
         .find(|coord| !board.get(*coord).is_occupied())
 }
@@ -219,5 +297,16 @@ fn lowest_free_cell(board: &Board, column: u8) -> Option<Coord> {
 impl crate::digest::Digestible for NuisanceDropState {
     fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
         writer.u8(self.next_column);
+    }
+}
+
+impl crate::digest::Digestible for NuisanceFall {
+    fn digest_into(&self, writer: &mut crate::digest::DigestWriter) {
+        writer.seq(&self.moves);
+        // The uncommitted target board is persistent state even though it is
+        // never exposed, so it has to enter the checksum.
+        self.target_board.digest_into(writer);
+        writer.u16(self.elapsed_ticks);
+        writer.u16(self.duration_ticks);
     }
 }

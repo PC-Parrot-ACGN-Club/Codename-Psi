@@ -719,3 +719,141 @@ fn mirroring_the_slots_mirrors_every_result() {
         );
     }
 }
+
+/// Advances until `slot` releases a batch, returning the tick's drop count.
+fn advance_to_release(state: &mut MatchState, slot: usize) -> u32 {
+    for _ in 0..120 {
+        let report = state
+            .step(&both(GameAction::HardDrop))
+            .expect("a tick advances");
+        for event in &report.events {
+            if let MatchEvent::NuisanceDropped {
+                slot: dropped_slot,
+                count,
+            } = event
+                && *dropped_slot == slot
+            {
+                return *count;
+            }
+        }
+    }
+    panic!("slot {slot} never released its queue");
+}
+
+// integration-system/match-and-round::TC-016
+#[test]
+fn a_released_batch_falls_before_the_next_group_is_supplied() {
+    let mut state = MatchState::new(spec());
+    open_play(&mut state);
+    state
+        .round_mut()
+        .player_mut(0)
+        .expect("slot exists")
+        .set_pending(NORMAL_CHANNEL, 6);
+
+    let floor = state.spec().board_geometry.height() - 1;
+    assert_eq!(advance_to_release(&mut state, 0), 6);
+
+    let fall = state
+        .player_view(0)
+        .expect("slot exists")
+        .resolution
+        .expect("the released batch is falling");
+    assert_eq!(fall.stage, game_core::view::ResolutionStage::Gravity);
+    assert!(
+        fall.duration_ticks > 0,
+        "a batch entering an empty board spends the table's gravity duration"
+    );
+    assert!(
+        fall.gravity_moves
+            .iter()
+            .all(|step| step.from.y() < step.to.y()),
+        "every released ball enters above where it comes to rest"
+    );
+    assert_eq!(
+        state.board(0).expect("slot exists").get(at(0, floor)),
+        Cell::Empty,
+        "nothing has reached the floor on the tick the batch is released"
+    );
+
+    // The batch owns the whole duration, and the player controls nothing for
+    // all of it.
+    for elapsed in 1..fall.duration_ticks {
+        state.step(&idle()).expect("a tick advances");
+        assert!(
+            state.active_group(0).is_none(),
+            "no group is supplied {elapsed} ticks into the fall"
+        );
+    }
+    state.step(&idle()).expect("a tick advances");
+
+    assert!(
+        state.active_group(0).is_some(),
+        "the next group arrives on the tick the batch comes to rest"
+    );
+    assert_eq!(
+        state.board(0).expect("slot exists").get(at(0, floor)),
+        Cell::Nuisance,
+        "the batch is committed to its resting cells"
+    );
+    assert!(
+        state
+            .player_view(0)
+            .expect("slot exists")
+            .resolution
+            .is_none(),
+        "the fall is over, so nothing is settling"
+    );
+}
+
+// integration-system/match-and-round::TC-016
+#[test]
+fn a_batch_burying_the_spawn_column_defeats_on_the_tick_it_lands() {
+    let mut state = MatchState::new(spec());
+    open_play(&mut state);
+
+    // Nuisance rather than colors, so nothing the batch lands on can clear and
+    // the stack stays exactly where the fixture puts it.
+    let geometry = state.spec().board_geometry;
+    let mut board = Board::with_geometry(geometry);
+    for x in 0..geometry.width() {
+        for y in (geometry.hidden_rows() + 1)..geometry.height() {
+            board.set(at(x, y), Cell::Nuisance);
+        }
+    }
+    {
+        let player = state.round_mut().player_mut(0).expect("slot exists");
+        player.set_board(board);
+        player.set_pending(NORMAL_CHANNEL, 6);
+    }
+
+    assert_eq!(advance_to_release(&mut state, 0), 6);
+    let duration = state
+        .player_view(0)
+        .expect("slot exists")
+        .resolution
+        .expect("the released batch is falling")
+        .duration_ticks;
+    assert!(
+        !state.is_defeated(0),
+        "the release itself decides nothing: the batch has not landed yet"
+    );
+
+    for _ in 1..duration {
+        state.step(&idle()).expect("a tick advances");
+        assert!(!state.is_defeated(0), "the batch is still falling");
+    }
+    state.step(&idle()).expect("a tick advances");
+
+    assert!(
+        state.is_defeated(0),
+        "the spawn check reads the board the batch came to rest on"
+    );
+    assert!(matches!(
+        state.phase(),
+        MatchPhase::RoundOutro {
+            outcome: RoundOutcome::Decided(1),
+            ..
+        }
+    ));
+}
