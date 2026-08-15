@@ -27,6 +27,7 @@ pub enum PageItem {
     SfxVolume,
     Vibration,
     AnimationIntensity,
+    ColorAssist,
     /// One configurable binding of one player on one device.
     Rebind {
         player: usize,
@@ -47,6 +48,7 @@ impl PageItem {
                 | Self::SfxVolume
                 | Self::Vibration
                 | Self::AnimationIntensity
+                | Self::ColorAssist
                 | Self::Rebind { .. }
         )
     }
@@ -67,6 +69,7 @@ fn settings_items(settings_origin: Option<SettingsOrigin>) -> Vec<FocusItem> {
         FocusItem::new(PageItem::SfxVolume, true, None::<String>),
         FocusItem::new(PageItem::Vibration, true, None::<String>),
         FocusItem::new(PageItem::AnimationIntensity, true, None::<String>),
+        FocusItem::new(PageItem::ColorAssist, true, None::<String>),
     ];
     // The back target comes from where the page was opened, so unlike every
     // other page's `Back` the command cannot be a constant. It is still carried

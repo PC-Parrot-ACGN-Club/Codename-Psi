@@ -26,6 +26,7 @@
     "settings.sfx_volume": "SFX Volume",
     "settings.vibration": "Vibration",
     "settings.animation_intensity": "Animation",
+    "settings.color_assist": "Colour Assist",
     "settings.rebind": "Rebind",
     "settings.binding_taken": "Key already bound:",
     "action.left": "Left",

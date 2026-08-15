@@ -38,11 +38,38 @@ const BALL_COLORS: [Color; 5] = [
     Color::srgb(0.70, 0.44, 0.85),
 ];
 
-/// A non-colour cue per colour id, so colour is never the only signal.
+/// A non-colour cue per colour id, drawn only under colour assist.
+///
+/// Matching is decided by colour alone, so the symbol adds nothing to play and
+/// stays off by default. It exists for players who cannot separate the palette
+/// by hue -- this palette puts blue and purple at nearly the same lightness,
+/// which is exactly the pair the common forms of colour blindness merge.
 const BALL_GLYPHS: [&str; 5] = ["●", "▲", "■", "◆", "★"];
 
 const NUISANCE_COLOR: Color = Color::srgb(0.42, 0.44, 0.48);
+/// Nuisance keeps its mark unconditionally: it is not one colour among the
+/// five but a different kind of ball, and neutral grey alone reads as an empty
+/// cell at a glance.
 const NUISANCE_GLYPH: &str = "✕";
+
+/// The glyph a cell shows, given whether the player asked for the extra cue.
+fn cell_glyph(occupant: Cell, color_assist: bool) -> &'static str {
+    match occupant {
+        Cell::Empty => "",
+        Cell::Color(id) if color_assist => BALL_GLYPHS[usize::from(id) % BALL_GLYPHS.len()],
+        Cell::Color(_) => "",
+        Cell::Nuisance => NUISANCE_GLYPH,
+    }
+}
+
+/// The fill for one occupant.
+fn cell_color(occupant: Cell) -> Color {
+    match occupant {
+        Cell::Empty => GRID,
+        Cell::Color(id) => BALL_COLORS[usize::from(id) % BALL_COLORS.len()],
+        Cell::Nuisance => NUISANCE_COLOR,
+    }
+}
 
 pub struct HudPlugin;
 
@@ -78,7 +105,6 @@ enum HudText {
     FeverTime(usize),
     FeverTarget(usize),
     Chain(usize),
-    Next { slot: usize, index: usize },
     Character(usize),
     Scoreline,
     Phase,
@@ -115,20 +141,51 @@ fn release_hud(
     }
 }
 
+/// Every HUD entity one refresh writes to.
+///
+/// Bundled because the board cells, the preview cells and the glyph nodes all
+/// reach for `BackgroundColor` or `Text`; the `Without` filters are what prove
+/// to the scheduler that the three sets are disjoint.
+#[derive(bevy::ecs::system::SystemParam)]
+struct HudCells<'w, 's> {
+    board: Query<
+        'w,
+        's,
+        (
+            &'static BoardCell,
+            &'static mut BackgroundColor,
+            &'static mut BorderColor,
+            &'static Children,
+        ),
+        Without<NextCell>,
+    >,
+    previews: Query<
+        'w,
+        's,
+        (
+            &'static NextCell,
+            &'static mut BackgroundColor,
+            &'static Children,
+        ),
+        Without<BoardCell>,
+    >,
+    texts: Query<'w, 's, (&'static HudText, &'static mut Text)>,
+    glyphs: Query<'w, 's, &'static mut Text, GlyphOnly>,
+}
+
+/// Text nodes that carry a ball's symbol rather than a HUD value.
+///
+/// A glyph node is the child of a cell, so it is excluded from both cell
+/// queries by the components it does not have.
+type GlyphOnly = (Without<HudText>, Without<BoardCell>, Without<NextCell>);
+
 /// Write the latest snapshot onto the HUD.
 fn refresh_hud(
     state: Res<State<AppState>>,
     simulation: Option<Res<RulesSimulation>>,
     report: Res<LatestStepReport>,
     settings: Res<UserSettings>,
-    mut cells: Query<(
-        &BoardCell,
-        &mut BackgroundColor,
-        &mut BorderColor,
-        &Children,
-    )>,
-    mut texts: Query<(&HudText, &mut Text)>,
-    mut glyphs: Query<&mut Text, Without<HudText>>,
+    mut cells: HudCells,
 ) {
     // The pause and settings pages sit over a live board, so the HUD keeps
     // showing the last snapshot rather than blanking while they are up.
@@ -154,7 +211,7 @@ fn refresh_hud(
     let overlays: [SlotOverlay; 2] =
         std::array::from_fn(|slot| slot_overlay(&snapshot.players[slot]));
 
-    for (cell, mut background, mut border, children) in &mut cells {
+    for (cell, mut background, mut border, children) in &mut cells.board {
         let player = &snapshot.players[cell.slot];
         let overlay = &overlays[cell.slot];
         let y = player.board.geometry().hidden_rows() + cell.row;
@@ -164,15 +221,8 @@ fn refresh_hud(
             || Coord::new(cell.column, y).map_or(Cell::Empty, |coord| player.board.get(coord)),
             |color| Cell::Color(*color),
         );
-        let (color, glyph) = match occupant {
-            Cell::Empty => (GRID, ""),
-            Cell::Color(id) => {
-                let index = usize::from(id) % BALL_COLORS.len();
-                (BALL_COLORS[index], BALL_GLYPHS[index])
-            }
-            Cell::Nuisance => (NUISANCE_COLOR, NUISANCE_GLYPH),
-        };
-        background.0 = color;
+        background.0 = cell_color(occupant);
+        let glyph = cell_glyph(occupant, settings.color_assist);
         // Priority: danger line, then the landing outline, then plain grid.
         *border = BorderColor::all(if cell.row == 0 && player.overflow_risk {
             DANGER
@@ -182,7 +232,7 @@ fn refresh_hud(
             GRID
         });
         for child in children.iter() {
-            if let Ok(mut text) = glyphs.get_mut(child)
+            if let Ok(mut text) = cells.glyphs.get_mut(child)
                 && text.0 != glyph
             {
                 text.0 = glyph.to_owned();
@@ -190,12 +240,48 @@ fn refresh_hud(
         }
     }
 
-    for (field, mut text) in &mut texts {
+    for (cell, mut background, children) in &mut cells.previews {
+        let occupant = snapshot.players[cell.slot]
+            .next_drops
+            .get(cell.index)
+            .and_then(|hand| preview_occupant(hand, cell.dx, cell.dy));
+
+        // No ball at this offset: the cell disappears rather than showing an
+        // empty slot, which is what makes the shape readable.
+        background.0 = occupant.map_or(Color::NONE, cell_color);
+        let glyph = occupant.map_or("", |occupant| cell_glyph(occupant, settings.color_assist));
+        for child in children.iter() {
+            if let Ok(mut text) = cells.glyphs.get_mut(child)
+                && text.0 != glyph
+            {
+                text.0 = glyph.to_owned();
+            }
+        }
+    }
+
+    for (field, mut text) in &mut cells.texts {
         let value = hud_value(field, &snapshot);
         if text.0 != value {
             text.0 = value;
         }
     }
+}
+
+/// What a hand puts at one offset from its pivot, if anything.
+fn preview_occupant(hand: &game_core::drop_stream::PendingHand, dx: i8, dy: i8) -> Option<Cell> {
+    use game_core::config::ColorSlot;
+
+    hand.template
+        .balls()
+        .into_iter()
+        .find(|ball| ball.dx == dx && ball.dy == dy)
+        .map(|ball| {
+            let color = match ball.color_slot {
+                ColorSlot::First => hand.colors[0],
+                ColorSlot::Second => hand.colors[1],
+            };
+            Cell::Color(color)
+        })
 }
 
 /// The active group's cells and where it would come to rest.
@@ -257,19 +343,6 @@ fn hud_value(field: &HudText, snapshot: &MatchPresentationSnapshot) -> String {
             } else {
                 String::new()
             }
-        }
-        HudText::Next { slot, index } => {
-            player(slot)
-                .next_drops
-                .get(index)
-                .map_or_else(String::new, |hand| {
-                    let [first, second] = hand.colors;
-                    format!(
-                        "{}{}",
-                        BALL_GLYPHS[usize::from(first) % BALL_GLYPHS.len()],
-                        BALL_GLYPHS[usize::from(second) % BALL_GLYPHS.len()]
-                    )
-                })
         }
         HudText::Character(slot) => player(slot).drop_set_id.0.clone(),
         HudText::Scoreline => format!(
@@ -488,13 +561,105 @@ fn next_panel(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Enti
     let heading = label(commands, font, 20.0, "NEXT");
     commands.entity(panel).add_child(heading);
     for index in 0..3 {
-        let size = if index == 0 { 40.0 } else { 28.0 };
-        let hand = value_text(commands, font, size, HudText::Next { slot, index });
+        let size = if index == 0 { 26.0 } else { 18.0 };
+        let hand = next_preview(commands, font, slot, index, size);
         commands.entity(panel).add_child(hand);
     }
     let chain = value_text(commands, font, 24.0, HudText::Chain(slot));
     commands.entity(panel).add_child(chain);
     panel
+}
+
+/// Columns and rows a preview grid needs to hold any hand shape.
+///
+/// `DropTemplate::balls` places every ball at `dx` in `-1..=1` and `dy` in
+/// `-1..=0` around the pivot, so this box covers `I`, `L`, `J` and both `O`
+/// layouts without the grid having to know which one it is showing.
+const PREVIEW_COLUMNS: i8 = 3;
+const PREVIEW_ROWS: i8 = 2;
+
+/// One cell of one hand's preview, addressed by its offset from the pivot.
+#[derive(Debug, Component)]
+struct NextCell {
+    slot: usize,
+    index: usize,
+    dx: i8,
+    dy: i8,
+}
+
+/// A preview grid for one upcoming hand.
+///
+/// Built from the same coloured cells as the board rather than from text: the
+/// preview has to be comparable with what will land, and a glyph string can
+/// carry neither the hand's colours nor its shape.
+fn next_preview(
+    commands: &mut Commands,
+    font: &Handle<Font>,
+    slot: usize,
+    index: usize,
+    size: f32,
+) -> Entity {
+    let grid = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(CELL_GAP),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+
+    for dy in -PREVIEW_ROWS + 1..=0 {
+        let line = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(CELL_GAP),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+            ))
+            .id();
+        for dx in -(PREVIEW_COLUMNS / 2)..=PREVIEW_COLUMNS / 2 {
+            let cell = commands
+                .spawn((
+                    NextCell {
+                        slot,
+                        index,
+                        dx,
+                        dy,
+                    },
+                    Node {
+                        width: px(size),
+                        height: px(size),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border_radius: BorderRadius::all(px(size / 7.0)),
+                        ..default()
+                    },
+                    // An offset no ball occupies stays fully transparent, so the
+                    // grid shows the hand's silhouette instead of a 3x2 block.
+                    BackgroundColor(Color::NONE),
+                ))
+                .id();
+            let glyph = commands
+                .spawn((
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(size * 0.6),
+                        ..default()
+                    },
+                    TextColor(GROUND),
+                ))
+                .id();
+            commands.entity(cell).add_child(glyph);
+            commands.entity(line).add_child(cell);
+        }
+        commands.entity(grid).add_child(line);
+    }
+    grid
 }
 
 /// Gauge, remaining time and puzzle target.
@@ -572,4 +737,92 @@ fn board_grid(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Enti
         commands.entity(board).add_child(line);
     }
     board
+}
+
+#[cfg(test)]
+mod tests {
+    use game_core::config::{DropShape, DropTemplate};
+    use game_core::drop_stream::PendingHand;
+
+    use super::{Cell, cell_glyph, preview_occupant};
+
+    fn hand(shape: DropShape, colors: [u8; 2]) -> PendingHand {
+        PendingHand {
+            template: DropTemplate {
+                shape,
+                vertical_pair_first: Some(true),
+            },
+            colors,
+            turn_id: 0,
+        }
+    }
+
+    // integration-system/presentation-runtime::TC-011
+    #[test]
+    fn colour_is_the_only_ball_cue_until_colour_assist_is_on() {
+        // Clearing is decided by colour, so the symbol is off by default and
+        // every colour reads as a plain fill.
+        for id in 0..5 {
+            assert_eq!(cell_glyph(Cell::Color(id), false), "");
+            assert!(!cell_glyph(Cell::Color(id), true).is_empty());
+        }
+
+        // Distinct symbols, or the assist would not separate the colours it
+        // exists to separate.
+        let assisted: Vec<&str> = (0..5).map(|id| cell_glyph(Cell::Color(id), true)).collect();
+        for (index, glyph) in assisted.iter().enumerate() {
+            assert!(
+                !assisted[index + 1..].contains(glyph),
+                "colour {index} shares its symbol with a later colour"
+            );
+        }
+
+        // Nuisance is a different kind of ball rather than a sixth colour, so
+        // its mark does not depend on the setting.
+        assert_eq!(
+            cell_glyph(Cell::Nuisance, false),
+            cell_glyph(Cell::Nuisance, true)
+        );
+        assert!(!cell_glyph(Cell::Nuisance, false).is_empty());
+        assert_eq!(cell_glyph(Cell::Empty, true), "");
+    }
+
+    // integration-system/presentation-runtime::TC-011
+    #[test]
+    fn the_next_preview_carries_both_the_hand_shape_and_its_colours() {
+        // `I` occupies the pivot column only, so the preview shows a vertical
+        // pair and the side offsets stay empty.
+        let i = hand(DropShape::I, [1, 2]);
+        assert_eq!(preview_occupant(&i, 0, 0), Some(Cell::Color(1)));
+        assert_eq!(preview_occupant(&i, 0, -1), Some(Cell::Color(2)));
+        assert_eq!(preview_occupant(&i, 1, 0), None);
+        assert_eq!(preview_occupant(&i, -1, 0), None);
+
+        // `L` and `J` differ only in which side the arm is on -- exactly the
+        // distinction a two-glyph string could not express.
+        let l = hand(DropShape::L, [1, 2]);
+        let j = hand(DropShape::J, [1, 2]);
+        assert_eq!(preview_occupant(&l, 1, 0), Some(Cell::Color(2)));
+        assert_eq!(preview_occupant(&l, -1, 0), None);
+        assert_eq!(preview_occupant(&j, -1, 0), Some(Cell::Color(2)));
+        assert_eq!(preview_occupant(&j, 1, 0), None);
+
+        // `O` fills a 2x2 block, and the dual layout puts each drawn colour on
+        // its own row.
+        let o = hand(DropShape::ODual, [3, 4]);
+        for dx in [0, 1] {
+            assert_eq!(preview_occupant(&o, dx, 0), Some(Cell::Color(3)));
+            assert_eq!(preview_occupant(&o, dx, -1), Some(Cell::Color(4)));
+        }
+        assert_eq!(preview_occupant(&o, -1, 0), None);
+
+        // A single-colour hand draws one colour everywhere, so the second drawn
+        // colour must not leak into the preview.
+        let mono = hand(DropShape::OMono, [3, 4]);
+        for dx in [0, 1] {
+            for dy in [0, -1] {
+                assert_eq!(preview_occupant(&mono, dx, dy), Some(Cell::Color(3)));
+            }
+        }
+    }
 }

@@ -55,6 +55,9 @@ fn default_settings_are_complete_and_safe() {
     assert_eq!(settings.master_volume, 1.0);
     assert_eq!(settings.sfx_volume, 1.0);
     assert!(settings.vibration);
+    // Off by default: matching is decided by colour, so the extra symbol is a
+    // redundancy the player opts into rather than the standard board.
+    assert!(!settings.color_assist);
     assert_only_configurable_bindings(&settings);
 }
 

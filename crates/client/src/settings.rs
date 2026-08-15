@@ -267,6 +267,13 @@ pub struct UserSettings {
     pub players: [PlayerInputBindings; 2],
     pub vibration: bool,
     pub animation_intensity: AnimationIntensity,
+    /// Draw a per-colour symbol inside every ball.
+    ///
+    /// Clearing is decided by colour alone, so the symbol carries no rule
+    /// information and is off by default -- plain colour reads faster. It is
+    /// the redundant cue for players who cannot separate the palette by hue,
+    /// which is why the option exists rather than the symbol simply being gone.
+    pub color_assist: bool,
 }
 
 impl Default for UserSettings {
@@ -280,6 +287,7 @@ impl Default for UserSettings {
             players: std::array::from_fn(PlayerInputBindings::for_player),
             vibration: true,
             animation_intensity: AnimationIntensity::Full,
+            color_assist: false,
         }
     }
 }

@@ -145,6 +145,7 @@ const fn label_key(item: PageItem) -> &'static str {
         PageItem::SfxVolume => "settings.sfx_volume",
         PageItem::Vibration => "settings.vibration",
         PageItem::AnimationIntensity => "settings.animation_intensity",
+        PageItem::ColorAssist => "settings.color_assist",
         PageItem::Rebind { .. } => "settings.rebind",
     }
 }
@@ -375,6 +376,7 @@ fn setting_value(item: PageItem, settings: &crate::settings::UserSettings) -> St
             AnimationIntensity::Full => "Full".into(),
             AnimationIntensity::Reduced => "Reduced".into(),
         },
+        PageItem::ColorAssist => if settings.color_assist { "On" } else { "Off" }.into(),
         PageItem::Rebind {
             player,
             action,
@@ -926,6 +928,7 @@ fn drive_settings(pages: &mut PageDrivers, focused: PageItem) {
         PageItem::MasterVolume => settings.master_volume = next_volume(settings.master_volume),
         PageItem::SfxVolume => settings.sfx_volume = next_volume(settings.sfx_volume),
         PageItem::Vibration => settings.vibration = !settings.vibration,
+        PageItem::ColorAssist => settings.color_assist = !settings.color_assist,
         PageItem::AnimationIntensity => {
             settings.animation_intensity = match settings.animation_intensity {
                 AnimationIntensity::Full => AnimationIntensity::Reduced,
