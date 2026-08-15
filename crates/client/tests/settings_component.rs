@@ -514,19 +514,19 @@ fn a_capture_writes_cancels_or_reports_a_conflict_for_the_page_to_resolve() {
     );
     assert_eq!(settings, UserSettings::default());
 
-    // Overwriting: the previous owner loses the input rather than sharing it.
-    capture
-        .overwrite(&mut settings, &taken_key)
+    // Refusal is final: offering the same taken input again reports the same
+    // conflict rather than eventually giving in, and the previous owner keeps
+    // it. Taking it away would leave `HardDrop` -- and, for a rotation, the
+    // menu action riding on it -- with nothing bound.
+    let again = capture
+        .offer(&mut settings, &taken_key)
         .expect("player 0 exists");
+    assert_eq!(again, outcome);
+    assert_eq!(settings, UserSettings::default());
     assert!(
         settings.players[0]
             .actions_for(&taken_key)
-            .eq([GameAction::SoftDrop])
-    );
-    assert!(
-        !settings.players[0]
-            .actions_for(&taken_key)
-            .any(|action| action == GameAction::HardDrop)
+            .eq([GameAction::HardDrop])
     );
 
     // A fixed binding never opens a capture at all.

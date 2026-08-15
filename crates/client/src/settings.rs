@@ -19,6 +19,7 @@ impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UserSettings>()
             .init_resource::<LastSaveError>()
+            .init_resource::<LastBindingRejection>()
             .add_message::<SaveSettingsRequest>()
             .add_systems(
                 Update,
@@ -92,15 +93,16 @@ impl PlayerInputBindings {
         }
     }
 
-    /// Removes one physical input from every action of this player.
+    /// The input this action uses on one device, if it has one.
     ///
-    /// An action left with no inputs stays in the map as an empty entry: it is
-    /// still configurable and still shown, it just produces nothing until it is
-    /// bound again.
-    pub fn unbind_input(&mut self, input: &PhysicalInput) {
-        for inputs in self.bindings.values_mut() {
-            inputs.retain(|bound| bound != input);
-        }
+    /// An action holds at most one input per device category, so this is the
+    /// single binding both the settings page and the on-screen key legend read.
+    #[must_use]
+    pub fn input_for(&self, action: GameAction, device: DeviceCategory) -> Option<&PhysicalInput> {
+        self.bindings
+            .get(&action)?
+            .iter()
+            .find(|input| input.category() == device)
     }
 
     #[must_use]
@@ -125,15 +127,20 @@ impl PlayerInputBindings {
     /// per player so two locals never fight over one key; the gamepad column is
     /// the same for both because players are told apart by which pad they hold.
     ///
-    /// Fixed bindings (directions, confirm, back, pause) are not listed here --
-    /// they are not user-configurable and live in `client::input`.
+    /// The two rotation bindings double as the menu confirm and back keys, so
+    /// their defaults are chosen for both roles at once: `J`/`K` sit under the
+    /// resting fingers for rotation, and on a gamepad `South`/`East` keep the
+    /// platform's usual confirm/back pair. See `client::input::ui_action_source`.
+    ///
+    /// Fixed bindings (directions, pause) are not listed here -- they are not
+    /// user-configurable and live in `client::input`.
     #[must_use]
     pub fn for_player(player: usize) -> Self {
         let keyboard = match player {
             0 => ["KeyS", "KeyW", "KeyK", "KeyJ"],
             _ => ["ArrowDown", "ArrowUp", "Numpad2", "Numpad1"],
         };
-        let gamepad = ["DPadDown", "DPadUp", "South", "West"];
+        let gamepad = ["DPadDown", "DPadUp", "East", "South"];
 
         let bindings = GameAction::CONFIGURABLE
             .into_iter()
@@ -194,8 +201,8 @@ pub enum CaptureOutcome {
     Ignored,
     /// The binding was written.
     Bound,
-    /// Another action of the same player and category already owns the input.
-    /// The settings page decides between overwrite and cancel.
+    /// Another action of the same player and category already owns the input,
+    /// so nothing was written. The settings page reports which action holds it.
     Conflict(BindingConflict),
     /// The player backed out; the binding table was never touched.
     Cancelled,
@@ -214,8 +221,11 @@ impl BindingCapture {
 
     /// Offers one physical input to the capture.
     ///
-    /// A conflict leaves the table untouched: the page has to choose, and until
-    /// it does, the player keeps the bindings they had.
+    /// A conflict leaves the table untouched and is final: an input that is
+    /// already taken is simply refused. Taking it from its previous owner would
+    /// leave that action unbound, and since the rotation bindings double as the
+    /// menu confirm and back keys, an unbound rotation is a player who can no
+    /// longer operate the settings page they are standing on.
     pub fn offer(
         &self,
         settings: &mut UserSettings,
@@ -243,24 +253,6 @@ impl BindingCapture {
     #[must_use]
     pub fn cancel(self) -> CaptureOutcome {
         CaptureOutcome::Cancelled
-    }
-
-    /// Resolves a conflict in favour of the action being bound.
-    ///
-    /// The previous owner loses the input rather than sharing it -- two actions
-    /// on one key would make the binding page lie about what the key does.
-    pub fn overwrite(
-        &self,
-        settings: &mut UserSettings,
-        input: &PhysicalInput,
-    ) -> Result<(), SettingsError> {
-        let bindings = settings
-            .players
-            .get_mut(self.player)
-            .ok_or(SettingsError::UnknownPlayer(self.player))?;
-        bindings.unbind_input(input);
-        bindings.bind(self.action, input.clone());
-        Ok(())
     }
 }
 
@@ -435,6 +427,14 @@ pub struct SaveSettingsRequest;
 /// The outcome of the most recent save, for the settings UI to display.
 #[derive(Debug, Default, Resource)]
 pub struct LastSaveError(pub Option<String>);
+
+/// The most recent refused rebinding, for the settings page to explain.
+///
+/// A refusal has no other visible effect -- the table is unchanged and the
+/// capture is over -- so without this the player would see their key press do
+/// nothing at all and conclude the page was broken.
+#[derive(Debug, Default, Resource)]
+pub struct LastBindingRejection(pub Option<BindingConflict>);
 
 /// Persist the current settings when a save is requested.
 ///

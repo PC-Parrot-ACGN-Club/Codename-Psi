@@ -147,6 +147,24 @@ fn enabled_page_items_map_to_the_declared_unique_command() {
             "{state:?}/{target_item:?}"
         );
     }
+
+    // Settings is the one page whose back cause depends on where it was opened,
+    // so it cannot join the table above. Confirming the item still has to leave
+    // the page on its own: a player who never learns the back *input* would
+    // otherwise be stranded in settings.
+    for origin in [AppState::MainMenu, AppState::Paused] {
+        let mut page = PageModel::for_state(AppState::Settings, Some(SettingsOrigin(origin)))
+            .expect("settings page exists");
+        page.focus_item(PageItem::Back).expect("back item exists");
+        assert_eq!(
+            page.handle(UIAction::Confirm),
+            Some(PageCommand::transition(
+                origin,
+                AppTransitionCause::SettingsClosed
+            )),
+            "settings opened from {origin:?}"
+        );
+    }
 }
 
 // component/page-navigation::TC-005
@@ -183,6 +201,98 @@ fn lan_entry_is_focusable_disabled_and_never_starts_a_match() {
             .is_some_and(|reason| reason.contains("R2"))
     );
     assert_eq!(page.handle(UIAction::Confirm), None);
+}
+
+// component/page-navigation::TC-010
+#[test]
+fn settings_focus_order_follows_the_two_column_layout() {
+    let page = PageModel::for_state(AppState::Settings, Some(SettingsOrigin(AppState::MainMenu)))
+        .expect("settings page exists");
+    let ids: Vec<PageItem> = page.items().iter().map(|item| item.id).collect();
+
+    let back = ids
+        .iter()
+        .position(|id| *id == PageItem::Back)
+        .expect("settings has a back item");
+    let first_rebind = ids
+        .iter()
+        .position(|id| matches!(id, PageItem::Rebind { .. }))
+        .expect("settings has rebinding items");
+
+    // The page renders the general settings and `Back` in one column and the
+    // rebindings in the other, so `Back` has to come before the first
+    // rebinding: focus finishes a column before it enters the next one.
+    assert!(
+        back < first_rebind,
+        "back is at {back} but the rebinding column starts at {first_rebind}"
+    );
+    assert!(
+        ids[..back].iter().all(|id| id.is_setting()),
+        "the first column holds the general settings, then back"
+    );
+    assert!(
+        ids[first_rebind..]
+            .iter()
+            .all(|id| matches!(id, PageItem::Rebind { .. })),
+        "the second column holds only rebindings"
+    );
+}
+
+// component/page-navigation::TC-011
+#[test]
+fn the_corner_legend_names_each_player_s_current_confirm_and_back_keys() {
+    use client::i18n::{Localization, parse_catalog};
+    use client::input::{GamepadSlots, PhysicalInput};
+    use client::settings::{DeviceCategory, UserSettings};
+    use client::ui::{key_legend_text, rebind_label};
+    use game_core::input::GameAction;
+
+    // The shipped catalog rather than a fixture, so a legend that asks for a
+    // key the catalog does not carry fails here instead of on screen.
+    const ASSET_EN: &str = include_str!("../../../assets/i18n/en.json");
+
+    let mut settings = UserSettings::default();
+    let localization = Localization::new("en", [parse_catalog(ASSET_EN).expect("catalog parses")]);
+    // No pad is bound to either slot, so both legends describe the keyboard.
+    let slots = GamepadSlots::default();
+
+    // The defaults are the ones the player is told about without opening the
+    // settings page at all: J confirms, K goes back.
+    let p1 = key_legend_text(0, &settings, &slots, &localization);
+    assert!(
+        p1.contains("J") && p1.contains("K"),
+        "P1's legend must name its default rotation keys, got {p1:?}"
+    );
+    assert!(p1.starts_with("P1"), "the left corner belongs to P1");
+
+    // P2's defaults differ, so the two corners must not read the same.
+    let p2 = key_legend_text(1, &settings, &slots, &localization);
+    assert!(p2.starts_with("P2"), "the right corner belongs to P2");
+    assert_ne!(p1, p2);
+
+    // Rebinding the rotation moves the legend with it -- that is the whole
+    // reason the legend exists rather than a printed constant.
+    settings.players[0].bindings.insert(
+        GameAction::RotateCounterClockwise,
+        vec![PhysicalInput::keyboard("KeyP")],
+    );
+    let rebound = key_legend_text(0, &settings, &slots, &localization);
+    assert!(
+        rebound.contains("P") && !rebound.contains("J"),
+        "the legend has to follow the binding, got {rebound:?}"
+    );
+
+    // The settings row for that binding names both of the things the key does.
+    let label = rebind_label(
+        &localization,
+        0,
+        GameAction::RotateCounterClockwise,
+        DeviceCategory::Keyboard,
+    );
+    assert!(
+        label.contains("Rotate CCW") && label.contains("Confirm"),
+        "the rotation row must name its menu meaning too, got {label:?}"
+    );
 }
 
 fn characters() -> Vec<CharacterId> {

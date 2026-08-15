@@ -26,6 +26,17 @@
     "settings.sfx_volume": "SFX Volume",
     "settings.vibration": "Vibration",
     "settings.animation_intensity": "Animation",
-    "settings.rebind": "Rebind"
+    "settings.rebind": "Rebind",
+    "settings.binding_taken": "Key already bound:",
+    "action.left": "Left",
+    "action.right": "Right",
+    "action.soft_drop": "Soft Drop",
+    "action.hard_drop": "Hard Drop",
+    "action.rotate_cw": "Rotate CW",
+    "action.rotate_ccw": "Rotate CCW",
+    "ui_action.confirm": "Confirm",
+    "ui_action.back": "Back",
+    "ui_action.up": "Up",
+    "ui_action.down": "Down"
   }
 }

@@ -56,8 +56,17 @@ pub const WORKSPACE_ASSETS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../a
 ///
 /// `AssetPlugin` is added before the project plugin, which then leaves it
 /// alone -- the asset root is plugin configuration, not a per-load argument.
+///
+/// The settings path is pinned to a file that does not exist, so the app starts
+/// from built-in defaults. Leaving it unset resolves the platform config
+/// directory instead: every assertion about default bindings would then be an
+/// assertion about whatever the developer running the suite last saved, and a
+/// test that requested a save would overwrite their real settings file.
 pub fn controlled_app_with_asset_root(root: impl Into<String>) -> App {
     let mut app = App::new();
+    app.insert_resource(client::bootstrap::BootstrapPaths {
+        settings: Some(unused_settings_path()),
+    });
     app.add_plugins((
         MinimalPlugins,
         bevy::asset::AssetPlugin {
@@ -69,6 +78,18 @@ pub fn controlled_app_with_asset_root(root: impl Into<String>) -> App {
     app.init_resource::<client::simulation::SimulationProbe>();
     app.world_mut().resource_mut::<Time<Virtual>>().pause();
     app
+}
+
+/// A settings path inside a fresh temporary directory, with no file at it.
+///
+/// The directory is leaked rather than kept alive: a `TempDir` dropped at the
+/// end of this function would delete itself before the app ever read the path,
+/// and nothing is written there unless the test under way asks for a save.
+fn unused_settings_path() -> std::path::PathBuf {
+    tempfile::tempdir()
+        .expect("a temporary directory for test settings")
+        .keep()
+        .join("settings.ron")
 }
 
 /// A client app driven by the production main schedule instead of by hand.

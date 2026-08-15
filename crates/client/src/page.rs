@@ -53,7 +53,13 @@ impl PageItem {
 }
 
 /// Every settings item, in the order the page lists them.
-fn settings_items() -> Vec<FocusItem> {
+///
+/// The order is the visual order, not the logical grouping: the page renders
+/// the general settings and `Back` in one column and the rebindings in the
+/// other, and the ring is linear across both. Listing `Back` after the general
+/// settings is what makes focus finish the first column before entering the
+/// second, instead of leaving the first column's last row until the very end.
+fn settings_items(settings_origin: Option<SettingsOrigin>) -> Vec<FocusItem> {
     let mut items = vec![
         FocusItem::new(PageItem::Language, true, None::<String>),
         FocusItem::new(PageItem::WindowMode, true, None::<String>),
@@ -62,6 +68,19 @@ fn settings_items() -> Vec<FocusItem> {
         FocusItem::new(PageItem::Vibration, true, None::<String>),
         FocusItem::new(PageItem::AnimationIntensity, true, None::<String>),
     ];
+    // The back target comes from where the page was opened, so unlike every
+    // other page's `Back` the command cannot be a constant. It is still carried
+    // by the item: confirming `Back` has to leave the page on its own, without
+    // depending on the player also knowing the back *input*.
+    let mut back = FocusItem::new(PageItem::Back, true, None::<String>);
+    if let Some(origin) = settings_origin {
+        back = back.with_command(PageCommand::transition(
+            origin.0,
+            AppTransitionCause::SettingsClosed,
+        ));
+    }
+    items.push(back);
+
     for player in 0..2 {
         for action in GameAction::CONFIGURABLE {
             for device in [DeviceCategory::Keyboard, DeviceCategory::Gamepad] {
@@ -77,9 +96,6 @@ fn settings_items() -> Vec<FocusItem> {
             }
         }
     }
-    // No command: the settings page's back target comes from where it was
-    // opened, which `PageModel::back` resolves.
-    items.push(FocusItem::new(PageItem::Back, true, None::<String>));
     items
 }
 
@@ -253,7 +269,7 @@ impl PageModel {
                     AppTransitionCause::BackRequested,
                 ),
             ],
-            AppState::Settings => settings_items(),
+            AppState::Settings => settings_items(settings_origin),
             AppState::Paused => vec![
                 action_item(
                     PageItem::Resume,

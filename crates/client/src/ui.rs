@@ -58,6 +58,8 @@ impl Plugin for UiPlugin {
                     refresh_focus_visuals,
                     refresh_slot_visuals,
                     refresh_setting_values,
+                    refresh_key_legend,
+                    refresh_binding_rejection,
                 ),
             );
 
@@ -167,6 +169,8 @@ const CHIP: Color = Color::srgb(0.10, 0.12, 0.16);
 const CHIP_FOCUSED: Color = Color::srgb(0.16, 0.42, 0.55);
 const TEXT: Color = Color::srgb(0.90, 0.94, 0.98);
 const TEXT_DISABLED: Color = Color::srgb(0.45, 0.48, 0.53);
+/// Refusals and other "that did not happen" reports.
+const WARNING: Color = Color::srgb(0.90, 0.55, 0.30);
 
 /// Pages that sit over a running match dim it instead of replacing it, so the
 /// board stays readable underneath.
@@ -193,7 +197,14 @@ fn spawn_page(world: &mut World, state: AppState) {
             .items()
             .iter()
             .map(|item| {
-                let mut label = localization.text(label_key(item.id));
+                let mut label = match item.id {
+                    PageItem::Rebind {
+                        player,
+                        action,
+                        device,
+                    } => rebind_label(localization, player, action, device),
+                    id => localization.text(label_key(id)),
+                };
                 if let Some(reason) = &item.unavailable_reason {
                     label.push_str(&format!("  ({reason})"));
                 }
@@ -239,6 +250,8 @@ fn spawn_page(world: &mut World, state: AppState) {
         ))
         .id();
     world.entity_mut(root).add_child(heading);
+
+    spawn_key_legend(world, root, &font);
 
     match state {
         AppState::CharacterSelect => spawn_character_slots(world, root, &font),
@@ -294,6 +307,57 @@ fn spawn_page(world: &mut World, state: AppState) {
 #[derive(Debug, Component)]
 struct SettingValueText(PageItem);
 
+/// Localization key naming a configurable rules action.
+const fn action_key(action: game_core::input::GameAction) -> &'static str {
+    use game_core::input::GameAction;
+    match action {
+        GameAction::SoftDrop => "action.soft_drop",
+        GameAction::HardDrop => "action.hard_drop",
+        GameAction::RotateClockwise => "action.rotate_cw",
+        GameAction::RotateCounterClockwise => "action.rotate_ccw",
+        GameAction::Left => "action.left",
+        GameAction::Right => "action.right",
+    }
+}
+
+/// Localization key naming a menu action.
+const fn ui_action_key(action: UIAction) -> &'static str {
+    match action {
+        UIAction::Confirm => "ui_action.confirm",
+        UIAction::Back => "ui_action.back",
+        UIAction::Left => "action.left",
+        UIAction::Right => "action.right",
+        UIAction::Up => "ui_action.up",
+        UIAction::Down => "ui_action.down",
+    }
+}
+
+/// How a bound physical input reads on screen.
+///
+/// Bindings persist Bevy's own variant spelling, which is precise but not what
+/// a player sees printed on the key. The legend is only useful if the string it
+/// shows is the one on the keycap, so the common families are shortened and
+/// anything else falls through unchanged.
+#[must_use]
+pub fn key_display(name: &str) -> String {
+    for prefix in ["Key", "Digit"] {
+        if let Some(rest) = name.strip_prefix(prefix)
+            && rest.len() == 1
+        {
+            return rest.to_owned();
+        }
+    }
+    match name {
+        "ArrowUp" => "↑".to_owned(),
+        "ArrowDown" => "↓".to_owned(),
+        "ArrowLeft" => "←".to_owned(),
+        "ArrowRight" => "→".to_owned(),
+        _ => name
+            .strip_prefix("Numpad")
+            .map_or_else(|| name.to_owned(), |rest| format!("Num{rest}")),
+    }
+}
+
 /// How a setting currently reads on the page.
 fn setting_value(item: PageItem, settings: &crate::settings::UserSettings) -> String {
     use crate::settings::{AnimationIntensity, WindowModeSetting};
@@ -318,23 +382,19 @@ fn setting_value(item: PageItem, settings: &crate::settings::UserSettings) -> St
         } => settings
             .players
             .get(player)
-            .and_then(|bindings| bindings.bindings.get(&action))
-            .and_then(|inputs| {
-                inputs
-                    .iter()
-                    .find(|input| input.category() == device)
-                    .map(|input| match input {
-                        crate::input::PhysicalInput::Keyboard(code)
-                        | crate::input::PhysicalInput::Gamepad(code) => code.clone(),
-                    })
-            })
-            .unwrap_or_else(|| "--".into()),
+            .and_then(|bindings| bindings.input_for(action, device))
+            .map_or_else(|| "--".to_owned(), |input| key_display(input.name())),
         _ => String::new(),
     }
 }
 
 /// Label for a rebinding row, which names a player, action and device.
-fn rebind_label(
+///
+/// The two rotations also carry the menu confirm and back, so their rows name
+/// both meanings: one key, one row, both of the things it does.
+#[must_use]
+pub fn rebind_label(
+    localization: &Localization,
     player: usize,
     action: game_core::input::GameAction,
     device: crate::settings::DeviceCategory,
@@ -344,7 +404,15 @@ fn rebind_label(
         DeviceCategory::Keyboard => "KB",
         DeviceCategory::Gamepad => "PAD",
     };
-    format!("P{} {action:?} [{device}]", player + 1)
+    let mut name = localization.text(action_key(action));
+    if let Some(ui_action) = crate::input::BOUND_UI_ACTIONS
+        .into_iter()
+        .find(|candidate| crate::input::ui_action_source(*candidate) == Some(action))
+    {
+        name.push_str(" / ");
+        name.push_str(&localization.text(ui_action_key(ui_action)));
+    }
+    format!("P{} {name} [{device}]", player + 1)
 }
 
 /// The settings page: general settings in one column, rebindings in the other.
@@ -391,14 +459,7 @@ fn spawn_settings_rows(
     for (id, label, _) in rows {
         let is_rebind = matches!(id, PageItem::Rebind { .. });
         let parent = column_ids[usize::from(is_rebind)];
-        let label = match *id {
-            PageItem::Rebind {
-                player,
-                action,
-                device,
-            } => rebind_label(player, action, device),
-            _ => label.clone(),
-        };
+        let label = label.clone();
 
         let row = world
             .spawn((
@@ -447,6 +508,146 @@ fn spawn_settings_rows(
             world.entity_mut(row).add_child(value);
         }
         world.entity_mut(parent).add_child(row);
+    }
+
+    // A refused rebinding changes nothing else on the page, so without this the
+    // player's key press would look like it was simply ignored.
+    let notice = world
+        .spawn((
+            BindingRejectionText,
+            Text::new(String::new()),
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(22.0),
+                ..default()
+            },
+            TextColor(WARNING),
+            Node {
+                margin: UiRect::top(px(24)),
+                ..default()
+            },
+        ))
+        .id();
+    world.entity_mut(root).add_child(notice);
+}
+
+/// The line explaining why the last rebinding was refused.
+#[derive(Debug, Component)]
+struct BindingRejectionText;
+
+/// Report a refused rebinding, naming the key and the action that holds it.
+fn refresh_binding_rejection(
+    rejection: Res<crate::settings::LastBindingRejection>,
+    localization: Res<Localization>,
+    mut notices: Query<&mut Text, With<BindingRejectionText>>,
+) {
+    let shown = rejection.0.as_ref().map_or_else(String::new, |conflict| {
+        format!(
+            "{} {} → {}",
+            localization.text("settings.binding_taken"),
+            key_display(conflict.input.name()),
+            localization.text(action_key(conflict.existing)),
+        )
+    });
+    for mut text in &mut notices {
+        if text.0 != shown {
+            text.0.clone_from(&shown);
+        }
+    }
+}
+
+/// One local player's confirm/back legend, pinned to a bottom corner.
+#[derive(Debug, Component)]
+struct KeyLegend(usize);
+
+/// The confirm and back keys a player currently holds, named on screen.
+///
+/// Every menu page carries it because confirm and back follow the player's
+/// rotation bindings: after a rebinding the keys are whatever that player chose,
+/// and the only way to know without opening the settings page is to be told
+/// here. P1 reads the left corner and P2 the right, which is also the side each
+/// one plays on.
+fn spawn_key_legend(world: &mut World, root: Entity, font: &Handle<Font>) {
+    for player in 0..crate::input::LOCAL_PLAYERS {
+        let mut node = Node {
+            position_type: PositionType::Absolute,
+            bottom: px(32),
+            ..default()
+        };
+        if player == 0 {
+            node.left = px(56);
+        } else {
+            node.right = px(56);
+        }
+
+        let legend = world
+            .spawn((
+                KeyLegend(player),
+                // Filled by `refresh_key_legend`, which also keeps it current
+                // when a rebinding or a gamepad changes what the keys are.
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(24.0),
+                    ..default()
+                },
+                TextColor(TEXT_DISABLED),
+                node,
+            ))
+            .id();
+        world.entity_mut(root).add_child(legend);
+    }
+}
+
+/// How one player's legend reads right now.
+#[must_use]
+pub fn key_legend_text(
+    player: usize,
+    settings: &crate::settings::UserSettings,
+    slots: &crate::input::GamepadSlots,
+    localization: &Localization,
+) -> String {
+    use crate::settings::DeviceCategory;
+
+    let Some(bindings) = settings.players.get(player) else {
+        return String::new();
+    };
+    // A player holding a pad is not pressing keyboard keys, so the legend names
+    // the device in their hands rather than listing both.
+    let device = if slots.pad(player).is_some() {
+        DeviceCategory::Gamepad
+    } else {
+        DeviceCategory::Keyboard
+    };
+
+    let mut parts = vec![format!("P{}", player + 1)];
+    for action in crate::input::BOUND_UI_ACTIONS {
+        let Some(source) = crate::input::ui_action_source(action) else {
+            continue;
+        };
+        let key = bindings
+            .input_for(source, device)
+            .map_or_else(|| "--".to_owned(), |input| key_display(input.name()));
+        parts.push(format!(
+            "{key} {}",
+            localization.text(ui_action_key(action))
+        ));
+    }
+    parts.join("    ")
+}
+
+/// Keep each corner legend equal to the bindings actually in force.
+fn refresh_key_legend(
+    settings: Res<crate::settings::UserSettings>,
+    slots: Res<crate::input::GamepadSlots>,
+    localization: Res<Localization>,
+    mut legends: Query<(&KeyLegend, &mut Text)>,
+) {
+    for (legend, mut text) in &mut legends {
+        let shown = key_legend_text(legend.0, &settings, &slots, &localization);
+        if text.0 != shown {
+            text.0 = shown;
+        }
     }
 }
 
@@ -631,7 +832,13 @@ fn drive_focused_page(
                 drive_character_select(&mut pages, event);
                 continue;
             }
-        } else if page.0.state() == AppState::Settings && event.action == UIAction::Confirm {
+        } else if page.0.state() == AppState::Settings
+            && event.action == UIAction::Confirm
+            // Only a setting is edited in place. A navigation row on the same
+            // page -- `Back` -- still belongs to the ring, or the page would
+            // swallow its own exit and strand the player in settings.
+            && page.0.focused().id.is_setting()
+        {
             drive_settings(&mut pages, page.0.focused().id);
             continue;
         }
@@ -672,6 +879,7 @@ struct PageDrivers<'w, 's> {
     save: MessageWriter<'w, crate::settings::SaveSettingsRequest>,
     rules: Option<Res<'w, RulesData>>,
     seeds: ResMut<'w, MatchSeedSource>,
+    rejection: ResMut<'w, crate::settings::LastBindingRejection>,
     commands: Commands<'w, 's>,
     selection_written: Local<'s, bool>,
 }
@@ -691,6 +899,9 @@ fn drive_settings(pages: &mut PageDrivers, focused: PageItem) {
     } = focused
     {
         if let Some(capture) = BindingCapture::open(player, action, device) {
+            // The refusal on screen belongs to the attempt that produced it, so
+            // opening the next capture clears it.
+            pages.rejection.0 = None;
             pages.commands.insert_resource(capture);
         }
         return;
@@ -749,6 +960,7 @@ fn complete_binding_capture(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     mut settings: ResMut<crate::settings::UserSettings>,
+    mut rejection: ResMut<crate::settings::LastBindingRejection>,
     mut save: MessageWriter<crate::settings::SaveSettingsRequest>,
     mut commands: Commands,
 ) {
@@ -781,17 +993,20 @@ fn complete_binding_capture(
 
     match capture.offer(&mut settings, &input) {
         Ok(CaptureOutcome::Ignored) => return,
-        // R1 resolves a conflict by overwriting: the page has no prompt yet, and
-        // leaving the capture open would trap the player on a key they cannot use.
-        Ok(CaptureOutcome::Conflict(_)) => {
-            if let Err(error) = capture.overwrite(&mut settings, &input) {
-                warn!("rebinding failed: {error}");
-            }
+        // A taken input is refused rather than moved. Taking it would leave its
+        // previous action unbound, and an unbound rotation is also an unbound
+        // menu confirm or back -- the player would lose the ability to leave
+        // this page. The page reports which action holds the key instead.
+        Ok(CaptureOutcome::Conflict(conflict)) => {
+            commands.remove_resource::<crate::settings::BindingCapture>();
+            rejection.0 = Some(conflict);
+            return;
         }
         Ok(_) => {}
         Err(error) => warn!("rebinding failed: {error}"),
     }
     commands.remove_resource::<crate::settings::BindingCapture>();
+    rejection.0 = None;
     save.write(crate::settings::SaveSettingsRequest);
 }
 
@@ -880,7 +1095,7 @@ fn refresh_focus_visuals(
     page: Option<Res<ActivePage>>,
     character_select: Option<Res<ActiveCharacterSelect>>,
     mut rows: Query<(&PageItemNode, &mut BackgroundColor, &Children)>,
-    mut text_colors: Query<&mut TextColor>,
+    mut text_colors: Query<(&mut TextColor, Has<SettingValueText>)>,
 ) {
     let Some(page) = page else {
         return;
@@ -899,7 +1114,11 @@ fn refresh_focus_visuals(
             (true, false) => CHIP,
         };
         for child in children.iter() {
-            if let Ok(mut color) = text_colors.get_mut(child) {
+            // The value column carries its own accent colour to separate the
+            // setting's name from what it is set to; focus does not own it.
+            if let Ok((mut color, is_value)) = text_colors.get_mut(child)
+                && !is_value
+            {
                 color.0 = if enabled { TEXT } else { TEXT_DISABLED };
             }
         }

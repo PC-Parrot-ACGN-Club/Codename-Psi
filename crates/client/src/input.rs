@@ -291,27 +291,26 @@ const FIXED_DPAD_DIRECTIONS: [(GamepadButton, FixedDirection); 4] = [
     (GamepadButton::DPadDown, FixedDirection::Down),
 ];
 
-/// Fixed keyboard confirm/back keys for a local player slot.
+/// The rules action whose binding a menu action borrows.
+///
+/// `Confirm` and `Back` have no binding of their own: they are the menu
+/// meanings of the two rotation keys, exactly as `Left`/`Right` are the menu
+/// meanings of the fixed horizontal directions. One key therefore carries one
+/// meaning per context, and the settings page lists it once.
+///
+/// Rotating counter-clockwise confirms and rotating clockwise goes back, so a
+/// player who has learned to rotate has already learned to navigate.
 #[must_use]
-pub fn fixed_keyboard_menu_keys(player: usize) -> Option<[(KeyCode, UIAction); 2]> {
-    match player {
-        0 => Some([
-            (KeyCode::Space, UIAction::Confirm),
-            (KeyCode::ShiftLeft, UIAction::Back),
-        ]),
-        1 => Some([
-            (KeyCode::Enter, UIAction::Confirm),
-            (KeyCode::ShiftRight, UIAction::Back),
-        ]),
-        _ => None,
+pub const fn ui_action_source(action: UIAction) -> Option<GameAction> {
+    match action {
+        UIAction::Confirm => Some(GameAction::RotateCounterClockwise),
+        UIAction::Back => Some(GameAction::RotateClockwise),
+        UIAction::Left | UIAction::Right | UIAction::Up | UIAction::Down => None,
     }
 }
 
-/// Fixed gamepad confirm/back buttons, shared by every local player.
-const FIXED_GAMEPAD_MENU_BUTTONS: [(GamepadButton, UIAction); 2] = [
-    (GamepadButton::South, UIAction::Confirm),
-    (GamepadButton::East, UIAction::Back),
-];
+/// The menu actions that borrow a configurable binding, in legend order.
+pub const BOUND_UI_ACTIONS: [UIAction; 2] = [UIAction::Confirm, UIAction::Back];
 
 /// A UI action produced by a local player in a menu context.
 #[derive(Message, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -500,6 +499,7 @@ pub fn emit_ui_actions(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<(Entity, &Gamepad)>,
     slots: Res<GamepadSlots>,
+    settings: Res<UserSettings>,
     mut state: ResMut<UiInputState>,
     mut writer: MessageWriter<UIActionEvent>,
 ) {
@@ -521,9 +521,29 @@ pub fn emit_ui_actions(
                 emit(source, action, keyboard.pressed(code));
             }
         }
-        for (code, action) in fixed_keyboard_menu_keys(player).into_iter().flatten() {
-            let source = PhysicalInput::keyboard(format!("{code:?}"));
-            emit(source, action, keyboard.pressed(code));
+
+        // Confirm and back are read off the player's own rotation bindings, so
+        // a rebinding moves the menu key with the rules key. Both device
+        // categories are walked here rather than under the pad branch below,
+        // because a player's keyboard binding must work whether or not they
+        // also hold a pad.
+        if let Some(bindings) = settings.players.get(player) {
+            for action in BOUND_UI_ACTIONS {
+                let Some(source_action) = ui_action_source(action) else {
+                    continue;
+                };
+                for input in bindings.bindings.get(&source_action).into_iter().flatten() {
+                    let held = match input {
+                        PhysicalInput::Keyboard(name) => {
+                            keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
+                        }
+                        PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
+                            .zip(pad)
+                            .is_some_and(|(button, pad)| pad.pressed(button)),
+                    };
+                    emit(input.clone(), action, held);
+                }
+            }
         }
 
         let Some(pad) = pad else { continue };
@@ -535,10 +555,6 @@ pub fn emit_ui_actions(
                 let source = PhysicalInput::gamepad(format!("{button:?}"));
                 emit(source, action, pad.pressed(button));
             }
-        }
-        for (button, action) in FIXED_GAMEPAD_MENU_BUTTONS {
-            let source = PhysicalInput::gamepad(format!("{button:?}"));
-            emit(source, action, pad.pressed(button));
         }
 
         let stick = pad.left_stick();
@@ -619,6 +635,14 @@ impl PhysicalInput {
         match self {
             Self::Keyboard(_) => DeviceCategory::Keyboard,
             Self::Gamepad(_) => DeviceCategory::Gamepad,
+        }
+    }
+
+    /// The persisted input name, without its device category.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Keyboard(name) | Self::Gamepad(name) => name,
         }
     }
 }
