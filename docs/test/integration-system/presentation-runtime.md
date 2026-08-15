@@ -38,6 +38,7 @@
 
 - 多种表现配置下相同输入得到相同校验和与赛果（TC-009；Concern: Determinism）。
 - 无正式美术、无音频设备、无手柄时仍可用键盘完成对局（TC-010；Concern: Smoke）。
+- 球体线索按色觉辅助设置分档，NEXT 预览与棋盘使用同一套线索（TC-011）。
 
 ## 设计方法与覆盖模型
 
@@ -46,6 +47,7 @@
 | 场景 / 协作路径 | 三种规则阶段的重建与跨状态的实体存活 | TC-001、TC-003 |
 | 边界值 | 渲染落后一个阶段与落后多个阶段；窗口比例边界 | TC-002、TC-004 |
 | 等价类划分 | 音频设备可用/不可用；手柄有/无 | TC-005～TC-006 |
+| 判定表 | 色觉辅助开/关 × 普通球/垃圾球/空格；四种手牌形状 | TC-011 |
 | 压力场景 | 大量垃圾与高连锁同时发生 | TC-007 |
 | 对比测试 | 表现配置矩阵下的同一输入日志 | TC-008～TC-009 |
 | 错误猜测 | 全部可选资源与设备同时缺失 | TC-010 |
@@ -64,6 +66,7 @@
 | TC-008 | 角色表现数据不进入开局规格摘要 | P1 | Component Integration | Determinism | Configuration；Client | 可提供两份不同的角色表现数据 | 用同一 `MatchRequest` 分别在两份表现数据下完成冻结 | 两份数据仅配色、徽章与音频键不同；规则数据完全相同 | 两次冻结得到的 `LockedMatchSpec` 摘要相同；以同一输入日志推进得到相同的状态校验和与赛果 | [Confirmed] [角色表现数据：数据模型](../../development/design/character-presentation.md#数据模型)；[规则配置与开局规格冻结](../../development/design/rule-configuration.md) |
 | TC-009 | 多种表现配置下相同输入得到相同校验和与赛果 | P0 | System | Determinism | Client；Rules | 已装配客户端，可回放固定输入日志 | 在表现配置矩阵下分别回放同一输入日志至比赛结束 | `AnimationIntensity` 取 `Full` 与 `Reduced`；`vibration` 取开与关；音频设备可用与不可用；表现更新频率取正常与人为降低 | 全部组合的逐 tick 状态校验和序列相同；小局结果、分数、垃圾数量、Fever 状态与最终赛果相同；`match_tick` 总数相同 | [Confirmed] [表现运行时：动画强度](../../development/design/presentation-runtime.md#动画强度)；[PRD §8](../../PRD.md)；[表现与 UI 设计 §6.1](../../presentation.md) |
 | TC-010 | 无美术、无音频设备、无手柄时仍可用键盘完成对局 | P0 | System | Smoke | Client；Match Flow | 已装配客户端；角色表现数据 `Failed`；音频输出不可用；未连接手柄 | 只用键盘从主菜单完成一局 BO3 | 表现数据 `Failed(Parse)`；无音频设备；无手柄 | 流程可走完并到达赛果；角色使用替补配色与徽章且两侧可区分；棋盘、NEXT、两条队列、Fever 面板与比分保持可读；各降级项各自保留诊断；规则结论与全部资源可用时的同输入结果一致 | [Confirmed] [PRD §5.3](../../PRD.md)；[角色表现数据：查询](../../development/design/character-presentation.md#查询)；[表现运行时：音频与震动](../../development/design/presentation-runtime.md#音频与震动) |
+| TC-011 | 球体线索按色觉辅助分档，NEXT 预览携带手牌的形状与颜色 | P1 | Component | — | Client | 可查询球体线索与 NEXT 预览格的取值 | 参数化取各类占据者在设置开与关下的线索；再参数化取四种手牌形状每个偏移位的预览内容 | 普通球五种颜色 id；垃圾球；空格；`color assist` 取开与关；`I`、`L`、`J`、`ODual`、`OMono` 手牌 | 关闭时普通球无球内符号，开启时五种颜色各得一个互不相同的符号；垃圾球的标记不随设置变化；空格始终无符号；每种手牌的预览在组占据的偏移位给出该位对应的抽取颜色、在未占据的偏移位为空，`L` 与 `J` 的横臂分列两侧，单色手牌不出现第二种抽取颜色 | [Confirmed] [表现运行时：球体线索](../../development/design/presentation-runtime.md#球体线索)；[表现与 UI 设计 §4.1、§4.2、§7](../../presentation.md) |
 
 ## 风险查漏
 

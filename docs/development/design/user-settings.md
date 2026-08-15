@@ -15,7 +15,7 @@
 | settings path | 平台标准应用配置目录中的文件 | 通过平台目录能力解析 |
 | `PlayerInputBindings` | P1/P2 的键盘与手柄绑定 | 两名玩家独立保存 |
 
-设置字段至少覆盖：language、window mode、master volume、sfx volume、P1 keyboard mapping、P2 keyboard mapping、P1/P2 gamepad mapping、vibration、animation intensity。
+设置字段至少覆盖：language、window mode、master volume、sfx volume、P1 keyboard mapping、P2 keyboard mapping、P1/P2 gamepad mapping、vibration、animation intensity、color assist。
 
 `PlayerInputBindings` 只保存可配置绑定。
 
@@ -26,7 +26,7 @@ enum AnimationIntensity {
 }
 ```
 
-`AnimationIntensity` 的表现语义见[表现运行时：动画强度](presentation-runtime.md#动画强度)。
+`AnimationIntensity` 的表现语义见[表现运行时：动画强度](presentation-runtime.md#动画强度)。color assist 的表现语义见[表现与 UI 设计 §4.1](../../presentation.md)：关闭时普通球只有纯色，开启时每种颜色获得互不相同的球内符号。它只改变球体线索，不改变任何规则时序。
 
 ## 默认值
 
@@ -40,6 +40,7 @@ enum AnimationIntensity {
 | sfx volume | `1.0` |
 | vibration | `true` |
 | animation intensity | `Full` |
+| color assist | `false` |
 
 ### 默认输入绑定
 
@@ -134,7 +135,7 @@ South / East    Gameplay: RotateCCW / RotateCW        Menu: Confirm / Back
 | window mode | 客户端窗口 | 立即 |
 | master volume、sfx volume | 客户端音频输出 | 立即 |
 | `PlayerInputBindings` | [本地输入采样](local-input-sampling.md) | 立即 |
-| vibration、animation intensity | [表现运行时](presentation-runtime.md) | 立即 |
+| vibration、animation intensity、color assist | [表现运行时](presentation-runtime.md) | 立即 |
 
 全部设置在玩家确认修改后立即生效，不需要重启，也不需要离开设置页。持久化与生效相互独立：写盘失败不回退已经生效的内存值。
 
