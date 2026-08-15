@@ -474,3 +474,80 @@ fn the_density_setting_decides_how_many_marks_a_clear_leaves() {
         "the two settings differ in the parameter the marks are spent from"
     );
 }
+
+// component/presentation-snapshot::TC-011
+#[test]
+fn a_portraits_pose_follows_the_facts_in_a_fixed_priority() {
+    use client::character_presentation::PoseKind;
+    use client::presentation::portrait_pose;
+    use game_core::match_state::{MatchOutcome, RoundOutcome};
+
+    let state = presentation_common::state(7);
+    let spec = state.spec().clone();
+    let view = state.view();
+    let base = build_snapshot(Some(&view), None, &spec, AnimationIntensity::Full)
+        .expect("a match produces a snapshot");
+    let quiet = FeedbackLines::default();
+
+    // Nothing happening: an empty queue idles, a filled one defends.
+    assert_eq!(portrait_pose(&base, &quiet, 0), PoseKind::Idle);
+    let mut pressed = base.clone();
+    pressed.players[0].pending_garbage = 12;
+    assert_eq!(portrait_pose(&pressed, &quiet, 0), PoseKind::Defending);
+    pressed.players[0].overflow_risk = true;
+    assert_eq!(
+        portrait_pose(&pressed, &quiet, 0),
+        PoseKind::Strained,
+        "being about to lose outranks merely being under pressure"
+    );
+
+    // What just left the board outranks pressure.
+    let mut lines = FeedbackLines::default();
+    lines.observe(&report(
+        base.match_tick,
+        vec![
+            MatchEvent::AttackArbitrated {
+                slot: 0,
+                offset: 0,
+                sent: 9,
+            },
+            MatchEvent::AttackArbitrated {
+                slot: 1,
+                offset: 4,
+                sent: 0,
+            },
+        ],
+    ));
+    assert_eq!(portrait_pose(&pressed, &lines, 0), PoseKind::Attacking);
+    assert_eq!(portrait_pose(&pressed, &lines, 1), PoseKind::Offsetting);
+
+    // Fever outranks what just left the board.
+    let mut fevered = pressed.clone();
+    fevered.players[0].fever_state = true;
+    assert_eq!(portrait_pose(&fevered, &lines, 0), PoseKind::Fever);
+
+    // A decided round or match outranks everything, on both sides at once.
+    let mut decided = fevered.clone();
+    decided.phase = MatchPhase::RoundOutro {
+        outcome: RoundOutcome::Decided(1),
+        remaining_ticks: 30,
+    };
+    assert_eq!(portrait_pose(&decided, &lines, 0), PoseKind::Losing);
+    assert_eq!(portrait_pose(&decided, &lines, 1), PoseKind::Winning);
+
+    let mut drawn = decided.clone();
+    drawn.phase = MatchPhase::RoundOutro {
+        outcome: RoundOutcome::Draw,
+        remaining_ticks: 30,
+    };
+    assert_eq!(
+        portrait_pose(&drawn, &lines, 0),
+        PoseKind::Fever,
+        "a draw names no winner, so the pose falls through to the next fact"
+    );
+
+    let mut over = decided;
+    over.phase = MatchPhase::Completed(MatchOutcome { winner: 0 });
+    assert_eq!(portrait_pose(&over, &lines, 0), PoseKind::Winning);
+    assert_eq!(portrait_pose(&over, &lines, 1), PoseKind::Losing);
+}

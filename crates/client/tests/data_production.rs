@@ -177,3 +177,62 @@ fn a_blocking_failure_stops_the_match_while_a_character_failure_only_narrows_sel
     assert!(error.path.ends_with("fever.ron"));
     assert!(matches!(error.cause, DataErrorCause::Io(_)));
 }
+
+/// Pump frames until the plugin publishes the presentation resolution.
+fn run_until_presentation_resolved(app: &mut App) {
+    for _ in 0..2000 {
+        app.update();
+        if app
+            .world()
+            .get_resource::<client::data::CharacterPresentationData>()
+            .is_some()
+        {
+            return;
+        }
+    }
+    panic!("the presentation load never resolved");
+}
+
+// integration-system/runtime-data::TC-003
+#[test]
+fn the_root_plugin_publishes_the_character_presentation_catalog() {
+    let mut app = controlled_app();
+    run_until_presentation_resolved(&mut app);
+
+    let data = app
+        .world()
+        .resource::<client::data::CharacterPresentationData>();
+    let catalog = data
+        .0
+        .loaded()
+        .expect("the repository's own presentation file must load cleanly");
+    for id in ["psi-a", "psi-b"] {
+        let entry = catalog
+            .get(&game_core::config::CharacterId(id.into()))
+            .unwrap_or_else(|| panic!("{id} is in the catalog"));
+        assert_eq!(
+            entry.poses.len(),
+            client::character_presentation::POSES.len(),
+            "{id} carries every pose the portraits can ask for"
+        );
+        assert!(!entry.badge.glyph.is_empty());
+    }
+}
+
+// integration-system/runtime-data::TC-003
+#[test]
+fn a_missing_presentation_file_degrades_instead_of_blocking() {
+    let root = tempfile::tempdir().expect("a temporary asset root");
+    let mut app = controlled_app_with_asset_root(root.path().to_string_lossy().to_string());
+    run_until_presentation_resolved(&mut app);
+
+    let data = app
+        .world()
+        .resource::<client::data::CharacterPresentationData>();
+    let error = data
+        .0
+        .error()
+        .expect("a missing file must resolve as a failure, not as a clean load");
+    assert_eq!(error.category, DataCategory::Presentation);
+    assert!(matches!(error.cause, DataErrorCause::Io(_)));
+}

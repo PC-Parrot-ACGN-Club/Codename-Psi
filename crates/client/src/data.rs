@@ -18,6 +18,7 @@ use game_core::config::{
     parse_rule_profile,
 };
 
+use crate::character_presentation::CharacterPresentationCatalog;
 use crate::i18n::CatalogError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +29,8 @@ use crate::i18n::CatalogError;
 pub enum DataCategory {
     Rules,
     Localization,
+    /// Client-side character colours, badges, poses and audio keys.
+    Presentation,
     Other,
 }
 
@@ -154,6 +157,9 @@ pub const RULES_PLAY_PATHS: [&str; 2] = [
     "data/rules/play/fever-r1/psi-a.ron",
     "data/rules/play/fever-r1/psi-b.ron",
 ];
+
+/// Where the client-side character presentation data lives under `assets/`.
+pub const PRESENTATION_CHARACTERS_PATH: &str = "data/presentation/characters.ron";
 
 /// Every rules path, profile first, then roster, puzzle book and plays.
 #[must_use]
@@ -331,6 +337,85 @@ pub fn build_library(
     Ok(library)
 }
 
+/// A presentation read in flight; removed once the resolution is published.
+#[derive(Debug, Resource)]
+pub struct PresentationLoad {
+    handle: Handle<SourceText>,
+    waited: Duration,
+}
+
+/// The resolved character presentation catalog.
+///
+/// Degradable scope: a failure blocks nothing and narrows nothing. Characters
+/// stay selectable and matches stay playable; they only lose the colours,
+/// badges and poses that tell them apart, and the resolver hands out its
+/// per-slot substitute instead.
+#[derive(Debug, Resource)]
+pub struct CharacterPresentationData(pub DataResolution<CharacterPresentationCatalog>);
+
+/// Ask Bevy Asset for the character presentation document.
+pub fn start_presentation_load(asset_server: Res<AssetServer>, mut commands: Commands) {
+    commands.insert_resource(PresentationLoad {
+        handle: asset_server.load::<SourceText>(PRESENTATION_CHARACTERS_PATH),
+        waited: Duration::ZERO,
+    });
+}
+
+/// Publish the presentation resolution once the read and the roster settle.
+///
+/// The roster is what the catalog is validated against, so this waits for the
+/// rules resolution as well. Rules that failed leave nothing to validate
+/// against, and the catalog resolves to that same failure's substitute.
+pub fn poll_presentation(
+    time: Res<Time<Real>>,
+    asset_server: Res<AssetServer>,
+    sources: Res<Assets<SourceText>>,
+    rules: Option<Res<RulesData>>,
+    mut load: ResMut<PresentationLoad>,
+    mut commands: Commands,
+) {
+    load.waited += time.delta();
+    let timed_out = load.waited >= DATA_LOAD_TIMEOUT;
+    let Some(rules) = rules else {
+        return;
+    };
+
+    let source = match asset_server.load_state(&load.handle) {
+        LoadState::Loaded => sources
+            .get(&load.handle)
+            .map(|text| Ok(text.0.as_str()))
+            .unwrap_or(Err(DataErrorCause::Io("asset dropped after load".into()))),
+        LoadState::Failed(error) => Err(DataErrorCause::Io(error.to_string())),
+        _ if timed_out => Err(DataErrorCause::Io(format!(
+            "timed out after {}s",
+            DATA_LOAD_TIMEOUT.as_secs()
+        ))),
+        _ => return,
+    };
+
+    let resolution = match rules.rules() {
+        Some(library) => {
+            let roster = library.roster().clone();
+            resolve_source(
+                PRESENTATION_CHARACTERS_PATH,
+                DataCategory::Presentation,
+                source,
+                |text| crate::character_presentation::parse_character_presentations(text, &roster),
+            )
+        }
+        None => DataResolution::Failed(DataLoadError {
+            path: PRESENTATION_CHARACTERS_PATH.into(),
+            category: DataCategory::Presentation,
+            cause: DataErrorCause::Io("rules unavailable, so nothing to validate against".into()),
+        }),
+    };
+    if let DataResolution::Failed(error) = &resolution {
+        warn!("character presentation falls back to substitutes: {error:?}");
+    }
+    commands.insert_resource(CharacterPresentationData(resolution));
+    commands.remove_resource::<PresentationLoad>();
+}
+
 /// Registers the project's asset reading path and data load lifecycle.
 #[derive(Debug, Default)]
 pub struct DataPlugin;
@@ -339,8 +424,14 @@ impl Plugin for DataPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<SourceText>()
             .register_asset_loader(SourceTextLoader)
-            .add_systems(Startup, start_rules_load)
-            .add_systems(Update, poll_rules.run_if(resource_exists::<RulesLoad>));
+            .add_systems(Startup, (start_rules_load, start_presentation_load))
+            .add_systems(
+                Update,
+                (
+                    poll_rules.run_if(resource_exists::<RulesLoad>),
+                    poll_presentation.run_if(resource_exists::<PresentationLoad>),
+                ),
+            );
     }
 }
 

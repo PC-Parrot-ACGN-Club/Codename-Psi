@@ -148,6 +148,53 @@ pub fn build_snapshot(
     })
 }
 
+/// The pose a participant's portrait holds this frame.
+///
+/// One pose per participant per frame, chosen from facts the snapshot already
+/// carries plus the line the last few ticks left. The order below is the
+/// priority: a decided match outranks Fever, Fever outranks what just left the
+/// board, and pressure is what shows when nothing else is happening.
+#[must_use]
+pub fn portrait_pose(
+    snapshot: &MatchPresentationSnapshot,
+    lines: &FeedbackLines,
+    slot: usize,
+) -> crate::character_presentation::PoseKind {
+    use crate::character_presentation::PoseKind;
+
+    let player = &snapshot.players[slot];
+    let decided = match snapshot.phase {
+        MatchPhase::Completed(outcome) => Some(outcome.winner == slot),
+        MatchPhase::RoundOutro { outcome, .. } => match outcome {
+            game_core::match_state::RoundOutcome::Decided(winner) => Some(winner == slot),
+            game_core::match_state::RoundOutcome::Draw => None,
+        },
+        _ => None,
+    };
+    if let Some(won) = decided {
+        return if won {
+            PoseKind::Winning
+        } else {
+            PoseKind::Losing
+        };
+    }
+    if player.fever_state {
+        return PoseKind::Fever;
+    }
+    match lines.line(slot, snapshot.match_tick) {
+        Some(FeedbackLine::Attack(_) | FeedbackLine::AllClear) => return PoseKind::Attacking,
+        Some(FeedbackLine::Offset(_)) => return PoseKind::Offsetting,
+        None => {}
+    }
+    if player.overflow_risk {
+        return PoseKind::Strained;
+    }
+    if player.pending_garbage + player.fever_garbage > 0 {
+        return PoseKind::Defending;
+    }
+    PoseKind::Idle
+}
+
 /// Icon units a nuisance queue is read in, heaviest first.
 ///
 /// A greedy walk therefore spends the heaviest symbols first, and a queue too

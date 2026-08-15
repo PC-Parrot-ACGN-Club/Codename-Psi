@@ -183,3 +183,76 @@ fn a_clear_leaves_marks_that_expire_on_their_own() {
         "marks outlived their own life instead of expiring"
     );
 }
+
+// integration-system/presentation-runtime::TC-014
+#[test]
+fn both_portraits_are_drawn_from_the_catalogs_own_colours_and_badges() {
+    let mut app = ui_app();
+    app.insert_resource(client::match_flow::FrozenMatch(presentation_common::spec(
+        3,
+    )));
+    advance_to(&mut app, AppState::Match);
+
+    // The catalog is degradable data, so it settles on its own schedule.
+    for _ in 0..2000 {
+        app.update();
+        if app
+            .world()
+            .get_resource::<client::data::CharacterPresentationData>()
+            .is_some()
+        {
+            break;
+        }
+    }
+    let catalog = app
+        .world()
+        .resource::<client::data::CharacterPresentationData>()
+        .0
+        .loaded()
+        .expect("the repository's presentation data loads")
+        .clone();
+    app.update();
+
+    let mut badges: Vec<String> = app
+        .world_mut()
+        .query::<(&Text, &TextColor)>()
+        .iter(app.world())
+        .map(|(text, _)| text.0.clone())
+        .collect();
+    badges.sort();
+    for id in ["psi-a", "psi-b"] {
+        let entry = catalog
+            .get(&game_core::config::CharacterId(id.into()))
+            .expect("the character is in the catalog");
+        assert!(
+            badges.contains(&entry.badge.glyph),
+            "{id}'s badge {:?} is not on screen: {badges:?}",
+            entry.badge.glyph
+        );
+    }
+
+    // The portrait circles carry the characters' own border colours, which is
+    // what tells a substitute apart from the real thing.
+    let expected: Vec<Color> = ["psi-a", "psi-b"]
+        .into_iter()
+        .map(|id| {
+            let color = catalog
+                .get(&game_core::config::CharacterId(id.into()))
+                .expect("the character is in the catalog")
+                .primary_color;
+            Color::srgb_u8(color.r, color.g, color.b)
+        })
+        .collect();
+    let borders: Vec<BorderColor> = app
+        .world_mut()
+        .query::<&BorderColor>()
+        .iter(app.world())
+        .copied()
+        .collect();
+    for color in expected {
+        assert!(
+            borders.contains(&BorderColor::all(color)),
+            "no portrait is drawn with {color:?}"
+        );
+    }
+}

@@ -25,7 +25,7 @@
 
 - 有效与四类失败资源形成带上下文的 resolution（TC-001；Concern: Content Validation）。
 - 平台配置目录中的原子保存、恢复与 replace 失败语义（TC-002）。
-- 项目根插件装配后消费者取得 resolved typed data（TC-003；Concern: Smoke）。
+- 项目根插件装配后消费者取得 resolved typed data，降级级的角色表现目录缺失时不阻塞（TC-003；Concern: Smoke）。
 - 设置修改在同一运行实例内于各消费者立即生效（TC-004）。
 
 ## 设计方法与覆盖模型

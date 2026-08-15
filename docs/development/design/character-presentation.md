@@ -43,7 +43,7 @@
 
 | 数据或消息 | 生产方 | 消费方 | 语义与约束 |
 | --- | --- | --- | --- |
-| 角色表现目录 | `client::data` | [表现运行时](presentation-runtime.md) | 降级级数据，缺失时使用替补 |
+| 角色表现目录 | `client::data` | [表现运行时：圆框角色与中央轨道](presentation-runtime.md#圆框角色与中央轨道) | 降级级数据，缺失时使用替补；校验需要 roster，因此在规则解析之后发布 |
 | `character_id` | [开局规格冻结](rule-configuration.md) | 本主题 | 一场对局内不变 |
 | 音频键 | 本主题 | [表现运行时：音频与震动](presentation-runtime.md#音频与震动) | R1 无对应音频资源 |
 

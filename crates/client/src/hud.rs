@@ -104,8 +104,57 @@ impl Plugin for HudPlugin {
             return;
         }
         app.init_resource::<MatchFeedback>()
-            .add_systems(Update, (spawn_hud, release_hud, refresh_hud).chain());
+            .add_systems(Update, (spawn_hud, release_hud, refresh_hud).chain())
+            .add_systems(Update, refresh_portraits.after(refresh_hud));
     }
+}
+
+/// The character presentation each side is drawn with.
+///
+/// Resolved once per match instance rather than once per frame: resolving is
+/// what records the one diagnostic a missing catalog is allowed to produce, and
+/// a per-frame resolve would repeat it sixty times a second.
+struct MatchPortraits {
+    resolved: [Option<crate::character_presentation::ResolvedCharacterPresentation>; 2],
+    instance: Option<MatchInstanceId>,
+}
+
+/// Everything the portraits read.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PortraitInputs<'w> {
+    simulation: Option<Res<'w, RulesSimulation>>,
+    report: Res<'w, LatestStepReport>,
+    settings: Res<'w, UserSettings>,
+    catalog: Option<Res<'w, crate::data::CharacterPresentationData>>,
+    rules: Option<Res<'w, crate::data::RulesData>>,
+    feedback: Res<'w, MatchFeedback>,
+    instance: Option<Res<'w, MatchInstanceId>>,
+}
+
+/// Everything the portraits write.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PortraitEntities<'w, 's> {
+    circles: Query<
+        'w,
+        's,
+        (
+            &'static Portrait,
+            &'static mut BorderColor,
+            &'static mut BackgroundColor,
+            &'static mut UiTransform,
+        ),
+        Without<TrackMarker>,
+    >,
+    badges: Query<
+        'w,
+        's,
+        (
+            &'static PortraitBadge,
+            &'static mut Text,
+            &'static mut TextColor,
+        ),
+    >,
+    markers: Query<'w, 's, &'static mut UiTransform, (With<TrackMarker>, Without<Portrait>)>,
 }
 
 /// What each side is currently being told about the last few ticks.
@@ -156,6 +205,26 @@ struct QueueIcon {
     index: usize,
 }
 
+/// One participant's portrait circle.
+#[derive(Debug, Component)]
+struct Portrait(usize);
+
+/// The badge glyph inside a portrait.
+#[derive(Debug, Component)]
+struct PortraitBadge(usize);
+
+/// The marker that leans toward whoever is ahead.
+#[derive(Debug, Component)]
+struct TrackMarker;
+
+/// Diameter of a portrait circle, close to the first NEXT hand's height so the
+/// characters read clearly without taking room from the boards.
+const PORTRAIT_SIZE: f32 = 108.0;
+/// Width of the track between the two portraits.
+const TRACK_WIDTH: f32 = 320.0;
+/// How far a portrait may lean, in virtual-canvas pixels.
+const PORTRAIT_LEAN: f32 = 28.0;
+
 /// A HUD text whose content is written from the snapshot.
 #[derive(Debug, Component)]
 enum HudText {
@@ -167,6 +236,7 @@ enum HudText {
     FeverTarget(usize),
     Chain(usize),
     Feedback(usize),
+    Track,
     Character(usize),
     Scoreline,
     Phase,
@@ -384,6 +454,140 @@ fn refresh_hud(
             text.0 = value;
         }
     }
+}
+
+/// Pose, colour and lean for both portraits, and the track marker with them.
+///
+/// Split from the main refresh because it needs the character catalog and the
+/// two portrait entities, and because a portrait is the one part of the HUD
+/// that is allowed to be missing: with no catalog the resolver hands out a
+/// substitute rather than leaving the circle blank.
+fn refresh_portraits(
+    inputs: PortraitInputs,
+    mut portraits: Local<Option<MatchPortraits>>,
+    mut entities: PortraitEntities,
+) {
+    use crate::character_presentation::{
+        CharacterPresentationResolver, ResolvedCharacterPresentation,
+    };
+
+    let Some(simulation) = inputs.simulation.as_ref() else {
+        return;
+    };
+    let Some(instance) = inputs.instance.as_ref() else {
+        return;
+    };
+    let instance = **instance;
+    let view = simulation.0.view();
+    let Some(snapshot) = build_snapshot(
+        Some(&view),
+        inputs.report.0.as_ref(),
+        simulation.0.spec(),
+        inputs.settings.animation_intensity,
+    ) else {
+        return;
+    };
+
+    // A new instance may have new characters, so the resolution is redone once
+    // per instance rather than once per frame.
+    if portraits
+        .as_ref()
+        .is_none_or(|held| held.instance != Some(instance))
+    {
+        let resolution = inputs.catalog.as_ref().map_or(
+            crate::data::DataResolution::Failed(crate::data::DataLoadError {
+                path: crate::data::PRESENTATION_CHARACTERS_PATH.into(),
+                category: crate::data::DataCategory::Presentation,
+                cause: crate::data::DataErrorCause::Io("catalog not read yet".into()),
+            }),
+            |data| data.0.clone(),
+        );
+        let mut resolver = CharacterPresentationResolver::new(resolution);
+        let roster = inputs.rules.as_ref().and_then(|rules| rules.rules());
+        let resolved: [Option<ResolvedCharacterPresentation>; 2] = std::array::from_fn(|slot| {
+            let id = simulation.0.spec().characters.get(slot)?.clone();
+            // The roster is where a character's display name lives, and the
+            // substitute badge is cut from it. Without a roster the id stands
+            // in, which is still stable and still tells the two sides apart.
+            let identity = roster
+                .and_then(|library| {
+                    library
+                        .roster()
+                        .characters
+                        .iter()
+                        .find(|identity| identity.id == id)
+                        .cloned()
+                })
+                .unwrap_or_else(|| game_core::config::CharacterIdentity {
+                    display_name_key: id.0.clone(),
+                    id: id.clone(),
+                });
+            Some(resolver.resolve(&identity, slot))
+        });
+        for diagnostic in resolver.diagnostics() {
+            warn!(
+                "character {} drawn with a substitute: {}",
+                diagnostic.character_id.0, diagnostic.reason
+            );
+        }
+        *portraits = Some(MatchPortraits {
+            resolved,
+            instance: Some(instance),
+        });
+    }
+    let Some(held) = portraits.as_ref() else {
+        return;
+    };
+
+    for (portrait, mut border, mut fill, mut transform) in &mut entities.circles {
+        let Some(resolved) = held.resolved[portrait.0].as_ref() else {
+            continue;
+        };
+        let pose_kind =
+            crate::presentation::portrait_pose(&snapshot, &inputs.feedback.0, portrait.0);
+        let pose = resolved
+            .data
+            .poses
+            .get(&pose_kind)
+            .copied()
+            .unwrap_or_default();
+
+        *border = BorderColor::all(rgb(resolved.data.primary_color));
+        fill.0 = rgb(resolved.data.secondary_color);
+        // Positive offsets lean toward the track, which is to the right for the
+        // left-hand portrait and to the left for the right-hand one.
+        let toward_centre = if portrait.0 == 0 { 1.0 } else { -1.0 };
+        let lean = f32::from(pose.offset) / 24.0 * PORTRAIT_LEAN * toward_centre;
+        *transform = UiTransform::IDENTITY;
+        transform.translation.x = px(lean);
+        transform.scale = Vec2::splat(f32::from(pose.scale) / 100.0);
+    }
+
+    for (badge, mut text, mut color) in &mut entities.badges {
+        let Some(resolved) = held.resolved[badge.0].as_ref() else {
+            continue;
+        };
+        if text.0 != resolved.data.badge.glyph {
+            text.0.clone_from(&resolved.data.badge.glyph);
+        }
+        color.0 = rgb(resolved.data.primary_color);
+    }
+
+    // The marker sits at the middle when neither side is ahead and slides one
+    // notch toward whoever is.
+    let notch = match snapshot.momentum.advantage_side {
+        Some(0) => TRACK_WIDTH / 4.0,
+        Some(_) => -TRACK_WIDTH / 4.0,
+        None => 0.0,
+    };
+    for mut transform in &mut entities.markers {
+        transform.translation.x = px(notch);
+    }
+}
+
+/// The colour one presentation entry names.
+fn rgb(color: crate::character_presentation::RgbColor) -> Color {
+    Color::srgb_u8(color.r, color.g, color.b)
 }
 
 /// What a hand puts at one offset from its pivot, if anything.
@@ -622,6 +826,11 @@ fn hud_value(
         HudText::Feedback(slot) => feedback
             .line(slot, snapshot.match_tick)
             .map_or_else(String::new, |line| line.text(localization)),
+        // The track says the same thing for whichever side last said anything,
+        // so one glance at the middle covers both boards.
+        HudText::Track => (0..2)
+            .find_map(|slot| feedback.line(slot, snapshot.match_tick))
+            .map_or_else(String::new, |line| line.text(localization)),
         HudText::Character(slot) => player(slot).drop_set_id.0.clone(),
         HudText::Scoreline => format!(
             "ROUND {} · BO3 · {} : {}",
@@ -735,15 +944,16 @@ fn build_hud(commands: &mut Commands, instance: MatchInstanceId, font: &Handle<F
             BackgroundColor(Color::NONE),
         ))
         .id();
-    let p1_name = value_text(commands, font, 30.0, HudText::Character(0));
+    let p1 = portrait(commands, font, 0);
     let centre = column(commands, 4.0);
     let scoreline = value_text(commands, font, 34.0, HudText::Scoreline);
     let phase = value_text(commands, font, 28.0, HudText::Phase);
-    commands.entity(centre).add_children(&[scoreline, phase]);
-    let p2_name = value_text(commands, font, 30.0, HudText::Character(1));
+    let track = collision_track(commands, font);
     commands
-        .entity(top)
-        .add_children(&[p1_name, centre, p2_name]);
+        .entity(centre)
+        .add_children(&[scoreline, phase, track]);
+    let p2 = portrait(commands, font, 1);
+    commands.entity(top).add_children(&[p1, centre, p2]);
     commands.entity(root).add_child(top);
 
     // The boards sit hard against the left and right edges, with the shared
@@ -791,6 +1001,85 @@ fn build_hud(commands: &mut Commands, instance: MatchInstanceId, font: &Handle<F
     commands
         .entity(main)
         .add_children(&[p1_side, p1_mid, p2_mid, p2_side]);
+}
+
+/// One participant's circular portrait, with its name under it.
+///
+/// The circle carries the character's own colours and badge; its offset and
+/// scale come from the pose the rules facts pick, so the two portraits lean
+/// into and away from the track between them.
+fn portrait(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
+    let column = column(commands, 6.0);
+    let circle = commands
+        .spawn((
+            Portrait(slot),
+            Node {
+                width: px(PORTRAIT_SIZE),
+                height: px(PORTRAIT_SIZE),
+                border: UiRect::all(px(5)),
+                border_radius: BorderRadius::all(px(PORTRAIT_SIZE / 2.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BorderColor::all(TEXT),
+            BackgroundColor(PANEL),
+        ))
+        .id();
+    let badge = commands
+        .spawn((
+            PortraitBadge(slot),
+            Text::new(String::new()),
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(44.0),
+                ..default()
+            },
+            TextColor(TEXT),
+        ))
+        .id();
+    commands.entity(circle).add_child(badge);
+    let name = value_text(commands, font, 26.0, HudText::Character(slot));
+    commands.entity(column).add_children(&[circle, name]);
+    column
+}
+
+/// The track between the two portraits.
+///
+/// It carries the words -- what the last chain sent, what it cancelled -- and a
+/// marker that leans toward whoever is ahead. The words are the point: the
+/// portraits animate the same facts, and the track is what stays readable in a
+/// single frame.
+fn collision_track(commands: &mut Commands, font: &Handle<Font>) -> Entity {
+    let track = commands
+        .spawn((
+            Node {
+                width: px(TRACK_WIDTH),
+                height: px(26),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(13)),
+                ..default()
+            },
+            BackgroundColor(GRID),
+        ))
+        .id();
+    let marker = commands
+        .spawn((
+            TrackMarker,
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(18),
+                height: px(18),
+                border_radius: BorderRadius::all(px(9)),
+                ..default()
+            },
+            BackgroundColor(TEXT),
+        ))
+        .id();
+    let text = value_text(commands, font, 22.0, HudText::Track);
+    commands.entity(track).add_children(&[marker, text]);
+    track
 }
 
 /// Both nuisance queues with exact counts, above the board on the outer side.
