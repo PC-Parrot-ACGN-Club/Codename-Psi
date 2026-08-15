@@ -39,6 +39,7 @@
 - 多种表现配置下相同输入得到相同校验和与赛果（TC-009；Concern: Determinism）。
 - 无正式美术、无音频设备、无手柄时仍可用键盘完成对局（TC-010；Concern: Smoke）。
 - 球体线索按色觉辅助设置分档，NEXT 预览与棋盘使用同一套线索（TC-011）。
+- 两个有时长的结算阶段按进度投影，并按动画强度分档（TC-012）。
 
 ## 设计方法与覆盖模型
 
@@ -48,6 +49,7 @@
 | 边界值 | 渲染落后一个阶段与落后多个阶段；窗口比例边界 | TC-002、TC-004 |
 | 等价类划分 | 音频设备可用/不可用；手柄有/无 | TC-005～TC-006 |
 | 判定表 | 色觉辅助开/关 × 普通球/垃圾球/空格；四种手牌形状 | TC-011 |
+| 边界值分析 | 阶段进度取 0、命中占比、1 与越界值；两档动画强度 | TC-012 |
 | 压力场景 | 大量垃圾与高连锁同时发生 | TC-007 |
 | 对比测试 | 表现配置矩阵下的同一输入日志 | TC-008～TC-009 |
 | 错误猜测 | 全部可选资源与设备同时缺失 | TC-010 |
@@ -67,6 +69,7 @@
 | TC-009 | 多种表现配置下相同输入得到相同校验和与赛果 | P0 | System | Determinism | Client；Rules | 已装配客户端，可回放固定输入日志 | 在表现配置矩阵下分别回放同一输入日志至比赛结束 | `AnimationIntensity` 取 `Full` 与 `Reduced`；`vibration` 取开与关；音频设备可用与不可用；表现更新频率取正常与人为降低 | 全部组合的逐 tick 状态校验和序列相同；小局结果、分数、垃圾数量、Fever 状态与最终赛果相同；`match_tick` 总数相同 | [Confirmed] [表现运行时：动画强度](../../development/design/presentation-runtime.md#动画强度)；[PRD §8](../../PRD.md)；[表现与 UI 设计 §6.1](../../presentation.md) |
 | TC-010 | 无美术、无音频设备、无手柄时仍可用键盘完成对局 | P0 | System | Smoke | Client；Match Flow | 已装配客户端；角色表现数据 `Failed`；音频输出不可用；未连接手柄 | 只用键盘从主菜单完成一局 BO3 | 表现数据 `Failed(Parse)`；无音频设备；无手柄 | 流程可走完并到达赛果；角色使用替补配色与徽章且两侧可区分；棋盘、NEXT、两条队列、Fever 面板与比分保持可读；各降级项各自保留诊断；规则结论与全部资源可用时的同输入结果一致 | [Confirmed] [PRD §5.3](../../PRD.md)；[角色表现数据：查询](../../development/design/character-presentation.md#查询)；[表现运行时：音频与震动](../../development/design/presentation-runtime.md#音频与震动) |
 | TC-011 | 球体线索按色觉辅助分档，NEXT 预览携带手牌的形状与颜色 | P1 | Component | — | Client | 可查询球体线索与 NEXT 预览格的取值 | 参数化取各类占据者在设置开与关下的线索；再参数化取四种手牌形状每个偏移位的预览内容 | 普通球五种颜色 id；垃圾球；空格；`color assist` 取开与关；`I`、`L`、`J`、`ODual`、`OMono` 手牌 | 关闭时普通球无球内符号，开启时五种颜色各得一个互不相同的符号；垃圾球的标记不随设置变化；空格始终无符号；每种手牌的预览在组占据的偏移位给出该位对应的抽取颜色、在未占据的偏移位为空，`L` 与 `J` 的横臂分列两侧，单色手牌不出现第二种抽取颜色 | [Confirmed] [表现运行时：球体线索](../../development/design/presentation-runtime.md#球体线索)；[表现与 UI 设计 §4.1、§4.2、§7](../../presentation.md) |
+| TC-012 | `ClearPreview` 与 `Gravity` 按阶段进度投影，`Reduced` 改为吸附 | P1 | Component | — | Client | 可按阶段进度查询被消球的姿态与下落球的位置 | 参数化取整段进度上的姿态与位置，两档动画强度各取一次 | 进度取 `0`、命中占比、`0.5`、`1` 与越界的 `2`；下落起止跨越多格；`AnimationIntensity` 取 `Full` 与 `Reduced` | `Full` 下：被消球在命中段保持原尺寸并完成闪光，其后缩放与不透明度单调下降，到阶段末已淡出；下落球起止落在整格、中途位于两格之间，且位置单调不回退，越界进度被钳制在终点。`Reduced` 下：被消球全程保持一次稳定高亮，下落球停在起点直到阶段结束再吸附到终点。两档均不改变 `duration_ticks` | [Confirmed] [表现运行时：画面重建](../../development/design/presentation-runtime.md#画面重建)、[动画强度](../../development/design/presentation-runtime.md#动画强度)；[表现与 UI 设计 §6.1](../../presentation.md) |
 
 ## 风险查漏
 
