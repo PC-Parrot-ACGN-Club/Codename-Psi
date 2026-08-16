@@ -72,6 +72,12 @@ Bevy Asset 按 `BEVY_ASSET_ROOT`、`CARGO_MANIFEST_DIR`、可执行文件所在�
 7. 客户端注册两种 resolution。
 8. 消费者读取 `Loaded` 的值，或按该类别的级别处置 `Failed`；诊断系统读取错误信息。
 
+### 规则数据的读取顺序
+
+规则剖面、名册与题面的路径固定；角色玩法数据的路径由数据本身决定——`data/rules/play/<profile_id>/<character_id>.ron` 的两段分别取自剖面 id 与名册中的角色 id（见 [assets/README.md](../../../assets/README.md)）。因此规则数据分两段读取：先读三份固定路径文档，名册解析成功后再按其列出的角色逐个请求玩法文件。两段共用同一份超时预算，读取总时长不因分段而变。
+
+名册本身不可用时玩法文件无从推导，该失败按阻断级直接形成 resolution。名册列出而玩法文件读取或解析失败的角色，按上节的阻断作用域只使该角色不可选。
+
 ## 错误语义
 
 `DataLoadError` 至少区分：

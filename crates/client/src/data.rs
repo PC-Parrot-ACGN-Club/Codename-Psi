@@ -14,8 +14,8 @@ use bevy::asset::io::Reader;
 use bevy::asset::{Asset, AssetLoader, LoadContext, LoadState};
 use bevy::prelude::*;
 use game_core::config::{
-    ConfigError, ValidatedRuleLibrary, parse_character_play, parse_fever_puzzle_book, parse_roster,
-    parse_rule_profile,
+    CharacterId, ConfigError, RuleProfileId, ValidatedRuleLibrary, parse_character_play,
+    parse_fever_puzzle_book, parse_roster, parse_rule_profile,
 };
 
 use crate::character_presentation::CharacterPresentationCatalog;
@@ -152,35 +152,65 @@ pub const RULES_PROFILE_PATH: &str = "data/rules/profiles/fever.ron";
 pub const RULES_ROSTER_PATH: &str = "data/rules/roster.ron";
 /// Where the Fever puzzle book lives under `assets/`.
 pub const RULES_PUZZLE_BOOK_PATH: &str = "data/rules/puzzles/fever-r1.ron";
-/// Where each character's gameplay data lives under `assets/`.
-pub const RULES_PLAY_PATHS: [&str; 2] = [
-    "data/rules/play/fever-r1/psi-a.ron",
-    "data/rules/play/fever-r1/psi-b.ron",
-];
-
 /// Where the client-side character presentation data lives under `assets/`.
 pub const PRESENTATION_CHARACTERS_PATH: &str = "data/presentation/characters.ron";
 
-/// Every rules path, profile first, then roster, puzzle book and plays.
+/// The rules documents that can be requested before anything has parsed:
+/// profile, roster, puzzle book, in that order.
 #[must_use]
-pub fn rules_paths() -> Vec<&'static str> {
-    let mut paths = vec![
+pub const fn core_rules_paths() -> [&'static str; 3] {
+    [
         RULES_PROFILE_PATH,
         RULES_ROSTER_PATH,
         RULES_PUZZLE_BOOK_PATH,
-    ];
-    paths.extend(RULES_PLAY_PATHS);
-    paths
+    ]
+}
+
+/// Where one character's gameplay data lives under `assets/`.
+///
+/// The convention is `data/rules/play/<profile_id>/<character_id>.ron`
+/// (`assets/README.md`). Nothing here names a character: the set of play files
+/// is whatever the roster lists, which is why they cannot be requested
+/// alongside the core documents — see [`poll_rules`].
+#[must_use]
+pub fn play_path(profile: &RuleProfileId, character: &CharacterId) -> String {
+    format!("data/rules/play/{}/{}.ron", profile.0, character.0)
 }
 
 /// How long a data read may hang before it is treated as failed.
 pub const DATA_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A rules read in flight; removed once the resolution is published.
+///
+/// `waited` spans both stages, so adding the second read does not widen the
+/// window the `Boot` barrier can be held open for.
 #[derive(Debug, Resource)]
 pub struct RulesLoad {
-    handles: Vec<Handle<SourceText>>,
+    stage: RulesStage,
     waited: Duration,
+}
+
+/// Which of the two reads is outstanding.
+#[derive(Debug)]
+enum RulesStage {
+    /// The documents of [`core_rules_paths`], in that order.
+    Core(Vec<Handle<SourceText>>),
+    /// The core text held for the final build, plus one read per rostered
+    /// character.
+    Plays {
+        core: Vec<Result<String, DataErrorCause>>,
+        paths: Vec<String>,
+        handles: Vec<Handle<SourceText>>,
+    },
+}
+
+impl RulesStage {
+    /// The handles this stage is waiting on.
+    fn handles(&self) -> &[Handle<SourceText>] {
+        match self {
+            Self::Core(handles) | Self::Plays { handles, .. } => handles,
+        }
+    }
 }
 
 /// The resolved rules document, in the form consumers read.
@@ -219,18 +249,25 @@ impl RulesData {
     }
 }
 
-/// Ask Bevy Asset for the rules documents.
+/// Ask Bevy Asset for the rules documents that can be named up front.
 pub fn start_rules_load(asset_server: Res<AssetServer>, mut commands: Commands) {
     commands.insert_resource(RulesLoad {
-        handles: rules_paths()
-            .into_iter()
-            .map(|path| asset_server.load::<SourceText>(path))
-            .collect(),
+        stage: RulesStage::Core(
+            core_rules_paths()
+                .into_iter()
+                .map(|path| asset_server.load::<SourceText>(path))
+                .collect(),
+        ),
         waited: Duration::ZERO,
     });
 }
 
-/// Publish the rules resolution once the read settles, or on timeout.
+/// Publish the rules resolution once the reads settle, or on timeout.
+///
+/// The read takes two stages because the roster is what says which play files
+/// exist: the core documents are requested up front, and one play file per
+/// rostered character only once the roster has parsed. Both stages share one
+/// timeout budget, so the second read does not widen the `Boot` barrier.
 ///
 /// Parsing stays here rather than in the asset loader, for the reason given at
 /// the top of this module: it is what keeps the typed causes apart.
@@ -244,11 +281,56 @@ pub fn poll_rules(
     load.waited += time.delta();
     let timed_out = load.waited >= DATA_LOAD_TIMEOUT;
 
-    let source_for = |index: usize| -> Option<Result<&str, DataErrorCause>> {
-        Some(match asset_server.load_state(&load.handles[index]) {
+    let Some(texts) = settle(load.stage.handles(), &asset_server, &sources, timed_out) else {
+        return;
+    };
+
+    match std::mem::replace(&mut load.stage, RulesStage::Core(Vec::new())) {
+        RulesStage::Core(_) => {
+            let derived = rostered_play_paths(&borrowed(&texts));
+            let Some(paths) = derived else {
+                // Nothing to derive the play files from. The same core failure
+                // is what `build_library` reports, so publish it now rather
+                // than waiting out a second read that cannot be requested.
+                publish(&mut commands, &borrowed(&texts), &core_rules_paths());
+                return;
+            };
+            let handles = paths
+                .iter()
+                .map(|path| asset_server.load::<SourceText>(path.clone()))
+                .collect();
+            load.stage = RulesStage::Plays {
+                core: texts,
+                paths,
+                handles,
+            };
+        }
+        RulesStage::Plays { core, paths, .. } => {
+            let mut all = core;
+            all.extend(texts);
+            let mut flat: Vec<&str> = core_rules_paths().to_vec();
+            flat.extend(paths.iter().map(String::as_str));
+            publish(&mut commands, &borrowed(&all), &flat);
+        }
+    }
+}
+
+/// Reads every handle a stage waits on, once all of them have settled.
+///
+/// `None` means at least one read is still in flight — the only state in which
+/// this system leaves the resolution unpublished.
+fn settle(
+    handles: &[Handle<SourceText>],
+    asset_server: &AssetServer,
+    sources: &Assets<SourceText>,
+    timed_out: bool,
+) -> Option<Vec<Result<String, DataErrorCause>>> {
+    let mut texts = Vec::with_capacity(handles.len());
+    for handle in handles {
+        texts.push(match asset_server.load_state(handle) {
             LoadState::Loaded => sources
-                .get(&load.handles[index])
-                .map(|text| Ok(text.0.as_str()))
+                .get(handle)
+                .map(|text| Ok(text.0.clone()))
                 .unwrap_or(Err(DataErrorCause::Io("asset dropped after load".into()))),
             LoadState::Failed(error) => Err(DataErrorCause::Io(error.to_string())),
             _ if timed_out => Err(DataErrorCause::Io(format!(
@@ -256,22 +338,41 @@ pub fn poll_rules(
                 DATA_LOAD_TIMEOUT.as_secs()
             ))),
             _ => return None,
-        })
-    };
-    let paths = rules_paths();
-    let mut source_texts = Vec::with_capacity(paths.len());
-    for index in 0..paths.len() {
-        let Some(source) = source_for(index) else {
-            return;
-        };
-        source_texts.push(source);
+        });
     }
+    Some(texts)
+}
 
-    // Blocking scope: the profile, roster and puzzle book gate every match, so
-    // a failure in any of them fails the whole resolution. A character's
-    // gameplay data only gates that character.
+/// Borrows settled text in the shape the builder reads.
+fn borrowed(texts: &[Result<String, DataErrorCause>]) -> Vec<Result<&str, DataErrorCause>> {
+    texts
+        .iter()
+        .map(|text| text.as_deref().map_err(Clone::clone))
+        .collect()
+}
+
+/// The play files this roster asks for, or `None` when the core cannot say.
+///
+/// Only the profile and the roster are parsed here — the profile names the
+/// directory and the roster names the files. The puzzle book is left to the
+/// final build, so every blocking failure is still reported from one place.
+fn rostered_play_paths(core: &[Result<&str, DataErrorCause>]) -> Option<Vec<String>> {
+    let paths = core_rules_paths();
+    let profile = parse_blocking(core[0].clone(), paths[0], parse_rule_profile).ok()?;
+    let roster = parse_blocking(core[1].clone(), paths[1], parse_roster).ok()?;
+    Some(
+        roster
+            .characters
+            .iter()
+            .map(|identity| play_path(&profile.id, &identity.id))
+            .collect(),
+    )
+}
+
+/// Build the library from settled text and hand the resolution to the app.
+fn publish(commands: &mut Commands, sources: &[Result<&str, DataErrorCause>], paths: &[&str]) {
     let mut excluded_characters = Vec::new();
-    let resolution = match build_library(&source_texts, &paths, &mut excluded_characters) {
+    let resolution = match build_library(sources, paths, &mut excluded_characters) {
         Ok(library) => DataResolution::Loaded(library),
         Err(error) => DataResolution::Failed(error),
     };
@@ -303,8 +404,13 @@ fn parse_blocking<T>(
 
 /// Builds the validated library from already-read sources.
 ///
-/// Split out of the polling system so the blocking-versus-narrowing scope is
-/// testable without an asset server.
+/// `sources` and `paths` are the three core documents of [`core_rules_paths`]
+/// in that order, followed by one play file per rostered character.
+///
+/// Blocking scope: the profile, roster and puzzle book gate every match, so a
+/// failure in any of them fails the whole resolution. A character's gameplay
+/// data only gates that character. Split out of the polling system so that
+/// scope is testable without an asset server.
 pub fn build_library(
     sources: &[Result<&str, DataErrorCause>],
     paths: &[&str],

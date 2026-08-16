@@ -116,6 +116,41 @@ fn the_plugin_owns_the_path_so_consumers_never_name_it() {
     );
 }
 
+/// The roster is what names the play files, so every character it lists has to
+/// come back playable from a path nothing in the code spelled out.
+// integration-system/runtime-data::TC-005
+#[test]
+fn every_rostered_character_resolves_through_a_path_derived_from_the_roster() {
+    let mut app = controlled_app();
+    run_until_rules_resolved(&mut app);
+
+    let data = app.world().resource::<RulesData>();
+    assert!(
+        data.excluded_characters.is_empty(),
+        "a rostered character had no play file at its derived path: {:?}",
+        data.excluded_characters
+    );
+
+    let library = data.rules().expect("library loaded");
+    let profile = library
+        .profile_ids()
+        .next()
+        .cloned()
+        .expect("the profile loaded");
+    for identity in &library.roster().characters {
+        assert!(
+            library.character_play(&profile, &identity.id).is_some(),
+            "{} is rostered but its play data never arrived",
+            identity.id.0
+        );
+        assert_eq!(
+            client::data::play_path(&profile, &identity.id),
+            format!("data/rules/play/{}/{}.ron", profile.0, identity.id.0),
+            "the derived path must follow the documented convention"
+        );
+    }
+}
+
 /// Blocking scope: a profile failure stops every match, one character's
 /// unusable gameplay data only removes that character.
 ///
@@ -130,7 +165,20 @@ fn a_blocking_failure_stops_the_match_while_a_character_failure_only_narrows_sel
     const PLAY_A: &str = include_str!("../../../assets/data/rules/play/fever-r1/psi-a.ron");
     const PLAY_B: &str = include_str!("../../../assets/data/rules/play/fever-r1/psi-b.ron");
 
-    let paths = client::data::rules_paths();
+    let profile = RuleProfileId("fever-r1".into());
+    let mut paths: Vec<String> = client::data::core_rules_paths()
+        .iter()
+        .map(|path| (*path).to_owned())
+        .collect();
+    paths.push(client::data::play_path(
+        &profile,
+        &game_core::config::CharacterId("psi-a".into()),
+    ));
+    paths.push(client::data::play_path(
+        &profile,
+        &game_core::config::CharacterId("psi-b".into()),
+    ));
+    let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
 
     // One unusable character file: the library still resolves, and the other
     // character stays selectable.
