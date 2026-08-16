@@ -254,6 +254,21 @@ fn restoring_from_five_different_phases_converges_with_the_baseline() {
 fn a_snapshot_forks_under_different_inputs_and_only_rejoins_on_identical_ones() {
     let mut origin = MatchState::new(spec());
     run(&mut origin, &input_log(200));
+
+    // Lateral input only forks the state while somebody is holding a group:
+    // during a resolve the rules ignore it by design. Advance to the first tick
+    // where both players control one, so what forks the state is the input
+    // rather than where 200 ticks happened to land in the resolve pacing.
+    for _ in 0..600 {
+        if origin.active_group(0).is_some() && origin.active_group(1).is_some() {
+            break;
+        }
+        run(&mut origin, &[[PlayerActions::EMPTY; 2]]);
+    }
+    assert!(
+        origin.active_group(0).is_some() && origin.active_group(1).is_some(),
+        "neither player ever got a group back to steer"
+    );
     let snapshot = origin.snapshot();
 
     let diverge_a: Vec<_> = (0..20)

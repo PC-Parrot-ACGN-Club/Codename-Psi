@@ -923,8 +923,13 @@ fn hud_value(
                 String::new()
             }
         }
+        // Only the facts that have no other home reach the board. What an
+        // attack sent and what it cancelled are already visible as the two
+        // queues changing, so naming them again is one more thing to read
+        // during the busiest moment of the match.
         HudText::Feedback(slot) => feedback
             .line(slot, snapshot.match_tick)
+            .filter(|line| matches!(line, crate::presentation::FeedbackLine::AllClear))
             .map_or_else(String::new, |line| line.text(localization)),
         HudText::Character(slot) => names.get(slot).cloned().unwrap_or_default(),
         HudText::Scoreline => format!(

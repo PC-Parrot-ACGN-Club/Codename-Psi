@@ -105,7 +105,7 @@ impl Default for ResolutionRules {
     fn default() -> Self {
         Self {
             clear_preview_ticks: 24,
-            gravity_ticks_by_distance: vec![0, 10, 15, 19, 22, 25, 28, 31, 33, 35, 37, 39, 41, 43],
+            gravity_ticks_by_distance: vec![0, 15, 22, 28, 33, 38, 42, 46, 50, 53, 56, 59, 62, 65],
             clear_threshold: 4,
         }
     }

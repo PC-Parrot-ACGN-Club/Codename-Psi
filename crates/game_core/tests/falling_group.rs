@@ -466,11 +466,11 @@ fn an_unsupported_ball_free_falls_after_its_split_delay() {
         "a follower takes the longer split delay"
     );
     assert_eq!(
-        fall.arrival_tick, 21,
-        "three cells of free fall take 19 ticks"
+        fall.arrival_tick, 30,
+        "three cells of free fall take 28 ticks"
     );
 
-    for tick in 1..21 {
+    for tick in 1..30 {
         split.tick(&mut harness.board);
         assert!(!split.is_complete(), "still in flight at tick {tick}");
         assert_eq!(
