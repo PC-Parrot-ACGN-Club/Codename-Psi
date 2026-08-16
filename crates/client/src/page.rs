@@ -204,6 +204,28 @@ impl FocusRing {
         &self.diagnostics
     }
 
+    /// Set the enabled flag of every matching item, reporting whether any moved.
+    ///
+    /// The reason travels with the flag: an item is disabled *for* something,
+    /// and the page says so in the row's own label.
+    fn set_enabled(
+        &mut self,
+        matches: impl Fn(PageItem) -> bool,
+        enabled: bool,
+        reason: &str,
+    ) -> bool {
+        let mut changed = false;
+        for item in self.items.iter_mut().filter(|item| matches(item.id)) {
+            if item.enabled == enabled {
+                continue;
+            }
+            item.enabled = enabled;
+            item.unavailable_reason = (!enabled).then(|| reason.to_owned());
+            changed = true;
+        }
+        changed
+    }
+
     fn focus_item(&mut self, id: PageItem) -> Result<(), PageItem> {
         let Some(index) = self.items.iter().position(|item| item.id == id) else {
             return Err(id);
@@ -382,6 +404,34 @@ impl PageModel {
     #[must_use]
     pub const fn focused_index(&self) -> usize {
         self.ring.focused_index()
+    }
+
+    /// Enable or disable the pad rebinding rows, and say whether that changed
+    /// anything.
+    ///
+    /// A capture waits for an input from its own device category and ignores
+    /// everything else, so opening a pad capture with no pad plugged in leaves a
+    /// row that can never complete. Disabling the row is what keeps the player
+    /// from walking into it; the ring still lists it, because the settings page
+    /// is a fixed list of what the game can be told, not a list of what is
+    /// plugged in right now.
+    ///
+    /// One flag for both players: a capture accepts input from any connected
+    /// pad, so per-slot availability would claim a precision that is not there.
+    pub fn set_gamepad_available(&mut self, available: bool) -> bool {
+        self.ring.set_enabled(
+            |id| {
+                matches!(
+                    id,
+                    PageItem::Rebind {
+                        device: DeviceCategory::Gamepad,
+                        ..
+                    }
+                )
+            },
+            available,
+            "settings.no_gamepad",
+        )
     }
 }
 

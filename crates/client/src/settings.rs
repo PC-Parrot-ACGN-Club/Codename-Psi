@@ -85,11 +85,22 @@ impl PlayerInputBindings {
             })
     }
 
-    /// Adds one physical input to an action, keeping the list duplicate-free.
+    /// Binds one physical input, replacing whatever the action held on that
+    /// device.
+    ///
+    /// Replacing rather than appending is what keeps the one-input-per-category
+    /// invariant that [`Self::input_for`] and the whole settings page read
+    /// through. An appended second keyboard binding would be invisible on
+    /// screen -- the page shows the first -- and unremovable, while still
+    /// producing the action.
     pub fn bind(&mut self, action: GameAction, input: PhysicalInput) {
         let inputs = self.bindings.entry(action).or_default();
-        if !inputs.contains(&input) {
-            inputs.push(input);
+        match inputs
+            .iter_mut()
+            .find(|held| held.category() == input.category())
+        {
+            Some(held) => *held = input,
+            None => inputs.push(input),
         }
     }
 
@@ -105,17 +116,16 @@ impl PlayerInputBindings {
             .find(|input| input.category() == device)
     }
 
+    /// The action of this player that already holds `input`, if any.
+    ///
+    /// Scoped to one player on purpose; the rule that decides whether a binding
+    /// may be written spans both of them and lives on
+    /// [`UserSettings::binding_conflict`].
     #[must_use]
-    pub fn conflict(&self, action: GameAction, input: &PhysicalInput) -> Option<BindingConflict> {
-        action.is_configurable().then(|| {
-            self.bindings.iter().find_map(|(existing_action, inputs)| {
-                (*existing_action != action && inputs.contains(input)).then(|| BindingConflict {
-                    requested: action,
-                    existing: *existing_action,
-                    input: input.clone(),
-                })
-            })
-        })?
+    fn holder_of(&self, input: &PhysicalInput) -> Option<GameAction> {
+        self.bindings
+            .iter()
+            .find_map(|(action, inputs)| inputs.contains(input).then_some(*action))
     }
 }
 
@@ -167,8 +177,25 @@ impl Default for PlayerInputBindings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BindingConflict {
     pub requested: GameAction,
-    pub existing: GameAction,
+    pub existing: BindingOwner,
     pub input: PhysicalInput,
+}
+
+/// What already holds a physical input that a capture asked for.
+///
+/// A configurable action names the player holding it, because a keyboard is one
+/// piece of hardware shared by both locals: the action that refuses P2's key
+/// press is often one of P1's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingOwner {
+    Player {
+        player: usize,
+        action: GameAction,
+    },
+    /// A fixed binding -- a board or menu direction, or pause. Fixed bindings
+    /// are not listed on the settings page, so this is the one owner a player
+    /// cannot go and edit; the way out is to pick a different key.
+    Fixed,
 }
 
 /// Which physical device a binding belongs to.
@@ -201,8 +228,8 @@ pub enum CaptureOutcome {
     Ignored,
     /// The binding was written.
     Bound,
-    /// Another action of the same player and category already owns the input,
-    /// so nothing was written. The settings page reports which action holds it.
+    /// A fixed binding or another action already owns the input, so nothing was
+    /// written. The settings page reports who holds it.
     Conflict(BindingConflict),
     /// The player backed out; the binding table was never touched.
     Cancelled,
@@ -234,15 +261,13 @@ impl BindingCapture {
         if input.category() != self.device {
             return Ok(CaptureOutcome::Ignored);
         }
-        let bindings = settings
-            .players
-            .get_mut(self.player)
-            .ok_or(SettingsError::UnknownPlayer(self.player))?;
-
-        if let Some(conflict) = bindings.conflict(self.action, input) {
+        if settings.players.get(self.player).is_none() {
+            return Err(SettingsError::UnknownPlayer(self.player));
+        }
+        if let Some(conflict) = settings.binding_conflict(self.player, self.action, input) {
             return Ok(CaptureOutcome::Conflict(conflict));
         }
-        bindings.bind(self.action, input.clone());
+        settings.players[self.player].bind(self.action, input.clone());
         Ok(CaptureOutcome::Bound)
     }
 
@@ -274,6 +299,105 @@ pub struct UserSettings {
     /// the redundant cue for players who cannot separate the palette by hue,
     /// which is why the option exists rather than the symbol simply being gone.
     pub color_assist: bool,
+}
+
+impl UserSettings {
+    /// Who already holds `input`, if binding it here would collide.
+    ///
+    /// The scope follows the hardware rather than the player. One keyboard
+    /// serves both locals, so a key held by either of them is held; each player
+    /// holds their own pad, so a pad button only collides inside one player's
+    /// own map. Fixed bindings are checked first because they are the one owner
+    /// the settings page never lists, and therefore the one a player can walk
+    /// into without anything on screen having warned them.
+    #[must_use]
+    pub fn binding_conflict(
+        &self,
+        player: usize,
+        action: GameAction,
+        input: &PhysicalInput,
+    ) -> Option<BindingConflict> {
+        if !action.is_configurable() {
+            return None;
+        }
+        let conflict = |existing| BindingConflict {
+            requested: action,
+            existing,
+            input: input.clone(),
+        };
+        if crate::input::fixed_binding_claims(input, action) {
+            return Some(conflict(BindingOwner::Fixed));
+        }
+        // A keyboard key is shared, a pad button is not.
+        let shared = input.category() == DeviceCategory::Keyboard;
+        (0..self.players.len())
+            .filter(|slot| shared || *slot == player)
+            .find_map(|slot| {
+                let held = self.players[slot].holder_of(input)?;
+                // Rebinding an action to the input it already holds is not a
+                // collision with itself; it is a player confirming what is
+                // there.
+                (slot != player || held != action).then(|| {
+                    conflict(BindingOwner::Player {
+                        player: slot,
+                        action: held,
+                    })
+                })
+            })
+    }
+
+    /// Drop persisted bindings that break the binding invariants.
+    ///
+    /// Written for files that predate those invariants being enforced: before
+    /// [`PlayerInputBindings::bind`] replaced instead of appended, every capture
+    /// added a row, and neither the shared keyboard nor the fixed bindings were
+    /// checked. Such a file makes the settings page lie -- it shows the first
+    /// binding of a category while the rest fire silently -- so the repair
+    /// happens on load rather than being left for the player to find.
+    ///
+    /// The first binding of each category survives, because that is the one the
+    /// page has been showing and the one the player believes is theirs.
+    pub fn normalize_bindings(&mut self) -> Vec<DroppedBinding> {
+        let mut dropped = Vec::new();
+        // Claims accumulate across players so the shared keyboard is settled in
+        // slot order: whatever P1 holds, P2 cannot also hold.
+        let mut keyboard_claims: Vec<PhysicalInput> = Vec::new();
+        for (player, bindings) in self.players.iter_mut().enumerate() {
+            let mut gamepad_claims: Vec<PhysicalInput> = Vec::new();
+            for (action, inputs) in &mut bindings.bindings {
+                let mut kept: Vec<PhysicalInput> = Vec::new();
+                for input in inputs.drain(..) {
+                    let claims = match input.category() {
+                        DeviceCategory::Keyboard => &mut keyboard_claims,
+                        DeviceCategory::Gamepad => &mut gamepad_claims,
+                    };
+                    let taken = claims.contains(&input)
+                        || kept.iter().any(|held| held.category() == input.category())
+                        || crate::input::fixed_binding_claims(&input, *action);
+                    if taken {
+                        dropped.push(DroppedBinding {
+                            player,
+                            action: *action,
+                            input,
+                        });
+                    } else {
+                        claims.push(input.clone());
+                        kept.push(input);
+                    }
+                }
+                *inputs = kept;
+            }
+        }
+        dropped
+    }
+}
+
+/// One binding that [`UserSettings::normalize_bindings`] removed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedBinding {
+    pub player: usize,
+    pub action: GameAction,
+    pub input: PhysicalInput,
 }
 
 impl Default for UserSettings {
@@ -482,11 +606,10 @@ pub fn save_settings_on_request(
 /// startup and any later edit, so the settings screen only has to mutate the
 /// resource.
 ///
-/// Input bindings are deliberately not pushed here. The sampler is populated
-/// once by `client::input::install_settings_bindings`, and re-pushing on every
-/// change would overwrite a sampler that was installed deliberately. Applying
-/// an edited binding belongs with the settings screen that can perform the
-/// edit, which does not exist yet.
+/// Input bindings are deliberately not pushed here. They reach the sampler
+/// through `client::input::install_settings_bindings`, which already runs on
+/// every settings change and sits early enough in the frame for a rebinding to
+/// take effect on the next sampled tick.
 pub fn apply_settings(
     settings: Res<UserSettings>,
     mut localization: ResMut<crate::i18n::Localization>,

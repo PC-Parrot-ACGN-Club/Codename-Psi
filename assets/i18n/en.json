@@ -32,6 +32,8 @@
     "settings.color_assist": "Colour Assist",
     "settings.rebind": "Rebind",
     "settings.binding_taken": "Key already bound:",
+    "settings.binding_fixed": "a fixed binding",
+    "settings.no_gamepad": "no gamepad connected",
     "action.left": "Left",
     "action.right": "Right",
     "action.soft_drop": "Soft Drop",

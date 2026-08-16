@@ -73,6 +73,12 @@ impl GamepadSlots {
         self.by_pad.get(&pad).copied()
     }
 
+    /// Whether any pad is bound to a local player.
+    #[must_use]
+    pub fn any_connected(&self) -> bool {
+        !self.by_pad.is_empty()
+    }
+
     /// The pad bound to a local player, if any.
     #[must_use]
     pub fn pad(&self, player: usize) -> Option<Entity> {
@@ -291,6 +297,59 @@ const FIXED_DPAD_DIRECTIONS: [(GamepadButton, FixedDirection); 4] = [
     (GamepadButton::DPadDown, FixedDirection::Down),
 ];
 
+/// The fixed direction this input carries, on any local player's device.
+///
+/// Not per player: one keyboard serves both locals, so a key that is P1's fixed
+/// direction is spoken for no matter which player is being edited.
+#[must_use]
+fn fixed_direction_of(input: &PhysicalInput) -> Option<FixedDirection> {
+    let named = |name: &str| input.name() == name;
+    (0..LOCAL_PLAYERS)
+        .filter_map(fixed_keyboard_directions)
+        .flatten()
+        .find_map(|(code, direction)| {
+            (matches!(input, PhysicalInput::Keyboard(_)) && named(&format!("{code:?}")))
+                .then_some(direction)
+        })
+        .or_else(|| {
+            FIXED_DPAD_DIRECTIONS
+                .into_iter()
+                .find_map(|(button, direction)| {
+                    (matches!(input, PhysicalInput::Gamepad(_)) && named(&format!("{button:?}")))
+                        .then_some(direction)
+                })
+        })
+}
+
+/// Whether a fixed binding already gives this input a meaning `action` collides
+/// with.
+///
+/// Not every fixed bit is off limits, which is why this asks about a specific
+/// action rather than answering for the input alone. What cannot be shared is a
+/// bit whose fixed meaning is live in the same input context as the action being
+/// bound:
+///
+/// - the horizontal directions are `Left`/`Right` for the whole match, so no
+///   configurable action may take them;
+/// - pause is live in every context;
+/// - the vertical directions only move menu focus, which is exactly the room the
+///   default soft and hard drop bindings sit in -- but the two rotations also
+///   carry the menu confirm and back, so for those two the vertical directions
+///   are taken as well.
+#[must_use]
+pub fn fixed_binding_claims(input: &PhysicalInput, action: GameAction) -> bool {
+    if fixed_pause_inputs().contains(input) {
+        return true;
+    }
+    match fixed_direction_of(input) {
+        Some(FixedDirection::Left | FixedDirection::Right) => true,
+        Some(FixedDirection::Up | FixedDirection::Down) => BOUND_UI_ACTIONS
+            .into_iter()
+            .any(|ui| ui_action_source(ui) == Some(action)),
+        None => false,
+    }
+}
+
 /// The rules action whose binding a menu action borrows.
 ///
 /// `Confirm` and `Back` have no binding of their own: they are the menu
@@ -348,17 +407,12 @@ impl UiInputState {
     }
 }
 
-/// Give the sampler the player's bindings once settings are available.
-///
-/// Without this the sampler starts with no bindings and no key would ever
-/// produce an action. It only fills an empty sampler: tests install their own
-/// bindings, and pushing a settings change onto a running sampler belongs to
-/// the settings system rather than here.
 /// Keep the sampler's binding table equal to the current settings.
 ///
-/// This runs on every settings change, not just the first: a rebinding has to
-/// take effect on the next sampled frame, without leaving the settings page or
-/// restarting the game.
+/// Without this the sampler starts with no bindings and no key would ever
+/// produce an action. It runs on every settings change, not just the first: a
+/// rebinding has to take effect on the next sampled frame, without leaving the
+/// settings page or restarting the game.
 pub fn install_settings_bindings(
     settings: Res<UserSettings>,
     mut sampler: ResMut<LocalInputSampler>,

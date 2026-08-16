@@ -32,6 +32,8 @@
     "settings.color_assist": "色觉辅助",
     "settings.rebind": "重新绑定",
     "settings.binding_taken": "该键已被占用：",
+    "settings.binding_fixed": "固定绑定",
+    "settings.no_gamepad": "未连接手柄",
     "action.left": "左移",
     "action.right": "右移",
     "action.soft_drop": "软降",

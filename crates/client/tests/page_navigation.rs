@@ -219,6 +219,85 @@ fn lan_entry_is_focusable_disabled_and_never_starts_a_match() {
     assert_eq!(page.handle(UIAction::Confirm), None);
 }
 
+// component/page-navigation::TC-013
+#[test]
+fn pad_rebinding_rows_follow_whether_a_pad_is_connected() {
+    use client::settings::DeviceCategory;
+
+    let is_pad_row = |id: PageItem| {
+        matches!(
+            id,
+            PageItem::Rebind {
+                device: DeviceCategory::Gamepad,
+                ..
+            }
+        )
+    };
+    let mut page =
+        PageModel::for_state(AppState::Settings, Some(SettingsOrigin(AppState::MainMenu)))
+            .expect("settings page exists");
+    let pad_rows = page
+        .items()
+        .iter()
+        .filter(|item| is_pad_row(item.id))
+        .count();
+    assert!(pad_rows > 0, "the settings page lists pad rebinding rows");
+
+    assert!(page.set_gamepad_available(false));
+    let reason = {
+        let disabled: Vec<&FocusItem> = page
+            .items()
+            .iter()
+            .filter(|item| is_pad_row(item.id))
+            .collect();
+        assert_eq!(disabled.len(), pad_rows, "the row list does not shrink");
+        assert!(disabled.iter().all(|item| !item.enabled));
+        disabled[0]
+            .unavailable_reason
+            .clone()
+            .expect("a disabled row says why")
+    };
+    assert_eq!(reason, "settings.no_gamepad");
+    for source in [
+        include_str!("../../../assets/i18n/en.json"),
+        include_str!("../../../assets/i18n/zh-CN.json"),
+    ] {
+        let catalog = client::i18n::parse_catalog(source).expect("the shipped catalog parses");
+        assert!(
+            catalog.messages.contains_key(&reason),
+            "every shipped language names the reason"
+        );
+    }
+
+    // The keyboard rows are untouched: one missing device does not take the
+    // whole rebinding surface with it.
+    assert!(
+        page.items()
+            .iter()
+            .filter(|item| matches!(
+                item.id,
+                PageItem::Rebind {
+                    device: DeviceCategory::Keyboard,
+                    ..
+                }
+            ))
+            .all(|item| item.enabled)
+    );
+
+    // Plugging a pad in restores them without leaving the page.
+    assert!(page.set_gamepad_available(true));
+    assert!(
+        page.items()
+            .iter()
+            .filter(|item| is_pad_row(item.id))
+            .all(|item| item.enabled && item.unavailable_reason.is_none())
+    );
+    assert!(
+        !page.set_gamepad_available(true),
+        "an unchanged availability must not ask the page to redraw"
+    );
+}
+
 // component/page-navigation::TC-010
 #[test]
 fn settings_focus_order_follows_the_two_column_layout() {

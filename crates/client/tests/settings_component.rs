@@ -2,9 +2,9 @@
 
 use client::input::{PhysicalInput, UIAction};
 use client::settings::{
-    AnimationIntensity, BindingCapture, BindingConflict, CaptureOutcome, DeviceCategory,
-    SETTINGS_SCHEMA_VERSION, SettingsError, SettingsLoad, SettingsStore, UserSettings,
-    WindowModeSetting, parse_settings, serialize_settings,
+    AnimationIntensity, BindingCapture, BindingConflict, BindingOwner, CaptureOutcome,
+    DeviceCategory, PlayerInputBindings, SETTINGS_SCHEMA_VERSION, SettingsError, SettingsLoad,
+    SettingsStore, UserSettings, WindowModeSetting, parse_settings, serialize_settings,
 };
 use game_core::input::GameAction;
 
@@ -241,28 +241,40 @@ fn both_players_keep_independent_keyboard_and_gamepad_bindings() {
     assert_only_configurable_bindings(&edited);
 }
 
-/// Player settings where `KeyA` is already bound to `SoftDrop` for player 0 only.
-fn settings_with_key_a_on_soft_drop() -> UserSettings {
+/// The free key these cases hand around: bound to nothing, claimed by no fixed
+/// binding.
+fn free_key() -> PhysicalInput {
+    PhysicalInput::keyboard("KeyX")
+}
+
+/// Player settings where the free key is bound to `SoftDrop` for player 0 only.
+fn settings_with_free_key_on_soft_drop() -> UserSettings {
     let mut settings = UserSettings::default();
     settings.players[0]
         .bindings
-        .insert(GameAction::SoftDrop, vec![PhysicalInput::keyboard("KeyA")]);
+        .insert(GameAction::SoftDrop, vec![free_key()]);
     settings
 }
 
 // component/user-settings::TC-006
 #[test]
 fn rebinding_an_occupied_input_to_hard_drop_reports_a_named_conflict() {
-    let settings = settings_with_key_a_on_soft_drop();
+    let settings = settings_with_free_key_on_soft_drop();
     let before = settings.clone();
 
-    let conflict = settings.players[0]
-        .conflict(GameAction::HardDrop, &PhysicalInput::keyboard("KeyA"))
-        .expect("KeyA is already taken by SoftDrop");
+    let conflict = settings
+        .binding_conflict(0, GameAction::HardDrop, &free_key())
+        .expect("the key is already taken by SoftDrop");
 
     assert_eq!(conflict.requested, GameAction::HardDrop);
-    assert_eq!(conflict.existing, GameAction::SoftDrop);
-    assert_eq!(conflict.input, PhysicalInput::keyboard("KeyA"));
+    assert_eq!(
+        conflict.existing,
+        BindingOwner::Player {
+            player: 0,
+            action: GameAction::SoftDrop,
+        }
+    );
+    assert_eq!(conflict.input, free_key());
     assert_eq!(
         settings, before,
         "querying a conflict must not overwrite settings before the UI decides"
@@ -272,30 +284,63 @@ fn rebinding_an_occupied_input_to_hard_drop_reports_a_named_conflict() {
 // component/user-settings::TC-006
 #[test]
 fn rebinding_an_occupied_input_to_rotate_clockwise_reports_a_named_conflict() {
-    let settings = settings_with_key_a_on_soft_drop();
+    let settings = settings_with_free_key_on_soft_drop();
 
-    let conflict = settings.players[0]
-        .conflict(
-            GameAction::RotateClockwise,
-            &PhysicalInput::keyboard("KeyA"),
-        )
-        .expect("KeyA is already taken by SoftDrop");
+    let conflict = settings
+        .binding_conflict(0, GameAction::RotateClockwise, &free_key())
+        .expect("the key is already taken by SoftDrop");
 
     assert_eq!(conflict.requested, GameAction::RotateClockwise);
-    assert_eq!(conflict.existing, GameAction::SoftDrop);
+    assert_eq!(
+        conflict.existing,
+        BindingOwner::Player {
+            player: 0,
+            action: GameAction::SoftDrop,
+        }
+    );
 }
 
 // component/user-settings::TC-006
 #[test]
-fn the_other_player_may_reuse_the_same_physical_input() {
-    let settings = settings_with_key_a_on_soft_drop();
+fn the_other_player_may_not_reuse_a_key_but_may_reuse_a_pad_button() {
+    let settings = settings_with_free_key_on_soft_drop();
 
-    let conflict =
-        settings.players[1].conflict(GameAction::SoftDrop, &PhysicalInput::keyboard("KeyA"));
+    let key = settings
+        .binding_conflict(1, GameAction::SoftDrop, &free_key())
+        .expect("one keyboard serves both locals, so the key is taken");
+    assert_eq!(
+        key.existing,
+        BindingOwner::Player {
+            player: 0,
+            action: GameAction::SoftDrop,
+        },
+        "the refusal has to name the player holding the key, not just the action"
+    );
+
+    // Both players default to the same pad column on purpose: each holds their
+    // own pad, so the same button is not the same physical input.
+    let held_by_player_0 = settings.players[0]
+        .input_for(GameAction::RotateClockwise, DeviceCategory::Gamepad)
+        .expect("the default pad column is populated")
+        .clone();
+    assert!(
+        settings
+            .binding_conflict(1, GameAction::RotateClockwise, &held_by_player_0)
+            .is_none(),
+        "a pad button is only claimed inside one player's own map"
+    );
+}
+
+// component/user-settings::TC-006
+#[test]
+fn rebinding_an_action_to_the_input_it_already_holds_is_not_a_conflict() {
+    let settings = settings_with_free_key_on_soft_drop();
 
     assert!(
-        conflict.is_none(),
-        "conflict detection is scoped per player configuration"
+        settings
+            .binding_conflict(0, GameAction::SoftDrop, &free_key())
+            .is_none(),
+        "confirming the key an action already has must not read as a collision"
     );
 }
 
@@ -319,21 +364,75 @@ fn fixed_binding_actions_stay_out_of_persisted_bindings() {
 // component/user-settings::TC-007
 #[test]
 fn fixed_binding_actions_are_excluded_from_conflict_detection() {
-    let settings = settings_with_key_a_on_soft_drop();
+    let settings = settings_with_free_key_on_soft_drop();
 
     for fixed in FIXED_GAME_ACTIONS {
         assert!(
-            settings.players[0]
-                .conflict(fixed, &PhysicalInput::keyboard("KeyA"))
-                .is_none(),
+            settings.binding_conflict(0, fixed, &free_key()).is_none(),
             "{fixed:?} is fixed and must stay outside the conflict-detection scope"
         );
     }
     assert!(
-        settings.players[0]
-            .conflict(GameAction::HardDrop, &PhysicalInput::keyboard("KeyA"))
+        settings
+            .binding_conflict(0, GameAction::HardDrop, &free_key())
             .is_some(),
         "the configurable scope itself still reports conflicts"
+    );
+}
+
+// component/user-settings::TC-011
+#[test]
+fn a_physical_input_a_fixed_binding_claims_is_refused_by_name() {
+    let settings = UserSettings::default();
+
+    // A horizontal direction moves the falling group for the whole match, so no
+    // configurable action may take it.
+    for action in GameAction::CONFIGURABLE {
+        let conflict = settings
+            .binding_conflict(0, action, &PhysicalInput::keyboard("KeyA"))
+            .unwrap_or_else(|| panic!("{action:?} must not be allowed to take a fixed direction"));
+        assert_eq!(conflict.existing, BindingOwner::Fixed);
+    }
+
+    // Pause is live in every context, on either device.
+    for input in [
+        PhysicalInput::keyboard("Escape"),
+        PhysicalInput::gamepad("Start"),
+    ] {
+        assert_eq!(
+            settings
+                .binding_conflict(0, GameAction::SoftDrop, &input)
+                .map(|conflict| conflict.existing),
+            Some(BindingOwner::Fixed),
+            "{input:?} proposes a pause and cannot also be a rules action"
+        );
+    }
+
+    // The vertical directions only move menu focus, which is the room the
+    // default drop bindings sit in -- but the rotations also carry confirm and
+    // back, so for those two the same key is taken.
+    let up = PhysicalInput::keyboard("KeyW");
+    assert!(
+        settings
+            .binding_conflict(1, GameAction::SoftDrop, &up)
+            .is_some_and(|conflict| conflict.existing
+                == BindingOwner::Player {
+                    player: 0,
+                    action: GameAction::HardDrop,
+                }),
+        "P1 already holds the key; that is a player conflict, not a fixed one"
+    );
+    assert_eq!(
+        UserSettings {
+            players: std::array::from_fn(|_| PlayerInputBindings {
+                bindings: Default::default(),
+            }),
+            ..UserSettings::default()
+        }
+        .binding_conflict(0, GameAction::RotateCounterClockwise, &up)
+        .map(|conflict| conflict.existing),
+        Some(BindingOwner::Fixed),
+        "the rotations carry the menu confirm and back, which the key already moves focus for"
     );
 }
 
@@ -511,7 +610,10 @@ fn a_capture_writes_cancels_or_reports_a_conflict_for_the_page_to_resolve() {
         outcome,
         CaptureOutcome::Conflict(BindingConflict {
             requested: GameAction::SoftDrop,
-            existing: GameAction::HardDrop,
+            existing: BindingOwner::Player {
+                player: 0,
+                action: GameAction::HardDrop,
+            },
             input: taken_key.clone(),
         })
     );
@@ -534,4 +636,93 @@ fn a_capture_writes_cancels_or_reports_a_conflict_for_the_page_to_resolve() {
 
     // A fixed binding never opens a capture at all.
     assert!(BindingCapture::open(0, GameAction::Left, DeviceCategory::Keyboard).is_none());
+}
+
+// component/user-settings::TC-012
+#[test]
+fn binding_replaces_what_the_action_held_on_that_device() {
+    let mut bindings = PlayerInputBindings::for_player(0);
+    let before_pad = bindings
+        .input_for(GameAction::SoftDrop, DeviceCategory::Gamepad)
+        .expect("the default pad column is populated")
+        .clone();
+
+    bindings.bind(GameAction::SoftDrop, PhysicalInput::keyboard("KeyX"));
+    bindings.bind(GameAction::SoftDrop, PhysicalInput::keyboard("KeyZ"));
+
+    assert_eq!(
+        bindings.bindings[&GameAction::SoftDrop]
+            .iter()
+            .filter(|input| input.category() == DeviceCategory::Keyboard)
+            .count(),
+        1,
+        "a second keyboard binding would fire while the page showed the first"
+    );
+    assert_eq!(
+        bindings.input_for(GameAction::SoftDrop, DeviceCategory::Keyboard),
+        Some(&PhysicalInput::keyboard("KeyZ"))
+    );
+    assert_eq!(
+        bindings.input_for(GameAction::SoftDrop, DeviceCategory::Gamepad),
+        Some(&before_pad),
+        "the other device category is untouched"
+    );
+}
+
+// component/user-settings::TC-013
+#[test]
+fn loading_repairs_a_document_that_breaks_the_binding_invariants() {
+    // Written the way the pre-fix capture wrote them: every accepted press
+    // appended, nothing checked the other player, nothing checked the fixed
+    // bindings. Only the first entry of each category was ever visible.
+    let document = r#"(
+    schema_version: 1,
+    players: ((
+        bindings: {
+            SoftDrop: [Keyboard("KeyS"), Gamepad("DPadDown")],
+            HardDrop: [Keyboard("KeyW"), Gamepad("DPadUp")],
+            RotateClockwise: [Keyboard("KeyK"), Gamepad("East")],
+            RotateCounterClockwise: [Keyboard("KeyJ"), Gamepad("South")],
+        },
+    ), (
+        bindings: {
+            SoftDrop: [Keyboard("ArrowDown"), Gamepad("DPadDown")],
+            HardDrop: [Keyboard("ArrowUp"), Gamepad("DPadUp")],
+            RotateClockwise: [Keyboard("Numpad2"), Gamepad("East"), Keyboard("Semicolon"), Keyboard("KeyS"), Keyboard("BracketLeft")],
+            RotateCounterClockwise: [Keyboard("Numpad1"), Gamepad("South"), Keyboard("KeyW")],
+        },
+    )),
+)"#;
+    let mut settings = parse_settings(document).expect("the document is well-formed RON");
+
+    let dropped = settings.normalize_bindings();
+
+    let dropped_inputs: Vec<&PhysicalInput> = dropped.iter().map(|entry| &entry.input).collect();
+    assert_eq!(
+        dropped_inputs,
+        vec![
+            &PhysicalInput::keyboard("Semicolon"),
+            &PhysicalInput::keyboard("KeyS"),
+            &PhysicalInput::keyboard("BracketLeft"),
+            &PhysicalInput::keyboard("KeyW"),
+        ],
+        "the first binding of each category survives, because that is the one the page has been showing"
+    );
+    assert!(dropped.iter().all(|entry| entry.player == 1));
+    assert_eq!(
+        settings.players[1].input_for(GameAction::RotateClockwise, DeviceCategory::Keyboard),
+        Some(&PhysicalInput::keyboard("Numpad2"))
+    );
+    assert!(
+        settings.players[1]
+            .actions_for(&PhysicalInput::keyboard("KeyS"))
+            .next()
+            .is_none(),
+        "P1's soft drop key must stop acting as P2's menu back"
+    );
+
+    // The repaired document is stable: running it again drops nothing.
+    assert!(settings.normalize_bindings().is_empty());
+    // And the built-in defaults were never in violation to begin with.
+    assert!(UserSettings::default().normalize_bindings().is_empty());
 }

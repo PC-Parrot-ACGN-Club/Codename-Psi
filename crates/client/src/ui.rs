@@ -12,7 +12,7 @@ use bevy::window::PrimaryWindow;
 use crate::app_state::{AppState, AppTransitionRequests, AppTransitionSet, SettingsOrigin};
 use crate::data::RulesData;
 use crate::i18n::Localization;
-use crate::input::{UIAction, UIActionEvent};
+use crate::input::{GamepadSlots, UIAction, UIActionEvent};
 use crate::match_flow::{MatchResultSummary, MatchSeedSource, MatchSelection, SelectedMode};
 use crate::page::{CharacterSelectPage, MatchMode, PageCommand, PageItem, PageModel};
 use crate::presentation::VirtualCanvas;
@@ -61,6 +61,7 @@ impl Plugin for UiPlugin {
                     refresh_setting_values,
                     refresh_key_legend,
                     refresh_binding_rejection,
+                    refresh_gamepad_rows,
                 ),
             );
 
@@ -218,9 +219,10 @@ const fn page_ground(state: AppState, origin: Option<SettingsOrigin>) -> Color {
 
 fn spawn_page(world: &mut World, state: AppState) {
     let origin = world.get_resource::<SettingsOrigin>().copied();
-    let Some(model) = PageModel::for_state(state, origin) else {
+    let Some(mut model) = PageModel::for_state(state, origin) else {
         return;
     };
+    model.set_gamepad_available(world.resource::<GamepadSlots>().any_connected());
     let font = world.resource::<UiFont>().0.clone();
     let rows: Vec<(PageItem, String, bool)> = {
         let localization = world.resource::<Localization>();
@@ -594,6 +596,24 @@ fn spawn_settings_rows(
 #[derive(Debug, Component)]
 struct BindingRejectionText;
 
+/// Name the holder of a key a rebinding was refused for.
+///
+/// A player number is part of the answer because one keyboard serves both
+/// locals: without it, "already bound to Soft Drop" reads as a lie to the player
+/// whose own soft drop is somewhere else entirely.
+fn binding_owner_label(
+    localization: &Localization,
+    owner: crate::settings::BindingOwner,
+) -> String {
+    use crate::settings::BindingOwner;
+    match owner {
+        BindingOwner::Player { player, action } => {
+            format!("P{} {}", player + 1, localization.text(action_key(action)))
+        }
+        BindingOwner::Fixed => localization.text("settings.binding_fixed"),
+    }
+}
+
 /// Report a refused rebinding, naming the key and the action that holds it.
 fn refresh_binding_rejection(
     rejection: Res<crate::settings::LastBindingRejection>,
@@ -605,7 +625,7 @@ fn refresh_binding_rejection(
             "{} {} → {}",
             localization.text("settings.binding_taken"),
             key_display(conflict.input.name()),
-            localization.text(action_key(conflict.existing)),
+            binding_owner_label(&localization, conflict.existing),
         )
     });
     for mut text in &mut notices {
@@ -897,6 +917,10 @@ fn drive_focused_page(
             // page -- `Back` -- still belongs to the ring, or the page would
             // swallow its own exit and strand the player in settings.
             && page.0.focused().id.is_setting()
+            // The ring refuses to run a disabled item's command, but a setting
+            // row is edited on this branch and never reaches the ring, so the
+            // same refusal has to be spelled out here.
+            && page.0.focused().enabled
         {
             drive_settings(&mut pages, page.0.focused().id);
             continue;
@@ -1011,6 +1035,24 @@ fn next_volume(current: f32) -> f32 {
     }
 }
 
+/// Whether this input is the one a player currently goes back with.
+///
+/// `Back` has no binding of its own; it is the menu meaning of the player's
+/// clockwise rotation, so that is what this reads.
+fn is_back_input(
+    settings: &crate::settings::UserSettings,
+    player: usize,
+    input: &crate::input::PhysicalInput,
+) -> bool {
+    crate::input::ui_action_source(UIAction::Back).is_some_and(|action| {
+        settings
+            .players
+            .get(player)
+            .and_then(|bindings| bindings.bindings.get(&action))
+            .is_some_and(|inputs| inputs.contains(input))
+    })
+}
+
 /// Complete an open rebinding from the next physical input.
 ///
 /// This reads devices directly because a capture suspends the normal
@@ -1031,11 +1073,6 @@ fn complete_binding_capture(
     let Some(capture) = capture else {
         return;
     };
-    // Back cancels, leaving the original binding in place.
-    if keys.just_pressed(KeyCode::Escape) {
-        commands.remove_resource::<crate::settings::BindingCapture>();
-        return;
-    }
 
     let captured = keys
         .get_just_pressed()
@@ -1051,6 +1088,18 @@ fn complete_binding_capture(
     let Some(input) = captured else {
         return;
     };
+
+    // Back cancels, leaving the original binding in place. It is read off the
+    // player's own back binding on *either* device, not just the one being
+    // captured: a pad capture opened with no pad in hand can only be left from
+    // the keyboard. Escape stays as the last resort for a player whose back
+    // binding is itself what they are in the middle of replacing.
+    if input == PhysicalInput::keyboard("Escape")
+        || is_back_input(&settings, capture.player, &input)
+    {
+        commands.remove_resource::<crate::settings::BindingCapture>();
+        return;
+    }
 
     match capture.offer(&mut settings, &input) {
         Ok(CaptureOutcome::Ignored) => return,
@@ -1088,6 +1137,35 @@ fn refresh_setting_values(
         } else {
             setting_value(value.0, &settings, &localization)
         };
+        if text.0 != shown {
+            text.0 = shown;
+        }
+    }
+}
+
+/// Follow pads appearing and disappearing while the settings page is up.
+///
+/// Row availability is decided when the page spawns, which would otherwise
+/// leave a player who plugged their pad in one screen too late looking at a row
+/// that says the pad is missing.
+fn refresh_gamepad_rows(
+    slots: Res<GamepadSlots>,
+    localization: Res<Localization>,
+    page: Option<ResMut<ActivePage>>,
+    mut labels: Query<(&PageItemLabel, &mut Text)>,
+) {
+    let Some(mut page) = page else {
+        return;
+    };
+    if page.0.state() != AppState::Settings || !page.0.set_gamepad_available(slots.any_connected())
+    {
+        return;
+    }
+    for (label, mut text) in &mut labels {
+        let Some(item) = page.0.items().iter().find(|item| item.id == label.0) else {
+            continue;
+        };
+        let shown = item_label(&localization, item);
         if text.0 != shown {
             text.0 = shown;
         }

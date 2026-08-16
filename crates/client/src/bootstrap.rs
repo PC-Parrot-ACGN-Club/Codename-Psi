@@ -100,11 +100,16 @@ impl Plugin for BootstrapPlugin {
 }
 
 /// Resolve `UserSettings`, falling back to built-in defaults on any failure.
+///
+/// This is the one door from the persisted document into memory, so the binding
+/// invariants are repaired here: a file written before they were enforced parses
+/// fine and is still wrong to play on.
 pub fn load_settings(
     paths: Res<BootstrapPaths>,
     mut commands: Commands,
     mut status: ResMut<BootstrapStatus>,
     mut diagnostics: ResMut<BootstrapDiagnostics>,
+    mut save: MessageWriter<crate::settings::SaveSettingsRequest>,
 ) {
     let store = match &paths.settings {
         Some(path) => Some(SettingsStore::new(path)),
@@ -119,13 +124,29 @@ pub fn load_settings(
         |store| store.load(),
     );
 
-    match load {
-        SettingsLoad::Loaded(settings) => commands.insert_resource(settings),
+    let mut settings = match load {
+        SettingsLoad::Loaded(settings) => settings,
         SettingsLoad::Defaulted { settings, error } => {
             diagnostics.settings = error;
-            commands.insert_resource(settings);
+            settings
         }
+    };
+    let dropped = settings.normalize_bindings();
+    if !dropped.is_empty() {
+        for binding in &dropped {
+            warn!(
+                "dropped P{} {:?} binding {}: another binding already holds it",
+                binding.player + 1,
+                binding.action,
+                binding.input.name()
+            );
+        }
+        // Written back so the repair is durable. Leaving it in memory alone
+        // would repair every launch and fix nothing, and the file would keep
+        // its extra bindings for as long as the player never edits a setting.
+        save.write(crate::settings::SaveSettingsRequest);
     }
+    commands.insert_resource(settings);
     status.settings = BootstrapTaskState::Resolved;
 }
 
