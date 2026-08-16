@@ -509,9 +509,13 @@ fn the_boards_sit_against_the_middle_channel_rather_than_the_screen_edges() {
     let mut query = app
         .world_mut()
         .query::<(&client::hud::BoardCell, &ComputedNode, &UiGlobalTransform)>();
-    let cells: Vec<(usize, Vec2, Vec2)> = query
+    let collected: Vec<(usize, u8, Vec2, Vec2)> = query
         .iter(app.world())
-        .map(|(cell, node, transform)| (cell.slot, node.size, transform.translation))
+        .map(|(cell, node, transform)| (cell.slot, cell.row, node.size, transform.translation))
+        .collect();
+    let cells: Vec<(usize, Vec2, Vec2)> = collected
+        .iter()
+        .map(|(slot, _, size, translation)| (*slot, *size, *translation))
         .collect();
     assert_eq!(cells.len(), 2 * 6 * 12, "both boards are fully built");
 
@@ -567,6 +571,65 @@ fn the_boards_sit_against_the_middle_channel_rather_than_the_screen_edges() {
     let bottom = ys.iter().copied().fold(f32::MIN, f32::max) + cell_size.y / 2.0;
     assert!(top > 150.0, "no room left above the board: {top}");
     assert!(bottom < 950.0, "no room left below the board: {bottom}");
+
+    // A ball part-way into a row is drawn over the row below it, which holds
+    // only while the board's rows sit in the tree bottom row first: Bevy UI
+    // stacks later siblings on top. Visual order alone would not catch a
+    // regression here, so the child order is what gets asserted.
+    let board = {
+        let mut query = app.world_mut().query::<(Entity, &client::hud::BoardCell)>();
+        let (cell, _) = query
+            .iter(app.world())
+            .find(|(_, cell)| cell.slot == 0)
+            .expect("the board is built");
+        let row_node = app
+            .world()
+            .get::<ChildOf>(cell)
+            .expect("a cell has a row")
+            .0;
+        app.world()
+            .get::<ChildOf>(row_node)
+            .expect("a row has a board")
+            .0
+    };
+    let row_order: Vec<u8> = app
+        .world()
+        .get::<Children>(board)
+        .expect("the board has rows")
+        .iter()
+        .filter_map(|row_node| {
+            let first = app.world().get::<Children>(row_node)?.iter().next()?;
+            app.world()
+                .get::<client::hud::BoardCell>(first)
+                .map(|c| c.row)
+        })
+        .collect();
+    let mut descending = row_order.clone();
+    descending.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq!(
+        row_order, descending,
+        "the top row has to be the last child, or falling balls draw under the row below"
+    );
+
+    // And it still has to read top-down on screen.
+    let row_y = |slot: usize, row: u8| {
+        collected
+            .iter()
+            .find(|(cell_slot, cell_row, ..)| *cell_slot == slot && *cell_row == row)
+            .map(|(.., translation)| translation.y)
+            .expect("every row exists")
+    };
+    let last_row = collected
+        .iter()
+        .map(|(_, row, ..)| *row)
+        .max()
+        .expect("rows exist");
+    assert!(
+        row_y(0, 0) < row_y(0, last_row),
+        "row 0 is no longer the top row: {} against {}",
+        row_y(0, 0),
+        row_y(0, last_row)
+    );
 }
 
 /// `CHAIN n` belongs in the board area the player is already watching, not in

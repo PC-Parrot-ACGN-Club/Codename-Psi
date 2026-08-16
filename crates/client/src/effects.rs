@@ -44,7 +44,7 @@ const MARK_LIFE_TICKS: u64 = 24;
 /// How far a mark drifts over its life, in cells.
 const MARK_DRIFT_CELLS: f32 = 1.4;
 /// Cell pitch, matching the board grid the marks are drawn over.
-const CELL_PITCH: f32 = 46.0;
+const CELL_PITCH: f32 = crate::hud::CELL_PITCH;
 
 /// How long the band entering Fever is up, in rule ticks.
 const FEVER_BAND_TICKS: u64 = 45;

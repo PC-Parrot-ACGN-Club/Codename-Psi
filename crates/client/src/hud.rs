@@ -28,6 +28,12 @@ const CELL: f32 = 60.0;
 const CELL_GAP: f32 = 2.0;
 /// Padding inside the board panel, on every side.
 const BOARD_PAD: f32 = 8.0;
+/// Distance between the same point of two neighbouring cells.
+///
+/// Anything drawn over the grid in cell units -- a falling ball's fraction, a
+/// mark's drift -- has to travel by this, or it drifts out of step with the
+/// board as soon as the cell size changes.
+pub(crate) const CELL_PITCH: f32 = CELL + CELL_GAP;
 /// `6 × 60 + 5 × 2 + 2 × 8`. The five layout columns are sized around it.
 const BOARD_WIDTH: f32 = 386.0;
 /// `12 × 60 + 11 × 2 + 2 × 8`.
@@ -439,7 +445,7 @@ fn refresh_hud(inputs: HudInputs, mut feedback: ResMut<MatchFeedback>, mut cells
         if let Some(moving) = moving {
             // The fraction of a cell the ball has travelled is spent here, so
             // it slides between rows instead of jumping a whole cell at a time.
-            transform.translation.y = px(moving.offset * (CELL + CELL_GAP));
+            transform.translation.y = px(moving.offset * CELL_PITCH);
         } else if overlay.clearing.contains(&key) {
             let pose = overlay.clear_pose;
             color = color
@@ -1512,7 +1518,12 @@ fn board_grid(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Enti
     let board = commands
         .spawn((
             Node {
-                flex_direction: FlexDirection::Column,
+                // Rows are built bottom-up so the tree order matches the
+                // drawing order a falling ball needs: a ball part-way into a
+                // row is drawn over the row below it, not under it. Bevy UI
+                // stacks later siblings on top, so the top row has to be the
+                // last child.
+                flex_direction: FlexDirection::ColumnReverse,
                 row_gap: px(CELL_GAP),
                 padding: UiRect::all(px(BOARD_PAD)),
                 border_radius: BorderRadius::all(px(10)),
@@ -1522,7 +1533,7 @@ fn board_grid(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Enti
         ))
         .id();
 
-    for row in 0..VISIBLE_ROWS {
+    for row in (0..VISIBLE_ROWS).rev() {
         let line = commands
             .spawn((
                 Node {
