@@ -317,3 +317,162 @@ fn the_portrait_name_is_the_localized_roster_name_not_the_drop_set_id() {
         );
     }
 }
+
+/// Every string currently drawn on screen.
+fn screen_text(app: &mut App) -> Vec<String> {
+    app.update();
+    app.world_mut()
+        .query::<&Text>()
+        .iter(app.world())
+        .map(|text| text.0.clone())
+        .collect()
+}
+
+/// Drive one menu action into the page on screen, as a player would.
+fn act(app: &mut App, action: client::input::UIAction) {
+    app.world_mut()
+        .write_message(client::input::UIActionEvent { player: 0, action });
+    app.update();
+}
+
+// integration-system/presentation-runtime::TC-014
+#[test]
+fn walking_into_the_binding_tree_replaces_the_rows_on_screen() {
+    use client::input::UIAction;
+    use client::page::{PageItem, SettingsPage};
+    use client::ui::ActivePage;
+
+    let mut app = ui_app();
+    advance_to(&mut app, AppState::MainMenu);
+    submit(
+        &mut app,
+        AppState::Settings,
+        AppTransitionCause::SettingsOpened,
+    );
+    commit(&mut app);
+
+    // The root level draws the general settings and the way into the tree, and
+    // no binding row at all: those need a player and a device first.
+    let root = screen_text(&mut app);
+    assert!(root.iter().any(|text| text == "Language"));
+    assert!(root.iter().any(|text| text == "Key Bindings"));
+    assert!(
+        !root.iter().any(|text| text == "Soft Drop / Confirm"),
+        "the root level must not list binding rows, got {root:?}"
+    );
+
+    app.world_mut()
+        .resource_mut::<ActivePage>()
+        .0
+        .focus_item(PageItem::InputBindings)
+        .expect("the settings page offers the binding tree");
+    act(&mut app, UIAction::Confirm);
+    assert_eq!(
+        app.world().resource::<ActivePage>().0.settings_page(),
+        SettingsPage::Players
+    );
+
+    // The rows really are replaced, not added to: the general settings are gone
+    // from the screen, and the two players have taken their place.
+    let players = screen_text(&mut app);
+    assert!(
+        !players.iter().any(|text| text == "Language"),
+        "descending must clear the level above it, got {players:?}"
+    );
+    assert!(players.iter().any(|text| text == "P1"));
+    assert!(players.iter().any(|text| text == "P2"));
+
+    act(&mut app, UIAction::Confirm);
+    let devices = screen_text(&mut app);
+    assert!(devices.iter().any(|text| text == "Keyboard"));
+    // No pad is connected in this harness, so the pad row says why it cannot be
+    // opened -- and keeps saying it, which is the whole point of the reason
+    // travelling with the row.
+    assert!(
+        devices
+            .iter()
+            .any(|text| text.starts_with("Gamepad") && text.contains("no gamepad connected")),
+        "the pad row has to say why it is unavailable, got {devices:?}"
+    );
+
+    // The keyboard level names its four actions without repeating whose they
+    // are or what they are on: the two levels above already said so.
+    act(&mut app, UIAction::Confirm);
+    let bindings = screen_text(&mut app);
+    for action in [
+        "Soft Drop",
+        "Hard Drop",
+        "Rotate CW / Back",
+        "Rotate CCW / Confirm",
+    ] {
+        assert!(
+            bindings.iter().any(|text| text == action),
+            "the keyboard level must list {action}, got {bindings:?}"
+        );
+    }
+    assert!(
+        bindings.iter().any(|text| text == "S"),
+        "each row shows the key it is bound to, got {bindings:?}"
+    );
+
+    // Backing out arrives at the level entered from, still fully drawn.
+    act(&mut app, UIAction::Back);
+    act(&mut app, UIAction::Back);
+    act(&mut app, UIAction::Back);
+    assert_eq!(
+        app.world().resource::<ActivePage>().0.settings_page(),
+        SettingsPage::Root
+    );
+    let returned = screen_text(&mut app);
+    assert!(returned.iter().any(|text| text == "Language"));
+    assert!(
+        !returned.iter().any(|text| text == "P1"),
+        "the tree must not be left behind under the root level, got {returned:?}"
+    );
+    assert_eq!(current_state(&app), AppState::Settings);
+}
+
+// integration-system/presentation-runtime::TC-014
+#[test]
+fn a_language_change_keeps_the_reason_a_row_is_unavailable() {
+    use client::input::UIAction;
+    use client::page::PageItem;
+    use client::settings::UserSettings;
+    use client::ui::ActivePage;
+
+    let mut app = ui_app();
+    advance_to(&mut app, AppState::MainMenu);
+    submit(
+        &mut app,
+        AppState::Settings,
+        AppTransitionCause::SettingsOpened,
+    );
+    commit(&mut app);
+
+    app.world_mut()
+        .resource_mut::<ActivePage>()
+        .0
+        .focus_item(PageItem::InputBindings)
+        .expect("the settings page offers the binding tree");
+    act(&mut app, UIAction::Confirm);
+    act(&mut app, UIAction::Confirm);
+
+    let unavailable = |app: &mut App| {
+        screen_text(app)
+            .into_iter()
+            .find(|text| text.starts_with("Gamepad") || text.starts_with("手柄"))
+            .expect("the device level lists the pad")
+    };
+    assert!(unavailable(&mut app).contains("no gamepad connected"));
+
+    // Editing an unrelated setting once rewrote every row from a model that
+    // knew nothing about devices, which silently dropped this line and left a
+    // row that was disabled for no stated reason until a pad was plugged in.
+    app.world_mut().resource_mut::<UserSettings>().language = "zh-CN".into();
+    app.update();
+    let translated = unavailable(&mut app);
+    assert!(
+        translated.contains("未连接手柄"),
+        "the reason has to survive a language change, got {translated:?}"
+    );
+}

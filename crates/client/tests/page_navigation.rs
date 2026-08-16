@@ -219,44 +219,42 @@ fn lan_entry_is_focusable_disabled_and_never_starts_a_match() {
     assert_eq!(page.handle(UIAction::Confirm), None);
 }
 
-// component/page-navigation::TC-013
-#[test]
-fn pad_rebinding_rows_follow_whether_a_pad_is_connected() {
-    use client::settings::DeviceCategory;
-
-    let is_pad_row = |id: PageItem| {
-        matches!(
-            id,
-            PageItem::Rebind {
-                device: DeviceCategory::Gamepad,
-                ..
-            }
-        )
-    };
+/// A settings page opened from the main menu, with focus on a given item.
+fn settings_page_focused_on(id: PageItem) -> PageModel {
     let mut page =
         PageModel::for_state(AppState::Settings, Some(SettingsOrigin(AppState::MainMenu)))
             .expect("settings page exists");
-    let pad_rows = page
-        .items()
-        .iter()
-        .filter(|item| is_pad_row(item.id))
-        .count();
-    assert!(pad_rows > 0, "the settings page lists pad rebinding rows");
+    page.focus_item(id).expect("the page lists that item");
+    page
+}
 
-    assert!(page.set_gamepad_available(false));
-    let reason = {
-        let disabled: Vec<&FocusItem> = page
-            .items()
+// component/page-navigation::TC-013
+#[test]
+fn the_pad_row_follows_whether_a_pad_is_connected() {
+    use client::page::SettingsPage;
+    use client::settings::DeviceCategory;
+
+    let device_row = |device| PageItem::DeviceBindings { player: 0, device };
+    let mut page = settings_page_focused_on(PageItem::InputBindings);
+    page.handle(UIAction::Confirm);
+    page.focus_item(PageItem::PlayerBindings { player: 0 })
+        .expect("the tree lists P1");
+    page.handle(UIAction::Confirm);
+    assert_eq!(page.settings_page(), SettingsPage::Devices { player: 0 });
+
+    // A model that has not been told about devices assumes none: a row that is
+    // wrongly enabled opens a capture that can never complete.
+    let pad_row = |page: &PageModel| {
+        page.items()
             .iter()
-            .filter(|item| is_pad_row(item.id))
-            .collect();
-        assert_eq!(disabled.len(), pad_rows, "the row list does not shrink");
-        assert!(disabled.iter().all(|item| !item.enabled));
-        disabled[0]
-            .unavailable_reason
-            .clone()
-            .expect("a disabled row says why")
+            .find(|item| item.id == device_row(DeviceCategory::Gamepad))
+            .cloned()
+            .expect("the device level lists the pad")
     };
+    assert!(!pad_row(&page).enabled);
+    let reason = pad_row(&page)
+        .unavailable_reason
+        .expect("a disabled row says why");
     assert_eq!(reason, "settings.no_gamepad");
     for source in [
         include_str!("../../../assets/i18n/en.json"),
@@ -269,68 +267,174 @@ fn pad_rebinding_rows_follow_whether_a_pad_is_connected() {
         );
     }
 
-    // The keyboard rows are untouched: one missing device does not take the
-    // whole rebinding surface with it.
+    // The list does not shrink and the keyboard row is untouched: one missing
+    // device does not take the whole binding surface with it.
+    assert_eq!(page.items().len(), 3, "the device level still lists both");
     assert!(
         page.items()
             .iter()
-            .filter(|item| matches!(
-                item.id,
-                PageItem::Rebind {
-                    device: DeviceCategory::Keyboard,
-                    ..
-                }
-            ))
-            .all(|item| item.enabled)
+            .find(|item| item.id == device_row(DeviceCategory::Keyboard))
+            .is_some_and(|item| item.enabled)
     );
 
-    // Plugging a pad in restores them without leaving the page.
-    assert!(page.set_gamepad_available(true));
-    assert!(
-        page.items()
-            .iter()
-            .filter(|item| is_pad_row(item.id))
-            .all(|item| item.enabled && item.unavailable_reason.is_none())
+    // A disabled row cannot be walked into.
+    page.focus_item(device_row(DeviceCategory::Gamepad))
+        .expect("a disabled row still takes focus");
+    assert_eq!(page.handle(UIAction::Confirm), None);
+    assert_eq!(
+        page.settings_page(),
+        SettingsPage::Devices { player: 0 },
+        "confirming a disabled row must not descend"
     );
+
+    // Plugging a pad in restores it without leaving the page.
+    assert!(page.set_gamepad_available(true));
+    assert!(pad_row(&page).enabled && pad_row(&page).unavailable_reason.is_none());
     assert!(
         !page.set_gamepad_available(true),
         "an unchanged availability must not ask the page to redraw"
+    );
+
+    // Walking away and back rebuilds the level, and the rebuilt one has to
+    // still know about the missing pad -- rebuilding without it is how the row
+    // once lost the line saying why it was unavailable.
+    assert!(page.set_gamepad_available(false));
+    page.handle(UIAction::Back);
+    page.focus_item(PageItem::PlayerBindings { player: 0 })
+        .expect("the tree lists P1");
+    page.handle(UIAction::Confirm);
+    assert!(!pad_row(&page).enabled);
+    assert_eq!(
+        pad_row(&page).unavailable_reason.as_deref(),
+        Some("settings.no_gamepad"),
+        "a rebuilt level still says why the row is unavailable"
     );
 }
 
 // component/page-navigation::TC-010
 #[test]
-fn settings_focus_order_follows_the_two_column_layout() {
-    let page = PageModel::for_state(AppState::Settings, Some(SettingsOrigin(AppState::MainMenu)))
-        .expect("settings page exists");
-    let ids: Vec<PageItem> = page.items().iter().map(|item| item.id).collect();
+fn the_binding_tree_descends_by_player_then_device_and_backs_out_the_way_it_came() {
+    use client::page::SettingsPage;
+    use client::settings::DeviceCategory;
+    use game_core::input::GameAction;
 
-    let back = ids
-        .iter()
-        .position(|id| *id == PageItem::Back)
-        .expect("settings has a back item");
-    let first_rebind = ids
-        .iter()
-        .position(|id| matches!(id, PageItem::Rebind { .. }))
-        .expect("settings has rebinding items");
+    let ids =
+        |page: &PageModel| -> Vec<PageItem> { page.items().iter().map(|item| item.id).collect() };
 
-    // The page renders the general settings and `Back` in one column and the
-    // rebindings in the other, so `Back` has to come before the first
-    // rebinding: focus finishes a column before it enters the next one.
+    // The root level is the general settings, the way into the tree, and back.
+    let mut page = settings_page_focused_on(PageItem::InputBindings);
+    assert_eq!(page.settings_page(), SettingsPage::Root);
+    let root = ids(&page);
     assert!(
-        back < first_rebind,
-        "back is at {back} but the rebinding column starts at {first_rebind}"
+        root[..root.len() - 2].iter().all(|id| id.is_setting()),
+        "the general settings come first"
     );
+    assert_eq!(root[root.len() - 2], PageItem::InputBindings);
+    assert_eq!(*root.last().expect("a level ends in back"), PageItem::Back);
     assert!(
-        ids[..back].iter().all(|id| id.is_setting()),
-        "the first column holds the general settings, then back"
+        !root.iter().any(|id| matches!(id, PageItem::Rebind { .. })),
+        "no binding row is listed before a player and a device were chosen"
     );
-    assert!(
-        ids[first_rebind..]
-            .iter()
-            .all(|id| matches!(id, PageItem::Rebind { .. })),
-        "the second column holds only rebindings"
+
+    // Confirming descends one level at a time: player, then device, then the
+    // four configurable actions.
+    page.handle(UIAction::Confirm);
+    assert_eq!(page.settings_page(), SettingsPage::Players);
+    assert_eq!(
+        ids(&page),
+        vec![
+            PageItem::PlayerBindings { player: 0 },
+            PageItem::PlayerBindings { player: 1 },
+            PageItem::Back,
+        ]
     );
+
+    page.focus_item(PageItem::PlayerBindings { player: 1 })
+        .expect("the tree lists P2");
+    page.handle(UIAction::Confirm);
+    assert_eq!(page.settings_page(), SettingsPage::Devices { player: 1 });
+    assert_eq!(
+        ids(&page),
+        vec![
+            PageItem::DeviceBindings {
+                player: 1,
+                device: DeviceCategory::Keyboard,
+            },
+            PageItem::DeviceBindings {
+                player: 1,
+                device: DeviceCategory::Gamepad,
+            },
+            PageItem::Back,
+        ]
+    );
+
+    page.handle(UIAction::Confirm);
+    assert_eq!(
+        page.settings_page(),
+        SettingsPage::Bindings {
+            player: 1,
+            device: DeviceCategory::Keyboard,
+        }
+    );
+    let bindings = ids(&page);
+    assert_eq!(
+        bindings[..bindings.len() - 1],
+        GameAction::CONFIGURABLE.map(|action| PageItem::Rebind {
+            player: 1,
+            action,
+            device: DeviceCategory::Keyboard,
+        })
+    );
+    assert_eq!(
+        *bindings.last().expect("a level ends in back"),
+        PageItem::Back
+    );
+
+    // Back climbs one level and lands on the row that was entered from, so the
+    // way out is the way in, reversed.
+    assert_eq!(page.handle(UIAction::Back), None);
+    assert_eq!(page.settings_page(), SettingsPage::Devices { player: 1 });
+    assert_eq!(
+        page.focused().id,
+        PageItem::DeviceBindings {
+            player: 1,
+            device: DeviceCategory::Keyboard,
+        }
+    );
+
+    assert_eq!(page.handle(UIAction::Back), None);
+    assert_eq!(page.settings_page(), SettingsPage::Players);
+    assert_eq!(page.focused().id, PageItem::PlayerBindings { player: 1 });
+
+    assert_eq!(page.handle(UIAction::Back), None);
+    assert_eq!(page.settings_page(), SettingsPage::Root);
+    assert_eq!(page.focused().id, PageItem::InputBindings);
+
+    // Only the root's back leaves the page.
+    assert_eq!(
+        page.handle(UIAction::Back),
+        Some(PageCommand::transition(
+            AppState::MainMenu,
+            AppTransitionCause::SettingsClosed,
+        ))
+    );
+}
+
+// component/page-navigation::TC-014
+#[test]
+fn confirming_a_sub_level_back_row_climbs_instead_of_leaving_the_page() {
+    use client::page::SettingsPage;
+
+    let mut page = settings_page_focused_on(PageItem::InputBindings);
+    page.handle(UIAction::Confirm);
+    page.focus_item(PageItem::Back)
+        .expect("a level ends in back");
+
+    // The row and the input have to agree: a player who reaches `Back` by
+    // walking the ring must not be thrown out of the settings page entirely.
+    assert_eq!(page.handle(UIAction::Confirm), None);
+    assert_eq!(page.settings_page(), SettingsPage::Root);
+    assert_eq!(page.focused().id, PageItem::InputBindings);
 }
 
 // component/page-navigation::TC-011
@@ -338,7 +442,7 @@ fn settings_focus_order_follows_the_two_column_layout() {
 fn the_corner_legend_names_each_player_s_current_confirm_and_back_keys() {
     use client::i18n::{Localization, parse_catalog};
     use client::input::{GamepadSlots, PhysicalInput};
-    use client::settings::{DeviceCategory, UserSettings};
+    use client::settings::UserSettings;
     use client::ui::{key_legend_text, rebind_label};
     use game_core::input::GameAction;
 
@@ -378,12 +482,7 @@ fn the_corner_legend_names_each_player_s_current_confirm_and_back_keys() {
     );
 
     // The settings row for that binding names both of the things the key does.
-    let label = rebind_label(
-        &localization,
-        0,
-        GameAction::RotateCounterClockwise,
-        DeviceCategory::Keyboard,
-    );
+    let label = rebind_label(&localization, GameAction::RotateCounterClockwise);
     assert!(
         label.contains("Rotate CCW") && label.contains("Confirm"),
         "the rotation row must name its menu meaning too, got {label:?}"
@@ -468,6 +567,7 @@ fn character_confirmation_requires_both_slots_and_allows_duplicates() {
 #[test]
 fn every_setting_value_is_named_in_the_players_own_language() {
     use client::i18n::{Localization, parse_catalog};
+    use client::input::GamepadSlots;
     use client::settings::{AnimationIntensity, UserSettings, WindowModeSetting};
     use client::ui::{language_name, setting_value};
 
@@ -481,6 +581,7 @@ fn every_setting_value_is_named_in_the_players_own_language() {
     };
     let en = Localization::new("en", catalogs());
     let zh = Localization::new("zh-CN", catalogs());
+    let slots = GamepadSlots::default();
 
     let mut settings = UserSettings {
         window_mode: WindowModeSetting::BorderlessFullscreen,
@@ -497,8 +598,8 @@ fn every_setting_value_is_named_in_the_players_own_language() {
         PageItem::Vibration,
         PageItem::ColorAssist,
     ] {
-        let english = setting_value(item, &settings, &en);
-        let chinese = setting_value(item, &settings, &zh);
+        let english = setting_value(item, &settings, &slots, &en);
+        let chinese = setting_value(item, &settings, &slots, &zh);
         assert!(
             !english.is_empty() && !chinese.is_empty(),
             "{item:?} is blank"
@@ -511,8 +612,14 @@ fn every_setting_value_is_named_in_the_players_own_language() {
 
     // ...while a number is a number.
     settings.master_volume = 0.5;
-    assert_eq!(setting_value(PageItem::MasterVolume, &settings, &en), "50%");
-    assert_eq!(setting_value(PageItem::MasterVolume, &settings, &zh), "50%");
+    assert_eq!(
+        setting_value(PageItem::MasterVolume, &settings, &slots, &en),
+        "50%"
+    );
+    assert_eq!(
+        setting_value(PageItem::MasterVolume, &settings, &slots, &zh),
+        "50%"
+    );
 
     // A language names itself the same way in every catalog, so a player who
     // cannot read the current one can still find their own.
@@ -530,7 +637,7 @@ fn every_setting_value_is_named_in_the_players_own_language() {
     // The language row shows the autonym, not the raw code.
     settings.language = "zh-CN".into();
     assert_eq!(
-        setting_value(PageItem::Language, &settings, &en),
+        setting_value(PageItem::Language, &settings, &slots, &en),
         "简体中文"
     );
 }

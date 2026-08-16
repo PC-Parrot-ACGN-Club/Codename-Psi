@@ -451,3 +451,170 @@ fn rebinding_a_rotation_moves_the_menu_key_with_it() {
         "the old key must stop confirming once it no longer rotates"
     );
 }
+
+// component/client-input::TC-010
+#[test]
+fn a_pad_takes_the_slot_and_the_keyboard_stops_driving_that_player() {
+    let mut app = controlled_app();
+    advance_to(&mut app, AppState::Match);
+
+    // Without a pad, P1 is on the keyboard: this is the fallback and also the
+    // default, because a desktop always has one.
+    press_key(&mut app, KeyCode::KeyA);
+    assert_eq!(
+        tick_actions(&mut app, 0),
+        PlayerActions::from_action(GameAction::Left),
+    );
+
+    // Plugging a pad in takes the slot immediately, mid-match included, and the
+    // key still physically held stops meaning anything for this player.
+    let pad = spawn_gamepad(&mut app);
+    assert_eq!(
+        tick_actions(&mut app, 0),
+        PlayerActions::EMPTY,
+        "a held key must not keep driving a player who is now on a pad",
+    );
+    // Released first: A and D are opposite directions, and two of those in one
+    // tick cancel each other, which would hide what this is asking about.
+    release_key(&mut app, KeyCode::KeyA);
+    press_key(&mut app, KeyCode::KeyD);
+    assert_eq!(
+        tick_actions(&mut app, 0),
+        PlayerActions::EMPTY,
+        "a fresh key press must not reach a player who is on a pad",
+    );
+
+    // The pad drives them instead.
+    app.world_mut()
+        .entity_mut(pad)
+        .get_mut::<Gamepad>()
+        .expect("the pad is spawned")
+        .digital_mut()
+        .press(GamepadButton::DPadLeft);
+    assert_eq!(
+        tick_actions(&mut app, 0),
+        PlayerActions::from_action(GameAction::Left),
+    );
+
+    // Unplugging falls straight back to the keyboard, which is still holding D.
+    app.world_mut().entity_mut(pad).despawn();
+    assert_eq!(
+        tick_actions(&mut app, 0),
+        PlayerActions::from_action(GameAction::Right),
+        "losing the pad returns the player to the keyboard at once",
+    );
+}
+
+// component/client-input::TC-010
+#[test]
+fn a_pad_on_one_slot_leaves_the_other_player_on_the_keyboard() {
+    let mut app = controlled_app();
+    advance_to(&mut app, AppState::Match);
+    spawn_gamepad(&mut app);
+
+    // One pad takes slot 0 only. P2 has none, so P2 is still on the keyboard --
+    // exclusivity is per player, not a global switch between two devices.
+    press_key(&mut app, KeyCode::KeyA);
+    press_key(&mut app, KeyCode::ArrowLeft);
+    assert_eq!(tick_actions(&mut app, 0), PlayerActions::EMPTY);
+    assert_eq!(
+        tick_actions(&mut app, 1),
+        PlayerActions::from_action(GameAction::Left),
+    );
+}
+
+// component/client-input::TC-010
+#[test]
+fn menu_input_follows_the_same_source_as_gameplay_input() {
+    let mut app = controlled_app();
+    advance_to(&mut app, AppState::MainMenu);
+    let pad = spawn_gamepad(&mut app);
+    app.update();
+    drain_ui_actions(&mut app);
+
+    // P1's keyboard confirm produces nothing while a pad holds the slot: the
+    // menu reads the player's input source, exactly as the rules path does.
+    press_key(&mut app, KeyCode::KeyJ);
+    app.update();
+    assert!(
+        !drain_ui_actions(&mut app)
+            .iter()
+            .any(|event| event.player == 0),
+        "a player on a pad must not also confirm from the keyboard",
+    );
+
+    // P2 has no pad, so P2's keyboard still works.
+    press_key(&mut app, KeyCode::Numpad1);
+    app.update();
+    assert!(
+        drain_ui_actions(&mut app).contains(&UIActionEvent {
+            player: 1,
+            action: UIAction::Confirm,
+        }),
+        "the player without a pad keeps their keyboard",
+    );
+
+    // Once the pad is gone, P1's keyboard confirms again. The key is released
+    // and pressed anew because a source change is not a press edge.
+    release_key(&mut app, KeyCode::KeyJ);
+    app.world_mut().entity_mut(pad).despawn();
+    app.update();
+    drain_ui_actions(&mut app);
+    press_key(&mut app, KeyCode::KeyJ);
+    app.update();
+    assert!(
+        drain_ui_actions(&mut app).contains(&UIActionEvent {
+            player: 0,
+            action: UIAction::Confirm,
+        }),
+        "losing the pad returns the menu to the keyboard too",
+    );
+}
+
+// component/client-input::TC-010
+#[test]
+fn with_both_slots_on_pads_the_keyboard_drives_nothing_at_all() {
+    let mut app = controlled_app();
+    let first = spawn_gamepad(&mut app);
+    spawn_gamepad(&mut app);
+    advance_to(&mut app, AppState::MainMenu);
+    app.update();
+    drain_ui_actions(&mut app);
+
+    // Both slots are taken, so no player is on the keyboard and it drives no
+    // focus ring. This is the cost of one source per player, stated plainly.
+    press_key(&mut app, KeyCode::KeyJ);
+    press_key(&mut app, KeyCode::Numpad1);
+    press_key(&mut app, KeyCode::KeyS);
+    app.update();
+    assert!(
+        drain_ui_actions(&mut app).is_empty(),
+        "with both players on pads the keyboard must not move or confirm anything",
+    );
+
+    // Pause follows the same rule: it is a fixed binding, not an exception.
+    advance_to(&mut app, AppState::Match);
+    press_key(&mut app, KeyCode::Escape);
+    app.update();
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<AppState>>().get(),
+        AppState::Match,
+        "the keyboard pause key means nothing while nobody is on the keyboard",
+    );
+
+    // Losing one pad puts that player back on the keyboard, and the pause key
+    // means something again. The key is re-pressed because a source change is
+    // not a press edge.
+    release_key(&mut app, KeyCode::Escape);
+    app.world_mut().entity_mut(first).despawn();
+    app.update();
+    press_key(&mut app, KeyCode::Escape);
+    app.update();
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<AppState>>().get(),
+        AppState::Paused,
+        "one player back on the keyboard restores its pause key",
+    );
+}

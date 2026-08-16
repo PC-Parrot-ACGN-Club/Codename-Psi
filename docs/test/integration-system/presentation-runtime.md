@@ -35,6 +35,8 @@
 - 装上 UI 栈后，页面实体随状态退出释放、HUD 随对局实例释放、一次性痕迹自行到期（TC-014）。
 - 圆框下的名字来自 roster 的 `display_name_key` 并经当前语言解析（TC-015）。
 - 目录在对局开始之后才发布时，圆框由替补换成角色自己的配色与徽章（TC-016）。
+- 走进设置页的按键层级时屏上的行整体换掉，退出层级时还原（TC-017）。
+- 切换语言后不可用行仍带着被本地化的不可用原因（TC-018）。
 - 高反馈场景下短命实体与并发 cue 不超预算（TC-007）。
 - 角色表现数据不进入开局规格摘要（TC-008；Concern: Determinism）。
 
@@ -55,6 +57,8 @@
 | 判定表 | cue 种类 × 两级音量 × 震动设置 × 手柄数 | TC-013 |
 | 场景 / 协作路径 | 逐页进入再逐页退回；对局—暂停—赛果的实体存活 | TC-014 |
 | 时序 | 降级级数据在对局开始前 / 后发布 | TC-016 |
+| 状态转移 | 设置页四级层级逐级下降再逐级返回 | TC-017 |
+| 场景法 | 手柄缺席时切换语言 | TC-018 |
 | 数据流 | roster → `display_name_key` → 本地化目录 → 屏上文本 | TC-015 |
 | 判定表 | 色觉辅助开/关 × 普通球/垃圾球/空格；四种手牌形状 | TC-011 |
 | 边界值分析 | 阶段进度取 0、命中占比、1 与越界值；两档动画强度 | TC-012 |
@@ -82,6 +86,8 @@
 | TC-014 | 页面与对局实体的存活期与它们所属的东西一致 | P1 | Component Integration | — | Client | 客户端 app 装有 Bevy UI 栈（无渲染后端），可走完页面主路径并建立真实对局实例 | 逐页进入主菜单→模式→角色再逐页退回；进入对局后暂停、恢复、进入赛果；另在对局中触发一次消除并继续推进 | 三层页面各一次往返；暂停与赛果各一次；消除后再推进 120 个 fixed tick | 退回到某页时该页的实体数与首次进入时相同，途经页面不残留；暂停时页面叠在 HUD 之上而不替换它；离开对局后对局实例与全部棋盘格实体一并释放；消除留下的痕迹在自身存活期结束后归零，无需其它系统清理 | [Confirmed] [表现运行时：画面重建](../../development/design/presentation-runtime.md#画面重建)；[页面导航与焦点](../../development/design/page-navigation.md)；[对局实例生命周期](match-lifecycle.md) |
 | TC-015 | 圆框下的名字来自 roster 与当前语言，而不是掉落组标识 | P1 | Component Integration | — | Client；Configuration | 客户端 app 装有 Bevy UI 栈，roster 与本地化目录均可用，对局已建立 | 进入对局并等待运行数据落地，读取屏上全部文本 | 双方角色为 `psi-a`、`psi-b`；两者的 `display_name_key` 在当前语言目录中均有条目 | 屏上出现两个角色 `display_name_key` 在当前语言下的文本；不出现角色标识本身；键在目录中缺失时不以键名充当名字 | [Confirmed] [角色表现数据：边界](../../development/design/character-presentation.md#边界)；[本地化运行时](../../development/design/localization-runtime.md) |
 | TC-016 | 角色表现目录晚于对局开始发布时圆框重解析 | P1 | Component Integration | — | Client | 客户端 app 装有 Bevy UI 栈，进入对局的一帧上角色表现目录尚未发布 | 进入对局并推进到目录发布，再推进一帧 | 仓库随包的 `characters.ron`；两名角色 | 圆框的边框色与徽章取自目录中该角色自己的取值，而非替补的槽位配色与显示名首字符；目录发布前的替补结果不被保留到本局结束 | [Confirmed] [角色表现数据：查询](../../development/design/character-presentation.md#查询) |
+| TC-017 | 设置页按键层级的行随层级整体替换 | P1 | Component Integration | — | Client | 客户端 app 装有 Bevy UI 栈，已进入设置页顶层，无手柄连接 | 逐级确认「按键设置」「P1」「键盘」，再逐级返回 | 随包 `en` 词条；四级层级 | 顶层同时给出通用设置项与按键设置入口且不含任何绑定行；下降一级后上一级的行不再出现在屏上；设备级的手柄行带出不可用原因；绑定级四行各只命名一个动作并给出当前键名；逐级返回后回到顶层且不残留下级的行，页面仍停在 `Settings` | [Confirmed] [页面导航与焦点：设置页层级](../../development/design/page-navigation.md#设置页层级) |
+| TC-018 | 切换语言后不可用原因仍随行给出 | P1 | Component Integration | — | Client | 客户端 app 装有 Bevy UI 栈，停在设置页的设备级，无手柄连接 | 读取手柄行文本，切换语言到 `zh-CN`，再次读取 | 随包 `en` 与 `zh-CN` 词条 | 两次读取的手柄行都带有不可用原因，且第二次以目标语言给出 | [Confirmed] [页面导航与焦点：设备可用性](../../development/design/page-navigation.md#设备可用性) |
 
 ## 风险查漏
 

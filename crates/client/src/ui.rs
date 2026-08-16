@@ -55,6 +55,9 @@ impl Plugin for UiPlugin {
             .add_systems(
                 PostUpdate,
                 (
+                    // The rows come first: everything after it writes into the
+                    // rows of the level currently on screen.
+                    refresh_settings_rows,
                     refresh_focus_visuals,
                     refresh_slot_visuals,
                     refresh_page_text,
@@ -62,7 +65,8 @@ impl Plugin for UiPlugin {
                     refresh_key_legend,
                     refresh_binding_rejection,
                     refresh_gamepad_rows,
-                ),
+                )
+                    .chain(),
             );
 
         for state in PAGE_STATES {
@@ -75,6 +79,7 @@ impl Plugin for UiPlugin {
             app.add_systems(OnExit(state), |mut commands: Commands| {
                 commands.remove_resource::<ActivePage>();
                 commands.remove_resource::<ActiveCharacterSelect>();
+                commands.remove_resource::<RenderedSettingsPage>();
             });
         }
     }
@@ -135,6 +140,9 @@ fn apply_virtual_canvas(
 }
 
 /// Localization key for an item's label.
+///
+/// Two items are not named by a key at all -- a player row by its number and a
+/// rebinding row by its action -- and [`item_label`] builds those itself.
 const fn label_key(item: PageItem) -> &'static str {
     match item {
         PageItem::StartGame => "main_menu.start",
@@ -157,7 +165,18 @@ const fn label_key(item: PageItem) -> &'static str {
         PageItem::Vibration => "settings.vibration",
         PageItem::AnimationIntensity => "settings.animation_intensity",
         PageItem::ColorAssist => "settings.color_assist",
-        PageItem::Rebind { .. } => "settings.rebind",
+        PageItem::InputBindings => "settings.input_bindings",
+        PageItem::DeviceBindings { device, .. } => device_key(device),
+        PageItem::PlayerBindings { .. } | PageItem::Rebind { .. } => "settings.input_bindings",
+    }
+}
+
+/// Localization key naming a device category.
+const fn device_key(device: crate::settings::DeviceCategory) -> &'static str {
+    use crate::settings::DeviceCategory;
+    match device {
+        DeviceCategory::Keyboard => "settings.device.keyboard",
+        DeviceCategory::Gamepad => "settings.device.gamepad",
     }
 }
 
@@ -168,11 +187,8 @@ const fn label_key(item: PageItem) -> &'static str {
 #[must_use]
 pub fn item_label(localization: &Localization, item: &crate::page::FocusItem) -> String {
     let mut label = match item.id {
-        PageItem::Rebind {
-            player,
-            action,
-            device,
-        } => rebind_label(localization, player, action, device),
+        PageItem::Rebind { action, .. } => rebind_label(localization, action),
+        PageItem::PlayerBindings { player } => format!("P{}", player + 1),
         id => localization.text(label_key(id)),
     };
     if let Some(reason) = &item.unavailable_reason {
@@ -287,8 +303,12 @@ fn spawn_page(world: &mut World, state: AppState) {
         AppState::CharacterSelect => spawn_character_slots(world, root, &font),
         AppState::Result => spawn_scoreline(world, root, &font),
         AppState::Settings => {
-            spawn_settings_rows(world, root, &font, &rows);
+            // The model goes in first: the rows are built from it, and are
+            // rebuilt from it again on every move through the binding tree.
             world.insert_resource(ActivePage(model));
+            world.remove_resource::<RenderedSettingsPage>();
+            spawn_settings_rows(world, root);
+            spawn_binding_notice(world, root, &font);
             return;
         }
         _ => {}
@@ -393,10 +413,21 @@ pub fn key_display(name: &str) -> String {
 ///
 /// Numbers stay numbers; everything a player picks from a fixed set is named in
 /// their own language, because the value is as much a word as the name is.
+/// Whether a row shows something in its value column.
+///
+/// Wider than [`PageItem::is_setting`]: the player rows of the binding tree are
+/// navigation, but they still report which device is driving that player, which
+/// is the only place that says so.
+#[must_use]
+const fn shows_value(item: PageItem) -> bool {
+    item.is_setting() || matches!(item, PageItem::PlayerBindings { .. })
+}
+
 #[must_use]
 pub fn setting_value(
     item: PageItem,
     settings: &crate::settings::UserSettings,
+    slots: &GamepadSlots,
     localization: &Localization,
 ) -> String {
     use crate::settings::{AnimationIntensity, WindowModeSetting};
@@ -416,6 +447,9 @@ pub fn setting_value(
             AnimationIntensity::Reduced => "settings.animation_intensity.reduced",
         }),
         PageItem::ColorAssist => switch(settings.color_assist),
+        // Not a setting but the answer to "which device am I on", which nothing
+        // else on the page states.
+        PageItem::PlayerBindings { player } => localization.text(device_key(slots.source(player))),
         PageItem::Rebind {
             player,
             action,
@@ -442,22 +476,14 @@ pub fn language_name(localization: &Localization, code: &str) -> String {
     if name == key { code.to_owned() } else { name }
 }
 
-/// Label for a rebinding row, which names a player, action and device.
+/// Label for a rebinding row, which names the action it binds.
 ///
-/// The two rotations also carry the menu confirm and back, so their rows name
-/// both meanings: one key, one row, both of the things it does.
+/// Neither the player nor the device appears here: reaching this row means
+/// having chosen both, and the two levels above the row still name them. The
+/// two rotations also carry the menu confirm and back, so their rows name both
+/// meanings: one key, one row, both of the things it does.
 #[must_use]
-pub fn rebind_label(
-    localization: &Localization,
-    player: usize,
-    action: game_core::input::GameAction,
-    device: crate::settings::DeviceCategory,
-) -> String {
-    use crate::settings::DeviceCategory;
-    let device = match device {
-        DeviceCategory::Keyboard => "KB",
-        DeviceCategory::Gamepad => "PAD",
-    };
+pub fn rebind_label(localization: &Localization, action: game_core::input::GameAction) -> String {
     let mut name = localization.text(action_key(action));
     if let Some(ui_action) = crate::input::BOUND_UI_ACTIONS
         .into_iter()
@@ -466,70 +492,88 @@ pub fn rebind_label(
         name.push_str(" / ");
         name.push_str(&localization.text(ui_action_key(ui_action)));
     }
-    format!("P{} {name} [{device}]", player + 1)
+    name
 }
 
-/// The settings page: general settings in one column, rebindings in the other.
+/// Container for the rows of the settings level on screen.
 ///
-/// Two columns because the page lists more rows than a 1080-tall canvas fits in
-/// one. The focus ring stays a single linear ring across both.
-fn spawn_settings_rows(
-    world: &mut World,
-    root: Entity,
-    font: &Handle<Font>,
-    rows: &[(PageItem, String, bool)],
-) {
-    let settings = world.resource::<crate::settings::UserSettings>().clone();
-    // Resolved before the first spawn: writing entities needs the world
-    // exclusively, and the values need the catalogs while they are still
-    // borrowable.
-    let values: Vec<(PageItem, String)> = {
-        let localization = world.resource::<Localization>();
-        rows.iter()
-            .filter(|(id, _, _)| id.is_setting())
-            .map(|(id, _, _)| (*id, setting_value(*id, &settings, localization)))
-            .collect()
-    };
+/// The rows are replaced wholesale when the player walks into or out of the
+/// binding tree, so they need a parent of their own to be cleared under.
+#[derive(Debug, Component)]
+struct SettingsRowsRoot;
 
-    let columns = world
+/// The settings level whose rows are currently spawned.
+///
+/// Compared against the model's level to notice a move through the tree; the
+/// model owns where the player is, this only records what is drawn.
+#[derive(Debug, Resource)]
+struct RenderedSettingsPage(crate::page::SettingsPage);
+
+/// The settings page: one column of rows for the current level of the tree.
+fn spawn_settings_rows(world: &mut World, root: Entity) {
+    let column = world
         .spawn((
+            SettingsRowsRoot,
             Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: px(80),
-                align_items: AlignItems::FlexStart,
+                flex_direction: FlexDirection::Column,
+                row_gap: px(6),
                 ..default()
             },
             BackgroundColor(Color::NONE),
         ))
         .id();
-    world.entity_mut(root).add_child(columns);
+    world.entity_mut(root).add_child(column);
+    fill_settings_rows(world);
+}
 
-    let mut column_ids = Vec::new();
-    for _ in 0..2 {
-        let column = world
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(6),
-                    ..default()
-                },
-                BackgroundColor(Color::NONE),
-            ))
-            .id();
-        world.entity_mut(columns).add_child(column);
-        column_ids.push(column);
-    }
+/// Replace the settings rows with those of the level the model is on.
+///
+/// Reads the rows off [`ActivePage`] rather than taking them as an argument, so
+/// the first spawn and every later move through the tree go through one path
+/// and cannot disagree about what a row says or whether it is enabled.
+fn fill_settings_rows(world: &mut World) {
+    let Some(column) = world
+        .query_filtered::<Entity, With<SettingsRowsRoot>>()
+        .iter(world)
+        .next()
+    else {
+        return;
+    };
+    let Some(page) = world.get_resource::<ActivePage>() else {
+        return;
+    };
+    let items: Vec<crate::page::FocusItem> = page.0.items().to_vec();
+    let level = page.0.settings_page();
 
-    for (id, label, _) in rows {
-        let is_rebind = matches!(id, PageItem::Rebind { .. });
-        let parent = column_ids[usize::from(is_rebind)];
-        let label = label.clone();
+    let settings = world.resource::<crate::settings::UserSettings>().clone();
+    let slots = world.resource::<GamepadSlots>();
+    // Resolved before the first spawn: writing entities needs the world
+    // exclusively, and the values need the catalogs while they are still
+    // borrowable.
+    let rows: Vec<(PageItem, String, String, bool)> = {
+        let localization = world.resource::<Localization>();
+        items
+            .iter()
+            .map(|item| {
+                let value = if shows_value(item.id) {
+                    setting_value(item.id, &settings, slots, localization)
+                } else {
+                    String::new()
+                };
+                (item.id, item_label(localization, item), value, item.enabled)
+            })
+            .collect()
+    };
+    let font = world.resource::<UiFont>().0.clone();
 
+    world.entity_mut(column).despawn_related::<Children>();
+
+    for (id, label, value, enabled) in rows {
         let row = world
             .spawn((
-                PageItemNode(*id),
+                PageItemNode(id),
                 Node {
-                    width: px(520),
+                    width: px(560),
                     height: px(40),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::SpaceBetween,
@@ -542,31 +586,30 @@ fn spawn_settings_rows(
                 BackgroundColor(CHIP),
             ))
             .id();
+        if !enabled {
+            // Grayed out but still focusable, so the player can read why.
+            world.entity_mut(row).insert(bevy::ui::InteractionDisabled);
+        }
 
         let name = world
             .spawn((
-                PageItemLabel(*id),
+                PageItemLabel(id),
                 Text::new(label),
                 TextFont {
                     font: FontSource::Handle(font.clone()),
                     font_size: FontSize::Px(22.0),
                     ..default()
                 },
-                TextColor(TEXT),
+                TextColor(if enabled { TEXT } else { TEXT_DISABLED }),
             ))
             .id();
         world.entity_mut(row).add_child(name);
 
-        if id.is_setting() {
+        if shows_value(id) {
             let value = world
                 .spawn((
-                    SettingValueText(*id),
-                    Text::new(
-                        values
-                            .iter()
-                            .find_map(|(candidate, value)| (candidate == id).then(|| value.clone()))
-                            .unwrap_or_default(),
-                    ),
+                    SettingValueText(id),
+                    Text::new(value),
                     TextFont {
                         font: FontSource::Handle(font.clone()),
                         font_size: FontSize::Px(22.0),
@@ -577,11 +620,35 @@ fn spawn_settings_rows(
                 .id();
             world.entity_mut(row).add_child(value);
         }
-        world.entity_mut(parent).add_child(row);
+        world.entity_mut(column).add_child(row);
     }
 
-    // A refused rebinding changes nothing else on the page, so without this the
-    // player's key press would look like it was simply ignored.
+    world.insert_resource(RenderedSettingsPage(level));
+}
+
+/// Follow the player through the settings tree, redrawing the rows they land on.
+fn refresh_settings_rows(world: &mut World) {
+    let Some(page) = world.get_resource::<ActivePage>() else {
+        return;
+    };
+    if page.0.state() != AppState::Settings {
+        return;
+    }
+    let level = page.0.settings_page();
+    if world
+        .get_resource::<RenderedSettingsPage>()
+        .is_some_and(|rendered| rendered.0 == level)
+    {
+        return;
+    }
+    fill_settings_rows(world);
+}
+
+/// Spawn the line that explains a refused rebinding.
+///
+/// A refused rebinding changes nothing else on the page, so without this the
+/// player's key press would look like it was simply ignored.
+fn spawn_binding_notice(world: &mut World, root: Entity, font: &Handle<Font>) {
     let notice = world
         .spawn((
             BindingRejectionText,
@@ -1132,6 +1199,7 @@ fn complete_binding_capture(
 /// Keep the value column showing what the settings actually hold.
 fn refresh_setting_values(
     settings: Res<crate::settings::UserSettings>,
+    slots: Res<GamepadSlots>,
     localization: Res<Localization>,
     capture: Option<Res<crate::settings::BindingCapture>>,
     mut values: Query<(&SettingValueText, &mut Text)>,
@@ -1144,7 +1212,7 @@ fn refresh_setting_values(
         let shown = if awaiting {
             "...".to_owned()
         } else {
-            setting_value(value.0, &settings, &localization)
+            setting_value(value.0, &settings, &slots, &localization)
         };
         if text.0 != shown {
             text.0 = shown;
@@ -1161,7 +1229,7 @@ fn refresh_gamepad_rows(
     slots: Res<GamepadSlots>,
     localization: Res<Localization>,
     page: Option<ResMut<ActivePage>>,
-    mut labels: Query<(&PageItemLabel, &mut Text)>,
+    mut labels: Query<(&PageItemLabel, &mut Text), Without<PageTitle>>,
 ) {
     let Some(mut page) = page else {
         return;
@@ -1170,15 +1238,7 @@ fn refresh_gamepad_rows(
     {
         return;
     }
-    for (label, mut text) in &mut labels {
-        let Some(item) = page.0.items().iter().find(|item| item.id == label.0) else {
-            continue;
-        };
-        let shown = item_label(&localization, item);
-        if text.0 != shown {
-            text.0 = shown;
-        }
-    }
+    relabel_rows(&page.0, &localization, &mut labels);
 }
 
 /// Rewrite every baked page string after a language change.
@@ -1186,32 +1246,44 @@ fn refresh_gamepad_rows(
 /// Row names and the heading are written once at spawn, which is enough for
 /// every change except the one that alters all of them at once. Switching the
 /// language must not require leaving and re-entering the page to take effect.
+///
+/// The labels are rewritten from the page on screen, never from a freshly built
+/// model. A fresh model knows nothing about connected devices, so rewriting from
+/// one silently dropped the line telling the player why the pad rows were
+/// unavailable -- and nothing put it back until a pad was plugged in or out.
 fn refresh_page_text(
     localization: Res<Localization>,
-    state: Res<State<AppState>>,
-    origin: Option<Res<SettingsOrigin>>,
+    page: Option<Res<ActivePage>>,
     mut titles: Query<&mut Text, (With<PageTitle>, Without<PageItemLabel>)>,
     mut labels: Query<(&PageItemLabel, &mut Text), Without<PageTitle>>,
 ) {
     if !localization.is_changed() {
         return;
     }
-    let state = *state.get();
-    let Some(model) = PageModel::for_state(state, origin.as_deref().copied()) else {
+    let Some(page) = page else {
         return;
     };
 
-    let title = localization.text(title_key(state));
+    let title = localization.text(title_key(page.0.state()));
     for mut text in &mut titles {
         if text.0 != title {
             text.0.clone_from(&title);
         }
     }
-    for (label, mut text) in &mut labels {
+    relabel_rows(&page.0, &localization, &mut labels);
+}
+
+/// Rewrite each row's label from the item it mirrors.
+fn relabel_rows(
+    model: &PageModel,
+    localization: &Localization,
+    labels: &mut Query<(&PageItemLabel, &mut Text), Without<PageTitle>>,
+) {
+    for (label, mut text) in labels {
         let Some(item) = model.items().iter().find(|item| item.id == label.0) else {
             continue;
         };
-        let shown = item_label(&localization, item);
+        let shown = item_label(localization, item);
         if text.0 != shown {
             text.0 = shown;
         }
@@ -1293,7 +1365,15 @@ fn refresh_focus_visuals(
         .is_some_and(|select| !select.0.confirm_enabled());
 
     for (item, mut background, children) in &mut rows {
-        let enabled = !(item.0 == PageItem::ConfirmCharacters && awaiting_slots);
+        // The model is the authority on availability; the character page's
+        // confirm is the one row whose reason lives outside it.
+        let enabled = page
+            .0
+            .items()
+            .iter()
+            .find(|candidate| candidate.id == item.0)
+            .is_none_or(|candidate| candidate.enabled)
+            && !(item.0 == PageItem::ConfirmCharacters && awaiting_slots);
         background.0 = match (enabled, item.0 == focused) {
             (false, _) => CHIP,
             (true, true) => CHIP_FOCUSED,

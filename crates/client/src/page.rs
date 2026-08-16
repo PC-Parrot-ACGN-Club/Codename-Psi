@@ -29,6 +29,17 @@ pub enum PageItem {
     Vibration,
     AnimationIntensity,
     ColorAssist,
+    /// Entry to the binding tree, on the settings root page.
+    InputBindings,
+    /// One local player, on the binding tree's first level.
+    PlayerBindings {
+        player: usize,
+    },
+    /// One device of one player, on the binding tree's second level.
+    DeviceBindings {
+        player: usize,
+        device: DeviceCategory,
+    },
     /// One configurable binding of one player on one device.
     Rebind {
         player: usize,
@@ -39,6 +50,9 @@ pub enum PageItem {
 
 impl PageItem {
     /// Whether confirming this item edits a setting instead of navigating.
+    ///
+    /// The three binding-tree items are navigation, not settings: confirming
+    /// one opens the level below it, exactly as `StartGame` opens a page.
     #[must_use]
     pub const fn is_setting(self) -> bool {
         matches!(
@@ -55,51 +69,93 @@ impl PageItem {
     }
 }
 
-/// Every settings item, in the order the page lists them.
+/// Which level of the settings tree is on screen.
 ///
-/// The order is the visual order, not the logical grouping: the page renders
-/// the general settings and `Back` in one column and the rebindings in the
-/// other, and the ring is linear across both. Listing `Back` after the general
-/// settings is what makes focus finish the first column before entering the
-/// second, instead of leaving the first column's last row until the very end.
-fn settings_items(settings_origin: Option<SettingsOrigin>) -> Vec<FocusItem> {
-    let mut items = vec![
-        FocusItem::new(PageItem::Language, true, None::<String>),
-        FocusItem::new(PageItem::WindowMode, true, None::<String>),
-        FocusItem::new(PageItem::MasterVolume, true, None::<String>),
-        FocusItem::new(PageItem::SfxVolume, true, None::<String>),
-        FocusItem::new(PageItem::Vibration, true, None::<String>),
-        FocusItem::new(PageItem::AnimationIntensity, true, None::<String>),
-        FocusItem::new(PageItem::ColorAssist, true, None::<String>),
-    ];
+/// The tree exists because bindings are per player *and* per device: a flat
+/// list has to spell both out on every row and still mixes two players' two
+/// devices into one column. Choosing the player, then the device, means each
+/// screen asks one question and the four rows underneath need no qualifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SettingsPage {
+    /// General settings, plus the way into the binding tree.
+    Root,
+    /// Which player's bindings to edit.
+    Players,
+    /// Which of that player's devices to edit.
+    Devices { player: usize },
+    /// The four configurable actions on one device of one player.
+    Bindings {
+        player: usize,
+        device: DeviceCategory,
+    },
+}
+
+impl SettingsPage {
+    /// The level confirming `item` opens, if it opens one.
+    #[must_use]
+    const fn opened_by(item: PageItem) -> Option<Self> {
+        match item {
+            PageItem::InputBindings => Some(Self::Players),
+            PageItem::PlayerBindings { player } => Some(Self::Devices { player }),
+            PageItem::DeviceBindings { player, device } => Some(Self::Bindings { player, device }),
+            _ => None,
+        }
+    }
+}
+
+/// The items of one level of the settings tree, in the order it lists them.
+///
+/// Every level but the root ends in `Back`, which pops one level rather than
+/// leaving the page: the way out of the tree is the way in, reversed.
+fn settings_items(page: SettingsPage, settings_origin: Option<SettingsOrigin>) -> Vec<FocusItem> {
+    let plain = |id| FocusItem::new(id, true, None::<String>);
+    let mut items = match page {
+        SettingsPage::Root => vec![
+            plain(PageItem::Language),
+            plain(PageItem::WindowMode),
+            plain(PageItem::MasterVolume),
+            plain(PageItem::SfxVolume),
+            plain(PageItem::Vibration),
+            plain(PageItem::AnimationIntensity),
+            plain(PageItem::ColorAssist),
+            plain(PageItem::InputBindings),
+        ],
+        // Every local slot, not only the ones a mode uses: the page is reachable
+        // from the main menu, where no mode has been chosen yet.
+        SettingsPage::Players => (0..crate::input::LOCAL_PLAYERS)
+            .map(|player| plain(PageItem::PlayerBindings { player }))
+            .collect(),
+        SettingsPage::Devices { player } => [DeviceCategory::Keyboard, DeviceCategory::Gamepad]
+            .into_iter()
+            .map(|device| plain(PageItem::DeviceBindings { player, device }))
+            .collect(),
+        SettingsPage::Bindings { player, device } => GameAction::CONFIGURABLE
+            .into_iter()
+            .map(|action| {
+                plain(PageItem::Rebind {
+                    player,
+                    action,
+                    device,
+                })
+            })
+            .collect(),
+    };
+
+    let mut back = FocusItem::new(PageItem::Back, true, None::<String>);
+    // Only the root's `Back` leaves the page, so only it carries a transition.
     // The back target comes from where the page was opened, so unlike every
     // other page's `Back` the command cannot be a constant. It is still carried
     // by the item: confirming `Back` has to leave the page on its own, without
     // depending on the player also knowing the back *input*.
-    let mut back = FocusItem::new(PageItem::Back, true, None::<String>);
-    if let Some(origin) = settings_origin {
+    if page == SettingsPage::Root
+        && let Some(origin) = settings_origin
+    {
         back = back.with_command(PageCommand::transition(
             origin.0,
             AppTransitionCause::SettingsClosed,
         ));
     }
     items.push(back);
-
-    for player in 0..2 {
-        for action in GameAction::CONFIGURABLE {
-            for device in [DeviceCategory::Keyboard, DeviceCategory::Gamepad] {
-                items.push(FocusItem::new(
-                    PageItem::Rebind {
-                        player,
-                        action,
-                        device,
-                    },
-                    true,
-                    None::<String>,
-                ));
-            }
-        }
-    }
     items
 }
 
@@ -246,6 +302,14 @@ pub struct PageModel {
     state: AppState,
     ring: FocusRing,
     settings_origin: Option<SettingsOrigin>,
+    /// The settings level on screen, and the levels above it with the item
+    /// each was left on, so backing out lands on the row that was entered.
+    settings_page: SettingsPage,
+    settings_stack: Vec<(SettingsPage, PageItem)>,
+    /// Whether a pad is connected, kept so that every ring this model builds
+    /// applies it. Recomputing the ring without it is how a pad row once lost
+    /// the line saying why it was unavailable.
+    gamepad_available: bool,
 }
 
 impl PageModel {
@@ -301,7 +365,7 @@ impl PageModel {
                     AppTransitionCause::BackRequested,
                 ),
             ],
-            AppState::Settings => settings_items(settings_origin),
+            AppState::Settings => settings_items(SettingsPage::Root, settings_origin),
             AppState::Paused => vec![
                 action_item(
                     PageItem::Resume,
@@ -338,16 +402,39 @@ impl PageModel {
             ],
             AppState::Boot | AppState::Match => return None,
         };
-        Some(Self {
+        let mut model = Self {
             state,
             ring: FocusRing::new(items),
             settings_origin,
-        })
+            settings_page: SettingsPage::Root,
+            settings_stack: Vec::new(),
+            gamepad_available: false,
+        };
+        // A fresh model has not been told about devices yet, and no pad is the
+        // safe assumption: a row that is wrongly enabled opens a capture that
+        // can never complete, while a row that is wrongly disabled is corrected
+        // by the first availability report the page receives.
+        model.apply_gamepad_availability();
+        Some(model)
     }
 
     pub fn handle(&mut self, action: UIAction) -> Option<PageCommand> {
         match action {
-            UIAction::Confirm => self.ring.confirm(),
+            UIAction::Confirm => {
+                let item = self.ring.focused();
+                if item.enabled
+                    && let Some(page) = SettingsPage::opened_by(item.id)
+                {
+                    self.open_settings_page(page);
+                    return None;
+                }
+                // A sub-level's `Back` carries no command, so confirming it has
+                // to pop here or it would do nothing at all.
+                if item.id == PageItem::Back && self.pop_settings_page() {
+                    return None;
+                }
+                self.ring.confirm()
+            }
             UIAction::Back => self.back(),
             direction => {
                 self.ring.move_focus(direction);
@@ -356,11 +443,54 @@ impl PageModel {
         }
     }
 
+    /// Descend one level of the settings tree.
+    fn open_settings_page(&mut self, page: SettingsPage) {
+        self.settings_stack
+            .push((self.settings_page, self.ring.focused().id));
+        self.settings_page = page;
+        self.rebuild_settings_ring();
+    }
+
+    /// Climb one level, restoring the row that was entered from.
+    ///
+    /// Reports whether there was a level to climb: the root's back leaves the
+    /// page instead, and that is the caller's business.
+    fn pop_settings_page(&mut self) -> bool {
+        let Some((page, focused)) = self.settings_stack.pop() else {
+            return false;
+        };
+        self.settings_page = page;
+        self.rebuild_settings_ring();
+        let _ = self.ring.focus_item(focused);
+        true
+    }
+
+    /// Rebuild the ring for the current settings level.
+    ///
+    /// The single place a settings ring is constructed, so device availability
+    /// is applied to every one of them rather than to whichever the last caller
+    /// remembered.
+    fn rebuild_settings_ring(&mut self) {
+        self.ring = FocusRing::new(settings_items(self.settings_page, self.settings_origin));
+        self.apply_gamepad_availability();
+    }
+
+    /// The settings level currently on screen.
+    #[must_use]
+    pub const fn settings_page(&self) -> SettingsPage {
+        self.settings_page
+    }
+
     pub fn handle_player(&mut self, _player: usize, action: UIAction) -> Option<PageCommand> {
         self.handle(action)
     }
 
-    fn back(&self) -> Option<PageCommand> {
+    fn back(&mut self) -> Option<PageCommand> {
+        // Inside the binding tree, back means one level up. Only the root level
+        // has a page to return to.
+        if self.pop_settings_page() {
+            return None;
+        }
         match self.state {
             AppState::ModeSelect => Some(PageCommand::transition(
                 AppState::MainMenu,
@@ -406,30 +536,43 @@ impl PageModel {
         self.ring.focused_index()
     }
 
-    /// Enable or disable the pad rebinding rows, and say whether that changed
-    /// anything.
+    /// Enable or disable the pad rows, and say whether that changed anything.
     ///
     /// A capture waits for an input from its own device category and ignores
     /// everything else, so opening a pad capture with no pad plugged in leaves a
     /// row that can never complete. Disabling the row is what keeps the player
-    /// from walking into it; the ring still lists it, because the settings page
-    /// is a fixed list of what the game can be told, not a list of what is
-    /// plugged in right now.
+    /// from walking into it; the tree still lists it, because the settings page
+    /// is a list of what the game can be told, not a list of what is plugged in
+    /// right now.
     ///
     /// One flag for both players: a capture accepts input from any connected
     /// pad, so per-slot availability would claim a precision that is not there.
+    /// A player without a pad can still configure the one they are about to
+    /// hold, which is the point of the rows being listed at all.
     pub fn set_gamepad_available(&mut self, available: bool) -> bool {
+        if self.gamepad_available == available {
+            // The ring already agrees; nothing on screen has to be redrawn.
+            return false;
+        }
+        self.gamepad_available = available;
+        self.apply_gamepad_availability()
+    }
+
+    fn apply_gamepad_availability(&mut self) -> bool {
         self.ring.set_enabled(
             |id| {
                 matches!(
                     id,
-                    PageItem::Rebind {
+                    PageItem::DeviceBindings {
+                        device: DeviceCategory::Gamepad,
+                        ..
+                    } | PageItem::Rebind {
                         device: DeviceCategory::Gamepad,
                         ..
                     }
                 )
             },
-            available,
+            self.gamepad_available,
             "settings.no_gamepad",
         )
     }

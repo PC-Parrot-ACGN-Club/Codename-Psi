@@ -87,6 +87,31 @@ impl GamepadSlots {
             .find_map(|(pad, slot)| (*slot == player).then_some(*pad))
     }
 
+    /// The one device a local player's inputs come from right now.
+    ///
+    /// A player holds one input source at a time: the pad bound to their slot
+    /// if there is one, and otherwise the keyboard. The keyboard is the default
+    /// because the game is desktop-only and there is always one, which also
+    /// makes it the fallback the moment a pad disconnects.
+    ///
+    /// This is what makes the two devices exclusive rather than additive: while
+    /// a pad drives a player, that player's keyboard keys produce nothing at
+    /// all, in gameplay and in menus alike.
+    #[must_use]
+    pub fn source(&self, player: usize) -> DeviceCategory {
+        if self.pad(player).is_some() {
+            DeviceCategory::Gamepad
+        } else {
+            DeviceCategory::Keyboard
+        }
+    }
+
+    /// Whether any local player is currently driven by the keyboard.
+    #[must_use]
+    pub fn any_on_keyboard(&self) -> bool {
+        (0..LOCAL_PLAYERS).any(|player| self.source(player) == DeviceCategory::Keyboard)
+    }
+
     fn is_taken(&self, player: usize) -> bool {
         self.by_pad.values().any(|slot| *slot == player)
     }
@@ -130,6 +155,13 @@ pub fn bind_gamepads(
             break;
         };
         slots.by_pad.insert(pad, player);
+        // The pad takes the slot immediately, in a match as much as in a menu,
+        // so the keyboard stops driving this player from this frame on. What it
+        // was holding has to go with it: a key held while the pad arrived would
+        // otherwise never be released, because the keyboard is no longer read
+        // for this player and so can never report the release.
+        sampler.clear_keyboard_state(player);
+        ui.clear_keyboard_state(player);
     }
 }
 
@@ -401,9 +433,17 @@ impl UiInputState {
     /// A stale entry here would swallow the first press after a reconnect: the
     /// rising edge is only reported when the source was not already held.
     fn clear_gamepad_state(&mut self, player: usize) {
-        self.held.retain(|(slot, source, _)| {
-            *slot != player || !matches!(source, PhysicalInput::Gamepad(_))
-        });
+        self.clear_device_state(player, DeviceCategory::Gamepad);
+    }
+
+    /// Forget what a player's keyboard held, for when a pad takes their slot.
+    fn clear_keyboard_state(&mut self, player: usize) {
+        self.clear_device_state(player, DeviceCategory::Keyboard);
+    }
+
+    fn clear_device_state(&mut self, player: usize, device: DeviceCategory) {
+        self.held
+            .retain(|(slot, source, _)| *slot != player || source.category() != device);
     }
 }
 
@@ -442,6 +482,10 @@ fn pads_by_player<'a>(
 /// physically held right now and which press edges happened this frame.
 /// Gamepads reach their player through [`GamepadSlots`], not through query
 /// order, so a device change elsewhere cannot move a player's input.
+///
+/// Only a player's own input source is read: bindings on the other device are
+/// left alone entirely, so a player holding a pad produces nothing from the
+/// keyboard even where the two would have meant the same action.
 pub fn capture_devices(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<(Entity, &Gamepad)>,
@@ -455,7 +499,13 @@ pub fn capture_devices(
     let mut configurable: Vec<(usize, PhysicalInput, bool, bool)> = Vec::new();
     for (player, bindings) in sampler.bindings.iter().enumerate() {
         let pad = pads.get(player).copied().flatten();
-        for input in bindings.bindings.values().flatten() {
+        let source = slots.source(player);
+        for input in bindings
+            .bindings
+            .values()
+            .flatten()
+            .filter(|input| input.category() == source)
+        {
             let (held, edge) = match input {
                 PhysicalInput::Keyboard(name) => keyboard_from_name(name)
                     .map_or((false, false), |code| {
@@ -489,12 +539,14 @@ pub fn capture_devices(
     for player in 0..players {
         let pad = pads.get(player).copied().flatten();
 
-        for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
-            let source = PhysicalInput::keyboard(format!("{code:?}"));
-            if keyboard.pressed(code) {
-                sampler.press_fixed_direction(player, source, direction);
-            } else {
-                sampler.release_fixed_direction(player, &source, direction);
+        if slots.source(player) == DeviceCategory::Keyboard {
+            for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
+                let source = PhysicalInput::keyboard(format!("{code:?}"));
+                if keyboard.pressed(code) {
+                    sampler.press_fixed_direction(player, source, direction);
+                } else {
+                    sampler.release_fixed_direction(player, &source, direction);
+                }
             }
         }
 
@@ -531,10 +583,13 @@ pub fn capture_devices(
     }
 
     // The sampler derives the edge, so holding the key proposes one pause.
+    // Pause follows the same exclusivity as everything else: with both players
+    // on pads, nobody is on the keyboard and its pause key means nothing.
     for input in fixed_pause_inputs() {
         let held = match &input {
             PhysicalInput::Keyboard(name) => {
-                keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
+                slots.any_on_keyboard()
+                    && keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
             }
             PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
                 .is_some_and(|button| pads.iter().flatten().any(|pad| pad.pressed(button))),
@@ -561,32 +616,39 @@ pub fn emit_ui_actions(
 
     for player in 0..LOCAL_PLAYERS {
         let pad = pads.get(player).copied().flatten();
+        let source_device = slots.source(player);
         let mut emit = |source: PhysicalInput, action: UIAction, held: bool| {
             if state.edge(player, source, action, held) {
                 writer.write(UIActionEvent { player, action });
             }
         };
 
-        for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
-            if let Some(ContextAction::Ui(action)) =
-                interpret_direction(direction, InputContext::Menu)
-            {
-                let source = PhysicalInput::keyboard(format!("{code:?}"));
-                emit(source, action, keyboard.pressed(code));
+        if source_device == DeviceCategory::Keyboard {
+            for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
+                if let Some(ContextAction::Ui(action)) =
+                    interpret_direction(direction, InputContext::Menu)
+                {
+                    let source = PhysicalInput::keyboard(format!("{code:?}"));
+                    emit(source, action, keyboard.pressed(code));
+                }
             }
         }
 
         // Confirm and back are read off the player's own rotation bindings, so
-        // a rebinding moves the menu key with the rules key. Both device
-        // categories are walked here rather than under the pad branch below,
-        // because a player's keyboard binding must work whether or not they
-        // also hold a pad.
+        // a rebinding moves the menu key with the rules key -- on the device
+        // that player is currently driven by, and only that one.
         if let Some(bindings) = settings.players.get(player) {
             for action in BOUND_UI_ACTIONS {
                 let Some(source_action) = ui_action_source(action) else {
                     continue;
                 };
-                for input in bindings.bindings.get(&source_action).into_iter().flatten() {
+                for input in bindings
+                    .bindings
+                    .get(&source_action)
+                    .into_iter()
+                    .flatten()
+                    .filter(|input| input.category() == source_device)
+                {
                     let held = match input {
                         PhysicalInput::Keyboard(name) => {
                             keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
@@ -800,11 +862,23 @@ impl LocalInputSampler {
     /// actually made, still owed to the rules layer. Only held state, which
     /// only means something while the device is there to report it, is lost.
     pub fn clear_gamepad_state(&mut self, player: usize) {
+        self.clear_device_state(player, DeviceCategory::Gamepad);
+    }
+
+    /// Drop everything a player's keyboard was holding.
+    ///
+    /// Called when a pad takes the slot rather than when hardware goes away,
+    /// but for the same reason: the keyboard stops being read for this player,
+    /// so nothing will ever report those keys released.
+    pub fn clear_keyboard_state(&mut self, player: usize) {
+        self.clear_device_state(player, DeviceCategory::Keyboard);
+    }
+
+    fn clear_device_state(&mut self, player: usize, device: DeviceCategory) {
         self.pressed
-            .retain(|(slot, input)| *slot != player || !matches!(input, PhysicalInput::Gamepad(_)));
-        self.fixed_directions.retain(|(slot, source, _)| {
-            *slot != player || !matches!(source, PhysicalInput::Gamepad(_))
-        });
+            .retain(|(slot, input)| *slot != player || input.category() != device);
+        self.fixed_directions
+            .retain(|(slot, source, _)| *slot != player || source.category() != device);
     }
 
     /// Record a press edge of a fixed pause input; other inputs are ignored.

@@ -213,12 +213,15 @@ fn neither_player_pressing_leaves_both_slots_empty() {
 fn two_physical_sources_of_the_same_direction_merge_into_one_action() {
     let mut sampler = sampler_for(1);
 
+    // Two bits of one device: the d-pad and the stick both mean left, and a
+    // player is only ever driven by one device at a time, so this is where
+    // merging actually happens.
+    sampler.press_fixed_direction(0, PhysicalInput::gamepad("DPadLeft"), FixedDirection::Left);
     sampler.press_fixed_direction(
         0,
-        PhysicalInput::keyboard("ArrowLeft"),
+        PhysicalInput::gamepad("LeftStickX"),
         FixedDirection::Left,
     );
-    sampler.press_fixed_direction(0, PhysicalInput::gamepad("DPadLeft"), FixedDirection::Left);
     let sampled = sampler.sample_fixed();
 
     assert_eq!(
