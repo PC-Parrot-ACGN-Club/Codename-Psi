@@ -167,6 +167,17 @@ struct PortraitEntities<'w, 's> {
             &'static mut BackgroundColor,
             &'static mut UiTransform,
         ),
+        Without<NameBar>,
+    >,
+    bars: Query<
+        'w,
+        's,
+        (
+            &'static NameBar,
+            &'static mut BackgroundColor,
+            &'static mut BorderColor,
+        ),
+        Without<Portrait>,
     >,
     badges: Query<
         'w,
@@ -226,6 +237,17 @@ struct QueueIcon {
     channel: usize,
     index: usize,
 }
+
+/// One cell of a Fever gauge, filled in place as the gauge grows.
+#[derive(Debug, Component)]
+struct FeverSegment {
+    slot: usize,
+    index: u8,
+}
+
+/// The name bar under a portrait, which carries that player's colour.
+#[derive(Debug, Component)]
+struct NameBar(usize);
 
 /// One participant's portrait circle.
 #[derive(Debug, Component)]
@@ -319,8 +341,13 @@ struct HudCells<'w, 's> {
     >,
     texts: Query<'w, 's, (&'static HudText, &'static mut Text)>,
     queue_icons: Query<'w, 's, (&'static QueueIcon, &'static mut Text), Without<HudText>>,
+    fever_segments: Query<'w, 's, (&'static FeverSegment, &'static mut BackgroundColor), FeverOnly>,
     glyphs: Query<'w, 's, &'static mut Text, GlyphOnly>,
 }
+
+/// Gauge cells are the only nodes carrying [`FeverSegment`], so excluding the
+/// two cell queries keeps the borrow disjoint from them.
+type FeverOnly = (Without<BoardCell>, Without<NextCell>);
 
 /// Text nodes that carry a ball's symbol rather than a HUD value.
 ///
@@ -464,6 +491,11 @@ fn refresh_hud(inputs: HudInputs, mut feedback: ResMut<MatchFeedback>, mut cells
             nuisance_icons(player.fever_garbage),
         ]
     });
+    for (segment, mut fill) in &mut cells.fever_segments {
+        let filled = segment.index < snapshot.players[segment.slot].fever_gauge;
+        fill.0 = if filled { FEVER_QUEUE } else { GRID };
+    }
+
     for (icon, mut text) in &mut cells.queue_icons {
         let glyph = icons[icon.slot][icon.channel]
             .get(icon.index)
@@ -602,6 +634,14 @@ fn refresh_portraits(
         *transform = UiTransform::IDENTITY;
         transform.translation.y = px(-lift);
         transform.scale = Vec2::splat(f32::from(pose.scale) / 100.0);
+    }
+
+    for (bar, mut fill, mut border) in &mut entities.bars {
+        let Some(resolved) = held.resolved[bar.0].as_ref() else {
+            continue;
+        };
+        fill.0 = rgb(resolved.data.secondary_color);
+        *border = BorderColor::all(rgb(resolved.data.primary_color));
     }
 
     for (badge, mut text, mut color) in &mut entities.badges {
@@ -1241,8 +1281,25 @@ fn portrait_column(commands: &mut Commands, font: &Handle<Font>, slot: usize) ->
         ))
         .id();
     commands.entity(circle).add_child(badge);
-    let name = value_text(commands, font, 32.0, HudText::Character(slot));
-    commands.entity(column).add_children(&[circle, name]);
+    let bar = commands
+        .spawn((
+            NameBar(slot),
+            Node {
+                width: px(PORTRAIT_SIZE * 0.92),
+                height: px(52),
+                border: UiRect::all(px(3)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(6)),
+                ..default()
+            },
+            BorderColor::all(TEXT),
+            BackgroundColor(PANEL),
+        ))
+        .id();
+    let name = value_text(commands, font, 30.0, HudText::Character(slot));
+    commands.entity(bar).add_child(name);
+    commands.entity(column).add_children(&[circle, bar]);
     column
 }
 
@@ -1355,13 +1412,45 @@ fn next_preview(
 fn fever_panel(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
     let panel = panel(commands, CHANNEL_COLUMN, 6.0);
     let heading = label(commands, font, 18.0, "FEVER");
-    let gauge = value_text(commands, font, 26.0, HudText::FeverGauge(slot));
+    let gauge = fever_gauge(commands, slot);
+    let counted = value_text(commands, font, 20.0, HudText::FeverGauge(slot));
     let time = value_text(commands, font, 24.0, HudText::FeverTime(slot));
     let target = value_text(commands, font, 24.0, HudText::FeverTarget(slot));
     commands
         .entity(panel)
-        .add_children(&[heading, gauge, time, target]);
+        .add_children(&[heading, gauge, counted, time, target]);
     panel
+}
+
+/// The seven-cell gauge as one horizontal strip: `7 × 18 + 6 × 4` fits the
+/// channel column exactly, which is what lets the channel hold both panels.
+fn fever_gauge(commands: &mut Commands, slot: usize) -> Entity {
+    let strip = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: px(4),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+    for index in 0..7 {
+        let cell = commands
+            .spawn((
+                FeverSegment { slot, index },
+                Node {
+                    width: px(18),
+                    height: px(28),
+                    border_radius: BorderRadius::all(px(3)),
+                    ..default()
+                },
+                BackgroundColor(GRID),
+            ))
+            .id();
+        commands.entity(strip).add_child(cell);
+    }
+    strip
 }
 
 /// A 6x12 grid of reusable cells.
