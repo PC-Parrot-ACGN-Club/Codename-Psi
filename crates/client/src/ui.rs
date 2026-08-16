@@ -200,6 +200,15 @@ const SCRIM: Color = Color::srgba(0.04, 0.05, 0.07, 0.82);
 const CHIP: Color = Color::srgb(0.10, 0.12, 0.16);
 const CHIP_FOCUSED: Color = Color::srgb(0.16, 0.42, 0.55);
 const TEXT: Color = Color::srgb(0.90, 0.94, 0.98);
+/// What a setting is set to, as opposed to what the setting is called.
+///
+/// Warm on purpose. The row it sits on is one of two cools -- [`CHIP`] or, when
+/// focused, [`CHIP_FOCUSED`] -- so hue alone separates the value from both, and
+/// it stays legible without focus having to reach in and recolour it. Drawing
+/// it in the focus colour, as this once did, made the value vanish into the row
+/// the moment that row was the one being edited: exactly the row whose value
+/// the player was looking at.
+const VALUE: Color = Color::srgb(1.00, 0.88, 0.55);
 const TEXT_DISABLED: Color = Color::srgb(0.45, 0.48, 0.53);
 /// Refusals and other "that did not happen" reports.
 const WARNING: Color = Color::srgb(0.90, 0.55, 0.30);
@@ -563,7 +572,7 @@ fn spawn_settings_rows(
                         font_size: FontSize::Px(22.0),
                         ..default()
                     },
-                    TextColor(CHIP_FOCUSED),
+                    TextColor(VALUE),
                 ))
                 .id();
             world.entity_mut(row).add_child(value);
@@ -1299,5 +1308,61 @@ fn refresh_focus_visuals(
                 color.0 = if enabled { TEXT } else { TEXT_DISABLED };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::Color;
+
+    use super::{CHIP, CHIP_FOCUSED, TEXT, VALUE};
+
+    /// One channel of an sRGB colour, linearized.
+    fn linearize(channel: f32) -> f32 {
+        if channel <= 0.040_45 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    /// Relative luminance, per WCAG 2.
+    fn luminance(color: Color) -> f32 {
+        let rgba = color.to_srgba();
+        0.2126 * linearize(rgba.red)
+            + 0.7152 * linearize(rgba.green)
+            + 0.0722 * linearize(rgba.blue)
+    }
+
+    /// Contrast ratio between two opaque colours, per WCAG 2.
+    fn contrast(a: Color, b: Color) -> f32 {
+        let (high, low) = {
+            let (x, y) = (luminance(a), luminance(b));
+            if x >= y { (x, y) } else { (y, x) }
+        };
+        (high + 0.05) / (low + 0.05)
+    }
+
+    /// The row a player is editing is the focused row, so a value drawn in the
+    /// focus colour disappears exactly when it is being changed -- which is how
+    /// a rebinding could complete with nothing on screen to show what it became.
+    /// Both row states are therefore checked, not just the resting one.
+    #[test]
+    fn a_settings_value_stays_legible_on_a_focused_row_and_an_unfocused_one() {
+        for (name, ground) in [("unfocused", CHIP), ("focused", CHIP_FOCUSED)] {
+            let ratio = contrast(VALUE, ground);
+            assert!(
+                ratio >= 4.5,
+                "the value colour reads at only {ratio:.2}:1 on a {name} row"
+            );
+        }
+    }
+
+    /// The name and the value are two columns of one row; telling them apart is
+    /// what makes the row scannable.
+    #[test]
+    fn the_value_colour_is_distinct_from_the_name_colour() {
+        assert_ne!(VALUE, TEXT);
+        assert_ne!(VALUE, CHIP_FOCUSED);
     }
 }
