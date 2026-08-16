@@ -734,6 +734,14 @@ const PRESET_ALPHA: f32 = 0.55;
 
 /// Fraction of the preview spent on the hit before the ball starts leaving.
 const CLEAR_HIT_SHARE: f32 = 0.35;
+/// Ticks a clear holds still before its pop plays.
+///
+/// The beat is the point: a clear registers, the board holds, and only then
+/// does the animation run. Without it the pop runs straight into the fall and
+/// the fall into the next link, so no single step ever reads as finished.
+const CLEAR_HOLD_TICKS: u16 = 6;
+/// Ticks a fall hangs before it moves, for the same reason.
+const FALL_HOLD_TICKS: u16 = 5;
 /// How much of its size a cleared ball keeps at the end of the preview.
 const CLEAR_END_SCALE: f32 = 0.35;
 
@@ -744,7 +752,7 @@ impl ClearPose {
     /// the hit lands and flashes, then the ball shrinks and fades so it is gone
     /// by the moment the rules commit the clear. Reduced holds a single steady
     /// highlight instead -- the fact is still shown, just not animated.
-    fn of(progress: f32, interpolate: bool) -> Self {
+    fn of(elapsed_ticks: u16, duration_ticks: u16, interpolate: bool) -> Self {
         if !interpolate {
             return Self {
                 scale: 1.0,
@@ -752,7 +760,7 @@ impl ClearPose {
                 alpha: 1.0,
             };
         }
-        let progress = progress.clamp(0.0, 1.0);
+        let progress = animation_progress(elapsed_ticks, duration_ticks, CLEAR_HOLD_TICKS);
         let flash = (progress / CLEAR_HIT_SHARE).min(1.0);
         let tail = ((progress - CLEAR_HIT_SHARE) / (1.0 - CLEAR_HIT_SHARE)).clamp(0.0, 1.0);
         Self {
@@ -761,6 +769,17 @@ impl ClearPose {
             alpha: 1.0 - tail,
         }
     }
+}
+
+/// How far into its animation a phase is, once its opening hold is over.
+///
+/// The hold is spent out of the phase's own ticks rather than added to them,
+/// so nothing here can move the tick on which the rules commit the phase.
+fn animation_progress(elapsed_ticks: u16, duration_ticks: u16, hold_ticks: u16) -> f32 {
+    let hold = hold_ticks.min(duration_ticks.saturating_sub(1));
+    let span = duration_ticks.saturating_sub(hold).max(1);
+    let moved = elapsed_ticks.saturating_sub(hold);
+    (f32::from(moved) / f32::from(span)).clamp(0.0, 1.0)
 }
 
 /// Place the resolving phases' balls for this frame.
@@ -778,25 +797,37 @@ fn resolve_overlay(
     let Some(resolution) = player.resolution.as_ref() else {
         return;
     };
-    let progress = if resolution.duration_ticks == 0 {
-        1.0
-    } else {
-        f32::from(resolution.elapsed_ticks) / f32::from(resolution.duration_ticks)
-    };
-
     match resolution.stage {
         ResolutionStage::ClearPreview => {
-            overlay.clear_pose = ClearPose::of(progress, effects.interpolate);
+            overlay.clear_pose = ClearPose::of(
+                resolution.elapsed_ticks,
+                resolution.duration_ticks,
+                effects.interpolate,
+            );
             for coord in &resolution.clear_cells {
                 overlay.clearing.insert((coord.x(), coord.y()));
             }
         }
         ResolutionStage::Gravity => {
+            // The phase lasts as long as the longest fall in the batch, so that
+            // fall is what sets the acceleration every ball shares.
+            let longest = resolution
+                .gravity_moves
+                .iter()
+                .map(|step| step.to.y().saturating_sub(step.from.y()))
+                .max()
+                .unwrap_or(0);
             // The board still holds the pre-gravity arrangement, so each moving
             // ball is hidden at its source and drawn at its current position.
             for step in &resolution.gravity_moves {
-                let (row, offset) =
-                    fall_position(step.from.y(), step.to.y(), progress, effects.interpolate);
+                let (row, offset) = fall_position(
+                    step.from.y(),
+                    step.to.y(),
+                    longest,
+                    resolution.elapsed_ticks,
+                    resolution.duration_ticks,
+                    effects.interpolate,
+                );
                 let occupant = Coord::new(step.from.x(), step.from.y())
                     .map_or(Cell::Empty, |coord| player.board.get(coord));
                 overlay.hidden.insert((step.from.x(), step.from.y()));
@@ -809,19 +840,37 @@ fn resolve_overlay(
     }
 }
 
-/// Where a falling ball is partway through the gravity phase.
+/// Where a falling ball sits this frame, and how far past that row it is.
 ///
-/// Returns the cell it is drawn in and how far past that cell it has travelled,
-/// so the caller can spend the fraction as a render offset. Reduced intensity
-/// holds the ball at its source and snaps to the target when the phase ends,
-/// which is the documented substitute for interpolating.
-fn fall_position(from: u8, to: u8, progress: f32, interpolate: bool) -> (u8, f32) {
-    let progress = progress.clamp(0.0, 1.0);
+/// Every ball in a batch shares one acceleration: the phase is timed for the
+/// longest fall, so a ball with less ground to cover lands earlier and then
+/// stays put. Stretching each fall across the whole phase instead gives balls
+/// in one batch visibly different speeds and leaves every one of them still
+/// moving when the next step begins.
+///
+/// The curve is quadratic in time, which is constant acceleration; the opening
+/// hold is taken out of the phase before it starts. Reduced intensity holds the
+/// ball at its source and snaps to the target when the phase ends, which is the
+/// documented substitute for interpolating.
+fn fall_position(
+    from: u8,
+    to: u8,
+    longest: u8,
+    elapsed_ticks: u16,
+    duration_ticks: u16,
+    interpolate: bool,
+) -> (u8, f32) {
     if !interpolate {
-        return (if progress >= 1.0 { to } else { from }, 0.0);
+        let landed = elapsed_ticks >= duration_ticks;
+        return (if landed { to } else { from }, 0.0);
     }
-    let span = f32::from(to) - f32::from(from);
-    let exact = f32::from(from) + span * progress;
+    let distance = f32::from(to.saturating_sub(from));
+    let longest = f32::from(longest).max(1.0);
+    let progress = animation_progress(elapsed_ticks, duration_ticks, FALL_HOLD_TICKS);
+    // At this point of the span the longest fall has covered this much, and
+    // every other ball in the batch has covered the same -- until it lands.
+    let travelled = (longest * progress * progress).min(distance);
+    let exact = f32::from(from) + travelled;
     let row = exact.floor();
     #[expect(
         clippy::cast_possible_truncation,
@@ -1530,7 +1579,10 @@ mod tests {
     use game_core::config::{DropShape, DropTemplate};
     use game_core::drop_stream::PendingHand;
 
-    use super::{CLEAR_HIT_SHARE, Cell, ClearPose, cell_glyph, fall_position, preview_occupant};
+    use super::{
+        CLEAR_HOLD_TICKS, Cell, ClearPose, FALL_HOLD_TICKS, cell_glyph, fall_position,
+        preview_occupant,
+    };
 
     fn hand(shape: DropShape, colors: [u8; 2]) -> PendingHand {
         PendingHand {
@@ -1614,71 +1666,108 @@ mod tests {
 
     // integration-system/presentation-runtime::TC-012
     #[test]
-    fn a_falling_ball_slides_between_its_ends_without_overshooting() {
-        // Endpoints are exact and land on a whole cell, so the ball starts where
-        // the rules put it and finishes exactly where the committed board draws it.
-        assert_eq!(fall_position(2, 8, 0.0, true), (2, 0.0));
-        assert_eq!(fall_position(2, 8, 1.0, true), (8, 0.0));
+    fn balls_in_one_batch_fall_at_one_acceleration_and_land_at_their_own_ends() {
+        const SPAN: u16 = 20;
 
-        // A distance whose midpoint falls between two rows is drawn between
-        // them: that offset is the whole difference from snapping cell to cell.
-        let (row, offset) = fall_position(2, 7, 0.5, true);
-        assert_eq!(row, 4);
+        // The opening hold is dead time on purpose: the batch hangs where the
+        // rules left it, so the clear that just happened reads as finished.
+        for tick in 0..FALL_HOLD_TICKS {
+            assert_eq!(
+                fall_position(2, 8, 6, tick, SPAN, true),
+                (2, 0.0),
+                "the ball moved during the hold, at tick {tick}"
+            );
+        }
+
+        // The longest fall in the batch is what the phase is timed for, so it
+        // lands exactly as the phase ends.
+        assert_eq!(fall_position(2, 8, 6, SPAN, SPAN, true), (8, 0.0));
+
+        // A shorter fall shares that acceleration, so it lands earlier and then
+        // stays put instead of drifting on until the phase is over.
+        let short = |tick| fall_position(9, 10, 6, tick, SPAN, true);
+        let landing = (FALL_HOLD_TICKS..=SPAN)
+            .find(|tick| short(*tick) == (10, 0.0))
+            .expect("a one-cell fall lands inside the phase");
         assert!(
-            (offset - 0.5).abs() < f32::EPSILON,
-            "expected half a cell, got {offset}"
+            landing < SPAN,
+            "the short fall used the whole phase: {landing} of {SPAN}"
+        );
+        for tick in landing..=SPAN {
+            assert_eq!(short(tick), (10, 0.0), "it moved again after landing");
+        }
+
+        // Accelerating, not linear: the first half of the moving span covers
+        // less ground than the second.
+        let midpoint = FALL_HOLD_TICKS + (SPAN - FALL_HOLD_TICKS) / 2;
+        let (row, offset) = fall_position(0, 8, 8, midpoint, SPAN, true);
+        let travelled = f32::from(row) + offset;
+        assert!(
+            travelled < 4.0,
+            "half the time covered half the distance, so nothing accelerated: {travelled}"
         );
 
         // Motion is monotonic, so a ball never appears to travel back up.
         let mut previous = (0, 0.0);
-        for step in 0..=10 {
-            #[expect(clippy::cast_precision_loss, reason = "ten steps")]
-            let position = fall_position(0, 10, step as f32 / 10.0, true);
+        for tick in 0..=SPAN {
+            let position = fall_position(0, 10, 10, tick, SPAN, true);
             assert!(
                 position >= previous,
-                "position went backwards at step {step}"
+                "position went backwards at tick {tick}"
             );
             previous = position;
         }
 
-        // Out-of-range progress is clamped rather than running off the board.
-        assert_eq!(fall_position(3, 5, 2.0, true), (5, 0.0));
+        // Past the end the ball stays landed rather than running off the board.
+        assert_eq!(fall_position(3, 5, 5, SPAN * 2, SPAN, true), (5, 0.0));
 
         // Reduced intensity holds the start and snaps at the end: the two
         // endpoints are shown and nothing between them.
-        assert_eq!(fall_position(2, 8, 0.5, false), (2, 0.0));
-        assert_eq!(fall_position(2, 8, 0.99, false), (2, 0.0));
-        assert_eq!(fall_position(2, 8, 1.0, false), (8, 0.0));
+        assert_eq!(fall_position(2, 8, 6, SPAN / 2, SPAN, false), (2, 0.0));
+        assert_eq!(fall_position(2, 8, 6, SPAN - 1, SPAN, false), (2, 0.0));
+        assert_eq!(fall_position(2, 8, 6, SPAN, SPAN, false), (8, 0.0));
     }
 
     // integration-system/presentation-runtime::TC-012
     #[test]
-    fn a_cleared_ball_flashes_then_leaves_before_the_rules_remove_it() {
-        // The hit lands at full size, so the player sees which balls were hit
-        // before anything starts moving.
-        let start = ClearPose::of(0.0, true);
-        assert_eq!(start.scale, 1.0);
-        assert_eq!(start.alpha, 1.0);
-        assert_eq!(start.flash, 0.0);
+    fn a_cleared_ball_holds_then_flashes_and_leaves_before_the_rules_remove_it() {
+        const SPAN: u16 = 24;
+
+        // The hold shows which balls were hit, at full size, before anything
+        // starts moving.
+        for tick in 0..CLEAR_HOLD_TICKS {
+            let pose = ClearPose::of(tick, SPAN, true);
+            assert_eq!(pose.scale, 1.0, "the ball shrank during the hold");
+            assert_eq!(pose.alpha, 1.0, "the ball faded during the hold");
+        }
+        assert_eq!(ClearPose::of(0, SPAN, true).flash, 0.0);
 
         // The flash comes up during the hit and is complete by the time the
         // ball starts to go.
-        assert_eq!(ClearPose::of(CLEAR_HIT_SHARE, true).flash, 1.0);
-        assert_eq!(ClearPose::of(CLEAR_HIT_SHARE, true).scale, 1.0);
+        let hit = (CLEAR_HOLD_TICKS..=SPAN)
+            .find(|tick| ClearPose::of(*tick, SPAN, true).flash >= 1.0)
+            .expect("the flash completes inside the phase");
+        assert!(
+            hit < SPAN,
+            "the flash used the whole phase and left no room to fade: {hit}"
+        );
+        assert!(
+            ClearPose::of(hit, SPAN, true).alpha > 0.9,
+            "the ball had already faded while the hit was still landing"
+        );
 
         // By the end the ball has shrunk and faded out, so the commit that
         // removes it has nothing left to pop away.
-        let end = ClearPose::of(1.0, true);
+        let end = ClearPose::of(SPAN, SPAN, true);
         assert_eq!(end.alpha, 0.0);
         assert!(end.scale < 1.0);
 
         // Shrinking and fading are monotonic across the phase.
-        let mut previous = ClearPose::of(0.0, true);
-        for step in 1..=10 {
-            #[expect(clippy::cast_precision_loss, reason = "ten steps")]
-            let pose = ClearPose::of(step as f32 / 10.0, true);
-            assert!(pose.scale <= previous.scale, "scale grew at step {step}");
-            assert!(pose.alpha <= previous.alpha, "alpha rose at step {step}");
+        let mut previous = ClearPose::of(0, SPAN, true);
+        for tick in 1..=SPAN {
+            let pose = ClearPose::of(tick, SPAN, true);
+            assert!(pose.scale <= previous.scale, "scale grew at tick {tick}");
+            assert!(pose.alpha <= previous.alpha, "alpha rose at tick {tick}");
             previous = pose;
         }
 
@@ -1689,10 +1778,8 @@ mod tests {
             flash: 1.0,
             alpha: 1.0,
         };
-        for step in 0..=10 {
-            #[expect(clippy::cast_precision_loss, reason = "ten steps")]
-            let pose = ClearPose::of(step as f32 / 10.0, false);
-            assert_eq!(pose, steady);
+        for tick in 0..=SPAN {
+            assert_eq!(ClearPose::of(tick, SPAN, false), steady);
         }
     }
 }

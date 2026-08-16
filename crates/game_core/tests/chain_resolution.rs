@@ -306,17 +306,17 @@ fn an_idle_resolution_only_leaves_that_phase_when_a_lock_triggers_it() {
 fn neither_zero_tick_boundary_lengthens_a_chain_step() {
     let rules = ResolutionRules::default();
 
-    // DEC-004 derives the preview duration from a chain step of 39 to 52
+    // DEC-004 derives the preview duration from a chain step of 44 to 57
     // ticks. That range is exactly preview plus a one- to three-cell gravity,
     // which leaves no tick for either boundary.
     assert_eq!(rules.clear_preview_ticks, 24);
     assert_eq!(
         rules.clear_preview_ticks + rules.gravity_ticks_by_distance[1],
-        39
+        44
     );
     assert_eq!(
         rules.clear_preview_ticks + rules.gravity_ticks_by_distance[3],
-        52
+        57
     );
 
     // The two-link fixture from TC-007 falls two cells, so its first step must
@@ -336,7 +336,7 @@ fn neither_zero_tick_boundary_lengthens_a_chain_step() {
         rules.clone(),
     );
     let step = rules.clear_preview_ticks + rules.gravity_ticks_by_distance[2];
-    assert_eq!(step, 46);
+    assert_eq!(step, 51);
 
     let mut labels = Vec::new();
     for _ in 0..=step {

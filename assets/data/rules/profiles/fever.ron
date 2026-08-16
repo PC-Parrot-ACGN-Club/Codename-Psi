@@ -45,7 +45,9 @@
         // Calibrated per DEC-004: the transcribed frame data assumes a 16 px
         // cell, and this canvas draws a 60 px one, so the same duration covered
         // 3.75x the on-screen distance and the fall outran the rest of the beat.
-        gravity_ticks_by_distance: [0, 15, 22, 28, 33, 38, 42, 46, 50, 53, 56, 59, 62, 65],
+        // Each entry also carries the opening hold the presentation spends
+        // before the batch moves, so the motion itself keeps its own length.
+        gravity_ticks_by_distance: [0, 20, 27, 33, 38, 43, 47, 51, 55, 58, 61, 64, 67, 70],
     ),
     scoring: (
         // Indexed by the link's distinct color count.
