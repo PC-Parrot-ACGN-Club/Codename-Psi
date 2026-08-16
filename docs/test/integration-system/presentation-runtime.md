@@ -34,6 +34,7 @@
 - 每个规则事实请求一条对应种类的 cue，增益与震动按设置与设备门控（TC-013）。
 - 装上 UI 栈后，页面实体随状态退出释放、HUD 随对局实例释放、一次性痕迹自行到期（TC-014）。
 - 圆框下的名字来自 roster 的 `display_name_key` 并经当前语言解析（TC-015）。
+- 目录在对局开始之后才发布时，圆框由替补换成角色自己的配色与徽章（TC-016）。
 - 高反馈场景下短命实体与并发 cue 不超预算（TC-007）。
 - 角色表现数据不进入开局规格摘要（TC-008；Concern: Determinism）。
 
@@ -55,6 +56,7 @@
 | TC-014 | 页面与对局实体的存活期与它们所属的东西一致 | P1 | Component Integration | — | Client | 客户端 app 装有 Bevy UI 栈（无渲染后端），可走完页面主路径并建立真实对局实例 | 逐页进入主菜单→模式→角色再逐页退回；进入对局后暂停、恢复、进入赛果；另在对局中触发一次消除并继续推进 | 三层页面各一次往返；暂停与赛果各一次；消除后再推进 120 个 fixed tick | 退回到某页时该页的实体数与首次进入时相同，途经页面不残留；暂停时页面叠在 HUD 之上而不替换它；离开对局后对局实例与全部棋盘格实体一并释放；消除留下的痕迹在自身存活期结束后归零，无需其它系统清理 | [Confirmed] [表现运行时：画面重建](../../development/design/presentation-runtime.md#画面重建)；[页面导航与焦点](../../development/design/page-navigation.md)；[对局实例生命周期](match-lifecycle.md) |
 | TC-015 | 圆框下的名字来自 roster 与当前语言，而不是掉落组标识 | P1 | Component Integration | — | Client；Configuration | 客户端 app 装有 Bevy UI 栈，roster 与本地化目录均可用，对局已建立 | 进入对局并等待运行数据落地，读取屏上全部文本 | 双方角色为 `psi-a`、`psi-b`；两者的 `display_name_key` 在当前语言目录中均有条目 | 屏上出现两个角色 `display_name_key` 在当前语言下的文本；不出现角色标识本身；键在目录中缺失时不以键名充当名字 | [Confirmed] [角色表现数据：边界](../../development/design/character-presentation.md#边界)；[本地化运行时](../../development/design/localization-runtime.md) |
 | 场景 / 协作路径 | 逐页进入再逐页退回；对局—暂停—赛果的实体存活 | TC-014 |
+| 时序 | 降级级数据在对局开始前 / 后发布 | TC-016 |
 | 数据流 | roster → `display_name_key` → 本地化目录 → 屏上文本 | TC-015 |
 | 判定表 | 色觉辅助开/关 × 普通球/垃圾球/空格；四种手牌形状 | TC-011 |
 | 边界值分析 | 阶段进度取 0、命中占比、1 与越界值；两档动画强度 | TC-012 |
@@ -79,6 +81,7 @@
 | TC-010 | 无美术、无音频设备、无手柄时仍可用键盘完成对局 | P0 | System | Smoke | Client；Match Flow | 已装配客户端；角色表现数据 `Failed`；音频输出不可用；未连接手柄 | 只用键盘从主菜单完成一局 BO3 | 表现数据 `Failed(Parse)`；无音频设备；无手柄 | 流程可走完并到达赛果；角色使用替补配色与徽章且两侧可区分；棋盘、NEXT、两条队列、Fever 面板与比分保持可读；各降级项各自保留诊断；规则结论与全部资源可用时的同输入结果一致 | [Confirmed] [PRD §5.3](../../PRD.md)；[角色表现数据：查询](../../development/design/character-presentation.md#查询)；[表现运行时：音频与震动](../../development/design/presentation-runtime.md#音频与震动) |
 | TC-011 | 球体线索按色觉辅助分档，NEXT 预览携带手牌的形状与颜色 | P1 | Component | — | Client | 可查询球体线索与 NEXT 预览格的取值 | 参数化取各类占据者在设置开与关下的线索；再参数化取四种手牌形状每个偏移位的预览内容 | 普通球五种颜色 id；垃圾球；空格；`color assist` 取开与关；`I`、`L`、`J`、`ODual`、`OMono` 手牌 | 关闭时普通球无球内符号，开启时五种颜色各得一个互不相同的符号；垃圾球的标记不随设置变化；空格始终无符号；每种手牌的预览在组占据的偏移位给出该位对应的抽取颜色、在未占据的偏移位为空，`L` 与 `J` 的横臂分列两侧，单色手牌不出现第二种抽取颜色 | [Confirmed] [表现运行时：球体线索](../../development/design/presentation-runtime.md#球体线索)；[表现与 UI 设计 §4.1、§4.2、§7](../../presentation.md) |
 | TC-012 | `ClearPreview` 与 `Gravity` 按阶段进度投影，`Reduced` 改为吸附 | P1 | Component | — | Client | 可按阶段进度查询被消球的姿态与下落球的位置 | 参数化取整段进度上的姿态与位置，两档动画强度各取一次 | 进度取 `0`、命中占比、`0.5`、`1` 与越界的 `2`；下落起止跨越多格；`AnimationIntensity` 取 `Full` 与 `Reduced` | `Full` 下：被消球在命中段保持原尺寸并完成闪光，其后缩放与不透明度单调下降，到阶段末已淡出；下落球起止落在整格、中途位于两格之间，且位置单调不回退，越界进度被钳制在终点。`Reduced` 下：被消球全程保持一次稳定高亮，下落球停在起点直到阶段结束再吸附到终点。两档均不改变 `duration_ticks` | [Confirmed] [表现运行时：画面重建](../../development/design/presentation-runtime.md#画面重建)、[动画强度](../../development/design/presentation-runtime.md#动画强度)；[表现与 UI 设计 §6.1](../../presentation.md) |
+| TC-016 | 角色表现目录晚于对局开始发布时圆框重解析 | P1 | Component Integration | — | Client | 客户端 app 装有 Bevy UI 栈，进入对局的一帧上角色表现目录尚未发布 | 进入对局并推进到目录发布，再推进一帧 | 仓库随包的 `characters.ron`；两名角色 | 圆框的边框色与徽章取自目录中该角色自己的取值，而非替补的槽位配色与显示名首字符；目录发布前的替补结果不被保留到本局结束 | [Confirmed] [角色表现数据：查询](../../development/design/character-presentation.md#查询) |
 
 ## 风险查漏
 

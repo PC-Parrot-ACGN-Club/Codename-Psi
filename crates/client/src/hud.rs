@@ -117,6 +117,13 @@ impl Plugin for HudPlugin {
 struct MatchPortraits {
     resolved: [Option<crate::character_presentation::ResolvedCharacterPresentation>; 2],
     instance: Option<MatchInstanceId>,
+    /// Whether the catalog had been published when this was resolved.
+    ///
+    /// The read is asynchronous and a match can start before it lands, so a
+    /// resolution made without it is provisional: it is the substitute, and it
+    /// has to be redone once the real catalog arrives. Without this the first
+    /// match of a cold start keeps the substitute for its whole length.
+    catalog_published: bool,
 }
 
 /// Everything the portraits read.
@@ -512,11 +519,12 @@ fn refresh_portraits(
     };
 
     // A new instance may have new characters, so the resolution is redone once
-    // per instance rather than once per frame.
-    if portraits
-        .as_ref()
-        .is_none_or(|held| held.instance != Some(instance))
-    {
+    // per instance rather than once per frame -- and once more if the catalog
+    // was still in flight when the instance started.
+    let catalog_published = inputs.catalog.is_some();
+    if portraits.as_ref().is_none_or(|held| {
+        held.instance != Some(instance) || (!held.catalog_published && catalog_published)
+    }) {
         let resolution = inputs.catalog.as_ref().map_or(
             crate::data::DataResolution::Failed(crate::data::DataLoadError {
                 path: crate::data::PRESENTATION_CHARACTERS_PATH.into(),
@@ -556,6 +564,7 @@ fn refresh_portraits(
         *portraits = Some(MatchPortraits {
             resolved,
             instance: Some(instance),
+            catalog_published,
         });
     }
     let Some(held) = portraits.as_ref() else {

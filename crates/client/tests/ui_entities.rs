@@ -184,7 +184,7 @@ fn a_clear_leaves_marks_that_expire_on_their_own() {
     );
 }
 
-// integration-system/presentation-runtime::TC-014
+// integration-system/presentation-runtime::TC-016
 #[test]
 fn both_portraits_are_drawn_from_the_catalogs_own_colours_and_badges() {
     let mut app = ui_app();
@@ -193,7 +193,10 @@ fn both_portraits_are_drawn_from_the_catalogs_own_colours_and_badges() {
     )));
     advance_to(&mut app, AppState::Match);
 
-    // The catalog is degradable data, so it settles on its own schedule.
+    // The catalog is degradable data, so it settles on its own schedule --
+    // after this match already started, which is the point: the substitute the
+    // portraits resolved to in the meantime has to be replaced once the real
+    // catalog lands, not held for the rest of the match.
     for _ in 0..2000 {
         app.update();
         if app
