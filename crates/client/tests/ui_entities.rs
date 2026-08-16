@@ -493,3 +493,173 @@ fn a_language_change_keeps_the_reason_a_row_is_unavailable() {
         "the reason has to survive a language change, got {translated:?}"
     );
 }
+
+/// The boards are the players' main gaze area, so the layout has to put them
+/// there: against the middle channel, not against the screen edges.
+// integration-system/presentation-runtime::TC-019
+#[test]
+fn the_boards_sit_against_the_middle_channel_rather_than_the_screen_edges() {
+    let mut app = ui_app();
+    app.insert_resource(client::match_flow::FrozenMatch(presentation_common::spec(
+        3,
+    )));
+    advance_to(&mut app, AppState::Match);
+    app.update();
+
+    let mut query = app
+        .world_mut()
+        .query::<(&client::hud::BoardCell, &ComputedNode, &UiGlobalTransform)>();
+    let cells: Vec<(usize, Vec2, Vec2)> = query
+        .iter(app.world())
+        .map(|(cell, node, transform)| (cell.slot, node.size, transform.translation))
+        .collect();
+    assert_eq!(cells.len(), 2 * 6 * 12, "both boards are fully built");
+
+    let cell_size = cells[0].1;
+    assert_eq!(
+        cell_size,
+        Vec2::splat(60.0),
+        "a cell is the documented 60 px square"
+    );
+
+    // Cell centres, so the panel padding stays out of the arithmetic.
+    let edges = |slot: usize| -> (f32, f32) {
+        let xs: Vec<f32> = cells
+            .iter()
+            .filter(|(cell_slot, ..)| *cell_slot == slot)
+            .map(|(_, _, translation)| translation.x)
+            .collect();
+        let min = xs.iter().copied().fold(f32::MAX, f32::min) - cell_size.x / 2.0;
+        let max = xs.iter().copied().fold(f32::MIN, f32::max) + cell_size.x / 2.0;
+        (min, max)
+    };
+    let (left_min, left_max) = edges(0);
+    let (right_min, right_max) = edges(1);
+
+    // 6 × 60 + 5 × 2.
+    assert!(
+        (left_max - left_min - 370.0).abs() < 1.0,
+        "a board spans its six columns: {left_min}..{left_max}"
+    );
+
+    // The channel is 360 wide and each board is inset 8 from its panel edge.
+    assert!(
+        (right_min - left_max - 376.0).abs() < 1.0,
+        "the boards are separated by the channel alone: {left_max}..{right_min}"
+    );
+
+    // Mirrored about the middle of the canvas, and nowhere near its edges.
+    assert!(
+        ((left_min + right_max) / 2.0 - 960.0).abs() < 1.0,
+        "the pair is centred: {left_min}..{right_max}"
+    );
+    assert!(
+        left_min > 300.0,
+        "the left board left the screen edge: {left_min}"
+    );
+
+    // Room above for the garbage row and below for the score, inside 1080.
+    let ys: Vec<f32> = cells
+        .iter()
+        .map(|(_, _, translation)| translation.y)
+        .collect();
+    let top = ys.iter().copied().fold(f32::MAX, f32::min) - cell_size.y / 2.0;
+    let bottom = ys.iter().copied().fold(f32::MIN, f32::max) + cell_size.y / 2.0;
+    assert!(top > 150.0, "no room left above the board: {top}");
+    assert!(bottom < 950.0, "no room left below the board: {bottom}");
+}
+
+/// `CHAIN n` belongs in the board area the player is already watching, not in
+/// the NEXT panel it used to hang off.
+// integration-system/presentation-runtime::TC-020
+#[test]
+fn the_chain_count_is_drawn_over_the_board_it_belongs_to() {
+    use game_core::board::{Board, Cell, Coord};
+
+    let mut app = ui_app();
+    app.insert_resource(client::match_flow::FrozenMatch(presentation_common::spec(
+        3,
+    )));
+    advance_to(&mut app, AppState::Match);
+
+    // A board holding one clearing group, so the next lock starts a chain.
+    {
+        let mut simulation = app
+            .world_mut()
+            .resource_mut::<client::simulation::RulesSimulation>();
+        let geometry = simulation.0.spec().board_geometry;
+        let mut board = Board::with_geometry(geometry);
+        for x in 0..4 {
+            board.set(
+                Coord::new(x, geometry.height() - 1).expect("bottom row"),
+                Cell::Color(0),
+            );
+        }
+        simulation
+            .0
+            .round_mut()
+            .player_mut(0)
+            .expect("slot exists")
+            .set_board(board);
+    }
+
+    let chain_rect = |app: &mut App| -> Option<(Vec2, Vec2)> {
+        let mut query = app
+            .world_mut()
+            .query::<(&Text, &ComputedNode, &UiGlobalTransform)>();
+        query
+            .iter(app.world())
+            .find(|(text, ..)| text.0.starts_with("CHAIN"))
+            .map(|(_, node, transform)| (transform.translation, node.size))
+    };
+
+    let mut found = None;
+    for _ in 0..600 {
+        common::press(&mut app, 0, game_core::input::GameAction::HardDrop);
+        common::run_fixed_tick(&mut app);
+        app.update();
+        if let Some(rect) = chain_rect(&mut app) {
+            found = Some(rect);
+            break;
+        }
+    }
+    let (chain_centre, chain_size) = found.expect("a chain never reached the HUD");
+
+    let mut query = app
+        .world_mut()
+        .query::<(&client::hud::BoardCell, &ComputedNode, &UiGlobalTransform)>();
+    let board: Vec<(Vec2, Vec2)> = query
+        .iter(app.world())
+        .filter(|(cell, ..)| cell.slot == 0)
+        .map(|(_, node, transform)| (transform.translation, node.size))
+        .collect();
+    let left = board
+        .iter()
+        .map(|(centre, size)| centre.x - size.x / 2.0)
+        .fold(f32::MAX, f32::min);
+    let right = board
+        .iter()
+        .map(|(centre, size)| centre.x + size.x / 2.0)
+        .fold(f32::MIN, f32::max);
+    let top = board
+        .iter()
+        .map(|(centre, size)| centre.y - size.y / 2.0)
+        .fold(f32::MAX, f32::min);
+    let bottom = board
+        .iter()
+        .map(|(centre, size)| centre.y + size.y / 2.0)
+        .fold(f32::MIN, f32::max);
+
+    let chain_left = chain_centre.x - chain_size.x / 2.0;
+    let chain_right = chain_centre.x + chain_size.x / 2.0;
+    assert!(
+        chain_left >= left - 1.0 && chain_right <= right + 1.0,
+        "the chain count sits outside its own board horizontally: \
+         {chain_left}..{chain_right} against {left}..{right}"
+    );
+    assert!(
+        chain_centre.y >= top - 1.0 && chain_centre.y <= bottom + 1.0,
+        "the chain count sits outside its own board vertically: {} against {top}..{bottom}",
+        chain_centre.y
+    );
+}

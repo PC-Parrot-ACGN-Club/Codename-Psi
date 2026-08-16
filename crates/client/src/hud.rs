@@ -24,8 +24,22 @@ use crate::ui::UiFont;
 /// Visible board rows. Hidden rows stay out of the HUD by definition.
 const VISIBLE_ROWS: u8 = 12;
 const BOARD_COLUMNS: u8 = 6;
-const CELL: f32 = 44.0;
+const CELL: f32 = 60.0;
 const CELL_GAP: f32 = 2.0;
+/// Padding inside the board panel, on every side.
+const BOARD_PAD: f32 = 8.0;
+/// `6 × 60 + 5 × 2 + 2 × 8`. The five layout columns are sized around it.
+const BOARD_WIDTH: f32 = 386.0;
+/// `12 × 60 + 11 × 2 + 2 × 8`.
+const BOARD_HEIGHT: f32 = 758.0;
+/// The outer column carrying one portrait and its name.
+const SIDE_COLUMN: f32 = 394.0;
+/// The channel between the boards: both NEXT columns and both Fever panels.
+const CHANNEL_WIDTH: f32 = 360.0;
+/// One channel sub-column, one per player.
+const CHANNEL_COLUMN: f32 = 152.0;
+/// Where the garbage row starts, leaving the round line above it.
+const BOARD_TOP: f32 = 96.0;
 
 const GROUND: Color = Color::srgb(0.04, 0.05, 0.07);
 const PANEL: Color = Color::srgb(0.09, 0.11, 0.14);
@@ -51,6 +65,9 @@ const BALL_COLORS: [Color; 5] = [
 const BALL_GLYPHS: [&str; 5] = ["●", "▲", "■", "◆", "★"];
 
 const NUISANCE_COLOR: Color = Color::srgb(0.42, 0.44, 0.48);
+/// The Fever queue's colour, which is what tells it apart from the normal
+/// queue now that both live on one row.
+const FEVER_QUEUE: Color = Color::srgb(0.90, 0.78, 0.30);
 /// Nuisance keeps its mark unconditionally: it is not one colour among the
 /// five but a different kind of ball, and neutral grey alone reads as an empty
 /// cell at a glance.
@@ -150,7 +167,6 @@ struct PortraitEntities<'w, 's> {
             &'static mut BackgroundColor,
             &'static mut UiTransform,
         ),
-        Without<TrackMarker>,
     >,
     badges: Query<
         'w,
@@ -161,7 +177,6 @@ struct PortraitEntities<'w, 's> {
             &'static mut TextColor,
         ),
     >,
-    markers: Query<'w, 's, &'static mut UiTransform, (With<TrackMarker>, Without<Portrait>)>,
 }
 
 /// What each side is currently being told about the last few ticks.
@@ -220,17 +235,11 @@ struct Portrait(usize);
 #[derive(Debug, Component)]
 struct PortraitBadge(usize);
 
-/// The marker that leans toward whoever is ahead.
-#[derive(Debug, Component)]
-struct TrackMarker;
-
-/// Diameter of a portrait circle, close to the first NEXT hand's height so the
-/// characters read clearly without taking room from the boards.
-const PORTRAIT_SIZE: f32 = 108.0;
-/// Width of the track between the two portraits.
-const TRACK_WIDTH: f32 = 320.0;
-/// How far a portrait may lean, in virtual-canvas pixels.
-const PORTRAIT_LEAN: f32 = 28.0;
+/// Diameter of a portrait circle. It fills its outer column, which is the only
+/// area the layout reserves for character presentation.
+const PORTRAIT_SIZE: f32 = 320.0;
+/// How far a portrait may lift, in virtual-canvas pixels.
+const PORTRAIT_LIFT: f32 = 34.0;
 
 /// A HUD text whose content is written from the snapshot.
 #[derive(Debug, Component)]
@@ -243,7 +252,6 @@ enum HudText {
     FeverTarget(usize),
     Chain(usize),
     Feedback(usize),
-    Track,
     Character(usize),
     Scoreline,
     Phase,
@@ -586,12 +594,13 @@ fn refresh_portraits(
 
         *border = BorderColor::all(rgb(resolved.data.primary_color));
         fill.0 = rgb(resolved.data.secondary_color);
-        // Positive offsets lean toward the track, which is to the right for the
-        // left-hand portrait and to the left for the right-hand one.
-        let toward_centre = if portrait.0 == 0 { 1.0 } else { -1.0 };
-        let lean = f32::from(pose.offset) / 24.0 * PORTRAIT_LEAN * toward_centre;
+        // Positive offsets lift the portrait. The two portraits sit at
+        // opposite edges of the screen, so leaning them toward the middle
+        // reads as drift rather than impact; the vertical axis is the one a
+        // one-shot jump will use.
+        let lift = f32::from(pose.offset) / 24.0 * PORTRAIT_LIFT;
         *transform = UiTransform::IDENTITY;
-        transform.translation.x = px(lean);
+        transform.translation.y = px(-lift);
         transform.scale = Vec2::splat(f32::from(pose.scale) / 100.0);
     }
 
@@ -603,17 +612,6 @@ fn refresh_portraits(
             text.0.clone_from(&resolved.data.badge.glyph);
         }
         color.0 = rgb(resolved.data.primary_color);
-    }
-
-    // The marker sits at the middle when neither side is ahead and slides one
-    // notch toward whoever is.
-    let notch = match snapshot.momentum.advantage_side {
-        Some(0) => TRACK_WIDTH / 4.0,
-        Some(_) => -TRACK_WIDTH / 4.0,
-        None => 0.0,
-    };
-    for mut transform in &mut entities.markers {
-        transform.translation.x = px(notch);
     }
 }
 
@@ -888,11 +886,6 @@ fn hud_value(
         HudText::Feedback(slot) => feedback
             .line(slot, snapshot.match_tick)
             .map_or_else(String::new, |line| line.text(localization)),
-        // The track says the same thing for whichever side last said anything,
-        // so one glance at the middle covers both boards.
-        HudText::Track => (0..2)
-            .find_map(|slot| feedback.line(slot, snapshot.match_tick))
-            .map_or_else(String::new, |line| line.text(localization)),
         HudText::Character(slot) => names.get(slot).cloned().unwrap_or_default(),
         HudText::Scoreline => format!(
             "ROUND {} · BO3 · {} : {}",
@@ -941,20 +934,6 @@ fn value_text(commands: &mut Commands, font: &Handle<Font>, size: f32, field: Hu
         .id()
 }
 
-fn column(commands: &mut Commands, gap: f32) -> Entity {
-    commands
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: px(gap),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-        ))
-        .id()
-}
-
 fn panel(commands: &mut Commands, width: f32, gap: f32) -> Entity {
     commands
         .spawn((
@@ -973,6 +952,9 @@ fn panel(commands: &mut Commands, width: f32, gap: f32) -> Entity {
 }
 
 fn build_hud(commands: &mut Commands, instance: MatchInstanceId, font: &Handle<Font>) {
+    // Five columns: portrait, board, channel, board, portrait. The boards are
+    // the players' main gaze area, so they sit against the channel in the
+    // middle of the screen rather than against the screen edges.
     let root = commands
         .spawn((
             HudRoot(instance),
@@ -983,95 +965,253 @@ fn build_hud(commands: &mut Commands, instance: MatchInstanceId, font: &Handle<F
                 position_type: PositionType::Absolute,
                 width: px(1920),
                 height: px(1080),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: px(16),
-                padding: UiRect::all(px(24)),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::FlexStart,
                 ..default()
             },
             BackgroundColor(GROUND),
         ))
         .id();
 
-    // Top bar: both characters and the match score, unobstructed above the boards.
-    let top = commands
+    let p1_portrait = portrait_column(commands, font, 0);
+    let p1_board = board_column(commands, font, 0);
+    let channel = channel_column(commands, font);
+    let p2_board = board_column(commands, font, 1);
+    let p2_portrait = portrait_column(commands, font, 1);
+    commands
+        .entity(root)
+        .add_children(&[p1_portrait, p1_board, channel, p2_board, p2_portrait]);
+
+    // Last child, so it draws over every column it covers.
+    let big_word = big_word_layer(commands, font);
+    commands.entity(root).add_child(big_word);
+}
+
+/// The full-screen word layer: the countdown, and the final `FINISH`.
+///
+/// The resident layout keeps no room for these. They are states of a layer of
+/// their own, so nothing else has to make space for something that is only on
+/// screen for a moment.
+fn big_word_layer(commands: &mut Commands, font: &Handle<Font>) -> Entity {
+    let layer = commands
         .spawn((
             Node {
-                width: px(1600),
+                position_type: PositionType::Absolute,
+                width: px(1920),
+                height: px(1080),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+    let word = value_text(commands, font, 132.0, HudText::Phase);
+    commands.entity(layer).add_child(word);
+    layer
+}
+
+/// One player's column: the garbage row, the board, and the score under it.
+fn board_column(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
+    let column = commands
+        .spawn((
+            Node {
+                width: px(BOARD_WIDTH),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::top(px(BOARD_TOP)),
+                row_gap: px(10),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+
+    let garbage = garbage_row(commands, font, slot);
+
+    // The board and the text over it share one box, so the chain count and the
+    // attack figure land inside the area the player is already watching.
+    let stack = commands
+        .spawn((
+            Node {
+                width: px(BOARD_WIDTH),
+                height: px(BOARD_HEIGHT),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+    let board = board_grid(commands, font, slot);
+    let overlay = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(18),
+                top: px(22),
+                width: px(BOARD_WIDTH - 36.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(4),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+    let chain = value_text(commands, font, 46.0, HudText::Chain(slot));
+    let feedback = value_text(commands, font, 26.0, HudText::Feedback(slot));
+    commands.entity(overlay).add_children(&[chain, feedback]);
+    commands.entity(stack).add_children(&[board, overlay]);
+
+    let score = value_text(commands, font, 58.0, HudText::Score(slot));
+    commands
+        .entity(column)
+        .add_children(&[garbage, stack, score]);
+    column
+}
+
+/// Both queues on one row above the board: tiered icons and exact counts.
+///
+/// One row is all the space this earns. The Fever queue shares it and is told
+/// apart by colour rather than by a heading of its own.
+fn garbage_row(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
+    let row = commands
+        .spawn((
+            Node {
+                width: px(BOARD_WIDTH),
+                height: px(64),
+                flex_direction: if slot == 0 {
+                    FlexDirection::Row
+                } else {
+                    FlexDirection::RowReverse
+                },
+                align_items: AlignItems::Center,
+                column_gap: px(12),
+                padding: UiRect::horizontal(px(6)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
+
+    let pending_icons = icon_strip(commands, font, slot, 0, TEXT);
+    let pending = value_text(commands, font, 34.0, HudText::PendingGarbage(slot));
+    let fever_icons = icon_strip(commands, font, slot, 1, FEVER_QUEUE);
+    let fever = value_text(commands, font, 26.0, HudText::FeverGarbage(slot));
+    commands.entity(fever).insert(TextColor(FEVER_QUEUE));
+    commands
+        .entity(row)
+        .add_children(&[pending_icons, pending, fever_icons, fever]);
+    row
+}
+
+/// One queue's tiered icons, written in place as the queue changes.
+fn icon_strip(
+    commands: &mut Commands,
+    font: &Handle<Font>,
+    slot: usize,
+    channel: usize,
+    colour: Color,
+) -> Entity {
+    let icons = commands
+        .spawn((
+            Node {
                 flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
+                column_gap: px(4),
                 align_items: AlignItems::Center,
                 ..default()
             },
             BackgroundColor(Color::NONE),
         ))
         .id();
-    let p1 = portrait(commands, font, 0);
-    let centre = column(commands, 4.0);
-    let scoreline = value_text(commands, font, 34.0, HudText::Scoreline);
-    let phase = value_text(commands, font, 28.0, HudText::Phase);
-    let track = collision_track(commands, font);
-    commands
-        .entity(centre)
-        .add_children(&[scoreline, phase, track]);
-    let p2 = portrait(commands, font, 1);
-    commands.entity(top).add_children(&[p1, centre, p2]);
-    commands.entity(root).add_child(top);
+    for index in 0..NUISANCE_ICON_SLOTS {
+        let icon = commands
+            .spawn((
+                QueueIcon {
+                    slot,
+                    channel,
+                    index,
+                },
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(24.0),
+                    ..default()
+                },
+                TextColor(colour),
+            ))
+            .id();
+        commands.entity(icons).add_child(icon);
+    }
+    icons
+}
 
-    // The boards sit hard against the left and right edges, with the shared
-    // columns between them: presentation keeps both boards at the sides so a
-    // single gaze covers own board, next hands and opponent pressure.
-    let main = commands
+/// The channel between the boards: the round line, both NEXT columns and both
+/// Fever panels.
+fn channel_column(commands: &mut Commands, font: &Handle<Font>) -> Entity {
+    let channel = commands
         .spawn((
             Node {
-                width: px(1840),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                column_gap: px(24),
-                align_items: AlignItems::FlexStart,
+                width: px(CHANNEL_WIDTH),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::top(px(26)),
+                row_gap: px(30),
                 ..default()
             },
             BackgroundColor(Color::NONE),
         ))
         .id();
-    commands.entity(root).add_child(main);
 
-    let side = |commands: &mut Commands, slot: usize| {
-        let side = column(commands, 10.0);
-        let queue = queue_panel(commands, font, slot);
-        // Directly over the board it belongs to, so a glance at one side reads
-        // that side's queue, what just happened to it, and the board itself.
-        let feedback = value_text(commands, font, 28.0, HudText::Feedback(slot));
-        let board = board_grid(commands, font, slot);
-        commands
-            .entity(side)
-            .add_children(&[queue, feedback, board]);
-        side
-    };
-    let middle = |commands: &mut Commands, slot: usize| {
-        let middle = column(commands, 14.0);
-        let next = next_panel(commands, font, slot);
-        let fever = fever_panel(commands, font, slot);
-        commands.entity(middle).add_children(&[next, fever]);
-        middle
+    let scoreline = value_text(commands, font, 24.0, HudText::Scoreline);
+
+    let pair = |commands: &mut Commands,
+                build: fn(&mut Commands, &Handle<Font>, usize) -> Entity| {
+        let row = commands
+            .spawn((
+                Node {
+                    width: px(CHANNEL_WIDTH),
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::FlexStart,
+                    padding: UiRect::horizontal(px(16)),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+            ))
+            .id();
+        let left = build(commands, font, 0);
+        let right = build(commands, font, 1);
+        commands.entity(row).add_children(&[left, right]);
+        row
     };
 
-    let p1_side = side(commands, 0);
-    let p1_mid = middle(commands, 0);
-    let p2_mid = middle(commands, 1);
-    let p2_side = side(commands, 1);
+    let nexts = pair(commands, next_panel);
+    let fevers = pair(commands, fever_panel);
     commands
-        .entity(main)
-        .add_children(&[p1_side, p1_mid, p2_mid, p2_side]);
+        .entity(channel)
+        .add_children(&[scoreline, nexts, fevers]);
+    channel
 }
 
-/// One participant's circular portrait, with its name under it.
+/// One participant's portrait column, with the name under the circle.
 ///
-/// The circle carries the character's own colours and badge; its offset and
-/// scale come from the pose the rules facts pick, so the two portraits lean
-/// into and away from the track between them.
-fn portrait(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
-    let column = column(commands, 6.0);
+/// The circle carries the character's own colours and badge. Its pose drives a
+/// vertical offset and a scale; the portrait stays in its own column, since the
+/// two of them are a screen apart and nothing they do reads as a collision.
+fn portrait_column(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
+    let column = commands
+        .spawn((
+            Node {
+                width: px(SIDE_COLUMN),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::top(px(400)),
+                row_gap: px(22),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .id();
     let circle = commands
         .spawn((
             Portrait(slot),
@@ -1094,153 +1234,28 @@ fn portrait(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity
             Text::new(String::new()),
             TextFont {
                 font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(44.0),
+                font_size: FontSize::Px(96.0),
                 ..default()
             },
             TextColor(TEXT),
         ))
         .id();
     commands.entity(circle).add_child(badge);
-    let name = value_text(commands, font, 26.0, HudText::Character(slot));
+    let name = value_text(commands, font, 32.0, HudText::Character(slot));
     commands.entity(column).add_children(&[circle, name]);
     column
 }
 
-/// The track between the two portraits.
-///
-/// It carries the words -- what the last chain sent, what it cancelled -- and a
-/// marker that leans toward whoever is ahead. The words are the point: the
-/// portraits animate the same facts, and the track is what stays readable in a
-/// single frame.
-fn collision_track(commands: &mut Commands, font: &Handle<Font>) -> Entity {
-    let track = commands
-        .spawn((
-            Node {
-                width: px(TRACK_WIDTH),
-                height: px(26),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border_radius: BorderRadius::all(px(13)),
-                ..default()
-            },
-            BackgroundColor(GRID),
-        ))
-        .id();
-    let marker = commands
-        .spawn((
-            TrackMarker,
-            Node {
-                position_type: PositionType::Absolute,
-                width: px(18),
-                height: px(18),
-                border_radius: BorderRadius::all(px(9)),
-                ..default()
-            },
-            BackgroundColor(TEXT),
-        ))
-        .id();
-    let text = value_text(commands, font, 22.0, HudText::Track);
-    commands.entity(track).add_children(&[marker, text]);
-    track
-}
-
-/// Both nuisance queues with exact counts, above the board on the outer side.
-fn queue_panel(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
-    let panel = panel(commands, 300.0, 4.0);
-    let heading = label(commands, font, 20.0, "NUISANCE");
-    let pending_row = queue_row(commands, font, slot, 0, "PENDING");
-    let fever_row = queue_row(commands, font, slot, 1, "FEVER");
-    let score = value_text(commands, font, 22.0, HudText::Score(slot));
-    commands
-        .entity(panel)
-        .add_children(&[heading, pending_row, fever_row, score]);
-    panel
-}
-
-/// One queue: its name and exact count, with the tiered icons under them.
-///
-/// The number and the icons say the same thing at two reading speeds -- the
-/// icons carry the magnitude at a glance, the number stays exact.
-fn queue_row(
-    commands: &mut Commands,
-    font: &Handle<Font>,
-    slot: usize,
-    channel: usize,
-    name: &str,
-) -> Entity {
-    let row = column(commands, 2.0);
-    let counted = commands
-        .spawn((
-            Node {
-                width: px(260),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-        ))
-        .id();
-    let name = label(commands, font, 20.0, name);
-    let count = value_text(
-        commands,
-        font,
-        24.0,
-        if channel == 0 {
-            HudText::PendingGarbage(slot)
-        } else {
-            HudText::FeverGarbage(slot)
-        },
-    );
-    commands.entity(counted).add_children(&[name, count]);
-
-    let icons = commands
-        .spawn((
-            Node {
-                width: px(260),
-                height: px(24),
-                flex_direction: FlexDirection::Row,
-                column_gap: px(4),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-        ))
-        .id();
-    for index in 0..NUISANCE_ICON_SLOTS {
-        let icon = commands
-            .spawn((
-                QueueIcon {
-                    slot,
-                    channel,
-                    index,
-                },
-                Text::new(String::new()),
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(22.0),
-                    ..default()
-                },
-                TextColor(TEXT),
-            ))
-            .id();
-        commands.entity(icons).add_child(icon);
-    }
-
-    commands.entity(row).add_children(&[counted, icons]);
-    row
-}
-
 /// The next three hands, first one largest.
 fn next_panel(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
-    let panel = panel(commands, 200.0, 8.0);
-    let heading = label(commands, font, 20.0, "NEXT");
+    let panel = panel(commands, CHANNEL_COLUMN, 8.0);
+    let heading = label(commands, font, 18.0, "NEXT");
     commands.entity(panel).add_child(heading);
     for index in 0..3 {
-        let size = if index == 0 { 26.0 } else { 18.0 };
+        let size = if index == 0 { 30.0 } else { 21.0 };
         let hand = next_preview(commands, font, slot, index, size);
         commands.entity(panel).add_child(hand);
     }
-    let chain = value_text(commands, font, 24.0, HudText::Chain(slot));
-    commands.entity(panel).add_child(chain);
     panel
 }
 
@@ -1338,8 +1353,8 @@ fn next_preview(
 
 /// Gauge, remaining time and puzzle target.
 fn fever_panel(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Entity {
-    let panel = panel(commands, 200.0, 6.0);
-    let heading = label(commands, font, 20.0, "FEVER");
+    let panel = panel(commands, CHANNEL_COLUMN, 6.0);
+    let heading = label(commands, font, 18.0, "FEVER");
     let gauge = value_text(commands, font, 26.0, HudText::FeverGauge(slot));
     let time = value_text(commands, font, 24.0, HudText::FeverTime(slot));
     let target = value_text(commands, font, 24.0, HudText::FeverTarget(slot));
@@ -1356,7 +1371,7 @@ fn board_grid(commands: &mut Commands, font: &Handle<Font>, slot: usize) -> Enti
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: px(CELL_GAP),
-                padding: UiRect::all(px(8)),
+                padding: UiRect::all(px(BOARD_PAD)),
                 border_radius: BorderRadius::all(px(10)),
                 ..default()
             },
