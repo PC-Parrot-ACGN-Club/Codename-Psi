@@ -34,7 +34,7 @@ ResolutionState
 
 | 阶段 | 时长 |
 | --- | --- |
-| `ClearPreview` | 12 tick |
+| `ClearPreview` | 24 tick |
 | `ClearCommit` | 0 tick（边界） |
 | `Gravity` | 按本轮最大下落格数查表 |
 | `ScanNext` | 0 tick（边界） |

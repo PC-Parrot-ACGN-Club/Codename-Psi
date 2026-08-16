@@ -317,8 +317,8 @@ fn digests_ignore_field_order_and_whitespace_but_not_values() {
     // Changing one value moves the digest.
     let changed = patch(
         PROFILE_SRC,
-        "clear_preview_ticks: 12",
-        "clear_preview_ticks: 13",
+        "clear_preview_ticks: 24",
+        "clear_preview_ticks: 25",
     );
     let changed_digest = library_with(
         &changed,
@@ -379,7 +379,7 @@ fn a_frozen_spec_does_not_observe_later_asset_changes() {
 
     let changed = patch(
         PROFILE_SRC,
-        "clear_preview_ticks: 12",
+        "clear_preview_ticks: 24",
         "clear_preview_ticks: 20",
     );
     let reloaded = library_with(
@@ -456,7 +456,7 @@ fn unusable_rule_data_never_produces_a_locked_spec() {
 fn durations_are_ticks_and_margin_reads_an_integer_table() {
     let spec = repository_spec(1);
 
-    assert_eq!(spec.resolution.clear_preview_ticks, 12);
+    assert_eq!(spec.resolution.clear_preview_ticks, 24);
     assert_eq!(spec.drop.natural_fall_ticks, 16);
     assert_eq!(spec.drop.soft_drop_ticks, 2);
     assert_eq!(spec.drop.lock_delay_ticks, 32);

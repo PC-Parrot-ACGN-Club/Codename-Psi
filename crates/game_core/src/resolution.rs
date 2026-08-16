@@ -104,7 +104,7 @@ pub struct ResolutionRules {
 impl Default for ResolutionRules {
     fn default() -> Self {
         Self {
-            clear_preview_ticks: 12,
+            clear_preview_ticks: 24,
             gravity_ticks_by_distance: vec![0, 10, 15, 19, 22, 25, 28, 31, 33, 35, 37, 39, 41, 43],
             clear_threshold: 4,
         }

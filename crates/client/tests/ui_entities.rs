@@ -173,13 +173,30 @@ fn a_clear_leaves_marks_that_expire_on_their_own() {
     }
     assert!(marks > 0, "a clear left no mark at all");
 
+    // This batch is what has to disappear. Counting every mark on screen would
+    // instead measure the chain's pace, since later links keep laying down new
+    // ones while the match plays on.
+    let batch: Vec<Entity> = app
+        .world_mut()
+        .query_filtered::<Entity, With<client::effects::ClearMark>>()
+        .iter(app.world())
+        .collect();
+
     // Nothing else has to clean them up: they go when their own life is over.
     for _ in 0..120 {
         common::run_fixed_tick(&mut app);
     }
+    app.update();
+    let survivors = batch
+        .iter()
+        .filter(|entity| {
+            app.world()
+                .get::<client::effects::ClearMark>(**entity)
+                .is_some()
+        })
+        .count();
     assert_eq!(
-        count::<client::effects::ClearMark>(&mut app),
-        0,
+        survivors, 0,
         "marks outlived their own life instead of expiring"
     );
 }
