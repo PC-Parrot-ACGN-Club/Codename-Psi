@@ -14,8 +14,8 @@ use crate::app_state::AppState;
 use crate::i18n::Localization;
 use crate::match_flow::MatchInstanceId;
 use crate::presentation::{
-    FeedbackLines, MatchPresentationSnapshot, NUISANCE_ICON_SLOTS, PresentationEffects,
-    build_snapshot, nuisance_icons,
+    FeedbackLines, MatchPresentationSnapshot, NUISANCE_ICON_SLOTS, PortraitPoseEvents,
+    PresentationEffects, build_snapshot, nuisance_icons,
 };
 use crate::settings::UserSettings;
 use crate::simulation::{LatestStepReport, RulesSimulation};
@@ -134,6 +134,7 @@ impl Plugin for HudPlugin {
             return;
         }
         app.init_resource::<MatchFeedback>()
+            .init_resource::<PortraitPoseWindows>()
             .add_systems(Update, (spawn_hud, release_hud, refresh_hud).chain())
             .add_systems(Update, refresh_portraits.after(refresh_hud));
     }
@@ -164,7 +165,7 @@ struct PortraitInputs<'w> {
     settings: Res<'w, UserSettings>,
     catalog: Option<Res<'w, crate::data::CharacterPresentationData>>,
     rules: Option<Res<'w, crate::data::RulesData>>,
-    feedback: Res<'w, MatchFeedback>,
+    portrait_events: Res<'w, PortraitPoseWindows>,
     instance: Option<Res<'w, MatchInstanceId>>,
 }
 
@@ -210,6 +211,16 @@ struct PortraitEntities<'w, 's> {
 /// back out of the snapshot every frame.
 #[derive(Debug, Default, Resource)]
 struct MatchFeedback(FeedbackLines);
+
+/// The event-driven windows behind a portrait's pose (see [`portrait_pose`]).
+///
+/// Kept separate from [`MatchFeedback`]: the board's feedback line and a
+/// portrait's pose expire on the same 90-tick clock but classify different
+/// facts, and `refresh_portraits` only ever needs this one.
+///
+/// [`portrait_pose`]: crate::presentation::portrait_pose
+#[derive(Debug, Default, Resource)]
+struct PortraitPoseWindows(PortraitPoseEvents);
 
 /// Root of the HUD, tagged with the instance it belongs to.
 #[derive(Debug, Component)]
@@ -390,7 +401,12 @@ struct HudInputs<'w> {
 }
 
 /// Write the latest snapshot onto the HUD.
-fn refresh_hud(inputs: HudInputs, mut feedback: ResMut<MatchFeedback>, mut cells: HudCells) {
+fn refresh_hud(
+    inputs: HudInputs,
+    mut feedback: ResMut<MatchFeedback>,
+    mut portrait_events: ResMut<PortraitPoseWindows>,
+    mut cells: HudCells,
+) {
     // The pause and settings pages sit over a live board, so the HUD keeps
     // showing the last snapshot rather than blanking while they are up.
     if !matches!(
@@ -416,6 +432,7 @@ fn refresh_hud(inputs: HudInputs, mut feedback: ResMut<MatchFeedback>, mut cells
 
     if let Some(report) = inputs.report.0.as_ref() {
         feedback.0.observe(report);
+        portrait_events.0.observe(report, &snapshot);
     }
 
     let overlays: [SlotOverlay; 2] =
@@ -629,7 +646,7 @@ fn refresh_portraits(
             continue;
         };
         let pose_kind =
-            crate::presentation::portrait_pose(&snapshot, &inputs.feedback.0, portrait.0);
+            crate::presentation::portrait_pose(&snapshot, &inputs.portrait_events.0, portrait.0);
         let pose = resolved
             .data
             .poses

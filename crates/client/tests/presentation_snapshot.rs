@@ -479,75 +479,91 @@ fn the_density_setting_decides_how_many_marks_a_clear_leaves() {
 #[test]
 fn a_portraits_pose_follows_the_facts_in_a_fixed_priority() {
     use client::character_presentation::PoseKind;
-    use client::presentation::portrait_pose;
-    use game_core::match_state::{MatchOutcome, RoundOutcome};
+    use client::presentation::{PortraitPoseEvents, portrait_pose};
 
     let state = presentation_common::state(7);
     let spec = state.spec().clone();
     let view = state.view();
     let base = build_snapshot(Some(&view), None, &spec, AnimationIntensity::Full)
         .expect("a match produces a snapshot");
-    let quiet = FeedbackLines::default();
+    let quiet = PortraitPoseEvents::default();
 
-    // Nothing happening: an empty queue idles, a filled one defends.
+    // Nothing happening: idle.
     assert_eq!(portrait_pose(&base, &quiet, 0), PoseKind::Idle);
-    let mut pressed = base.clone();
-    pressed.players[0].pending_garbage = 12;
-    assert_eq!(portrait_pose(&pressed, &quiet, 0), PoseKind::Defending);
-    pressed.players[0].overflow_risk = true;
+
+    // The opponent being about to lose while this side is safe reads as
+    // advantage; the side actually at risk reads its own overflow risk as
+    // damage instead, not idle.
+    let mut ahead = base.clone();
+    ahead.players[1].overflow_risk = true;
+    assert_eq!(portrait_pose(&ahead, &quiet, 0), PoseKind::Advantage);
+    assert_eq!(portrait_pose(&ahead, &quiet, 1), PoseKind::Damage);
+
+    // Being about to lose outranks being advantaged, and needs no event: the
+    // state alone is enough.
+    let mut both_at_risk = ahead.clone();
+    both_at_risk.players[0].overflow_risk = true;
+    assert_eq!(portrait_pose(&both_at_risk, &quiet, 0), PoseKind::Damage);
+
+    // A nuisance drop opens a damage window on its own, even without overflow
+    // risk, and it outranks advantage the same way.
+    let mut dropped = PortraitPoseEvents::default();
+    dropped.observe(
+        &report(
+            base.match_tick,
+            vec![MatchEvent::NuisanceDropped { slot: 0, count: 4 }],
+        ),
+        &base,
+    );
+    assert_eq!(portrait_pose(&ahead, &dropped, 0), PoseKind::Damage);
+
+    // The window expires on its own clock, same as a feedback line.
+    let mut expired = base.clone();
+    expired.match_tick = base.match_tick + FEEDBACK_TICKS;
     assert_eq!(
-        portrait_pose(&pressed, &quiet, 0),
-        PoseKind::Strained,
-        "being about to lose outranks merely being under pressure"
+        portrait_pose(&expired, &dropped, 0),
+        PoseKind::Idle,
+        "the damage window has closed"
     );
 
-    // What just left the board outranks pressure.
-    let mut lines = FeedbackLines::default();
-    lines.observe(&report(
-        base.match_tick,
-        vec![
-            MatchEvent::AttackArbitrated {
+    // A chain settling outranks everything else, and picks offset vs. spell
+    // from this side's own nuisance queues at the moment it settles.
+    let mut owed = base.clone();
+    owed.players[0].pending_garbage = 6;
+    let mut counterattacked = PortraitPoseEvents::default();
+    counterattacked.observe(
+        &report(
+            base.match_tick,
+            vec![MatchEvent::ChainSettled {
                 slot: 0,
-                offset: 0,
-                sent: 9,
-            },
-            MatchEvent::AttackArbitrated {
-                slot: 1,
-                offset: 4,
-                sent: 0,
-            },
-        ],
-    ));
-    assert_eq!(portrait_pose(&pressed, &lines, 0), PoseKind::Attacking);
-    assert_eq!(portrait_pose(&pressed, &lines, 1), PoseKind::Offsetting);
-
-    // Fever outranks what just left the board.
-    let mut fevered = pressed.clone();
-    fevered.players[0].fever_state = true;
-    assert_eq!(portrait_pose(&fevered, &lines, 0), PoseKind::Fever);
-
-    // A decided round or match outranks everything, on both sides at once.
-    let mut decided = fevered.clone();
-    decided.phase = MatchPhase::RoundOutro {
-        outcome: RoundOutcome::Decided(1),
-        remaining_ticks: 30,
-    };
-    assert_eq!(portrait_pose(&decided, &lines, 0), PoseKind::Losing);
-    assert_eq!(portrait_pose(&decided, &lines, 1), PoseKind::Winning);
-
-    let mut drawn = decided.clone();
-    drawn.phase = MatchPhase::RoundOutro {
-        outcome: RoundOutcome::Draw,
-        remaining_ticks: 30,
-    };
-    assert_eq!(
-        portrait_pose(&drawn, &lines, 0),
-        PoseKind::Fever,
-        "a draw names no winner, so the pose falls through to the next fact"
+                links: 3,
+                all_clear: false,
+            }],
+        ),
+        &owed,
     );
+    assert_eq!(portrait_pose(&owed, &counterattacked, 0), PoseKind::Offset);
 
-    let mut over = decided;
-    over.phase = MatchPhase::Completed(MatchOutcome { winner: 0 });
-    assert_eq!(portrait_pose(&over, &lines, 0), PoseKind::Winning);
-    assert_eq!(portrait_pose(&over, &lines, 1), PoseKind::Losing);
+    let mut cast = PortraitPoseEvents::default();
+    cast.observe(
+        &report(
+            base.match_tick,
+            vec![MatchEvent::ChainSettled {
+                slot: 0,
+                links: 2,
+                all_clear: false,
+            }],
+        ),
+        &base,
+    );
+    assert_eq!(portrait_pose(&base, &cast, 0), PoseKind::Spell);
+
+    // Settling this tick outranks a fresh damage event and overflow risk
+    // alike, even when both fire on the same side at once.
+    let mut cornered = owed;
+    cornered.players[0].overflow_risk = true;
+    assert_eq!(
+        portrait_pose(&cornered, &counterattacked, 0),
+        PoseKind::Offset
+    );
 }

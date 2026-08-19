@@ -51,14 +51,10 @@ fn unknown_character_is_invalid_data_with_the_id_preserved() {
 // component/character-presentation::TC-003
 #[test]
 fn missing_pose_is_invalid_data_with_the_character_preserved() {
-    let source = replace_once(
-        PRESENTATION,
-        "fever: (offset: 12, scale: 108, frame: Charged),",
-        "",
-    );
+    let source = replace_once(PRESENTATION, "damage: (offset: -20, scale: 95),", "");
     let error = parse_character_presentations(&source, &roster()).expect_err("missing pose fails");
     assert!(
-        matches!(error, DataErrorCause::InvalidData(ref reason) if reason.contains("alpha") && reason.contains("fever"))
+        matches!(error, DataErrorCause::InvalidData(ref reason) if reason.contains("alpha") && reason.contains("damage"))
     );
 }
 

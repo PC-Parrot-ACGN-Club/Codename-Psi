@@ -12,24 +12,18 @@ pub const CHARACTER_PRESENTATION_SCHEMA_VERSION: u32 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 pub enum PoseKind {
     Idle,
-    Attacking,
-    Offsetting,
-    Defending,
-    Strained,
-    Fever,
-    Winning,
-    Losing,
+    Spell,
+    Offset,
+    Damage,
+    Advantage,
 }
 
-pub const POSES: [PoseKind; 8] = [
+pub const POSES: [PoseKind; 5] = [
     PoseKind::Idle,
-    PoseKind::Attacking,
-    PoseKind::Offsetting,
-    PoseKind::Defending,
-    PoseKind::Strained,
-    PoseKind::Fever,
-    PoseKind::Winning,
-    PoseKind::Losing,
+    PoseKind::Spell,
+    PoseKind::Offset,
+    PoseKind::Damage,
+    PoseKind::Advantage,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -73,19 +67,9 @@ pub struct BadgeSpec {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-pub enum PoseFrame {
-    #[default]
-    Neutral,
-    Charged,
-    Guard,
-    Alert,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 pub struct PoseSpec {
     pub offset: i16,
     pub scale: u16,
-    pub frame: PoseFrame,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,26 +122,20 @@ struct RawCharacter {
 #[serde(default)]
 struct RawPoses {
     idle: PoseSpec,
-    attacking: PoseSpec,
-    offsetting: PoseSpec,
-    defending: PoseSpec,
-    strained: PoseSpec,
-    fever: PoseSpec,
-    winning: PoseSpec,
-    losing: PoseSpec,
+    spell: PoseSpec,
+    offset: PoseSpec,
+    damage: PoseSpec,
+    advantage: PoseSpec,
 }
 
 impl RawPoses {
     fn finish(self, id: &CharacterId) -> Result<BTreeMap<PoseKind, PoseSpec>, DataErrorCause> {
         let fields = [
             (PoseKind::Idle, "idle", self.idle),
-            (PoseKind::Attacking, "attacking", self.attacking),
-            (PoseKind::Offsetting, "offsetting", self.offsetting),
-            (PoseKind::Defending, "defending", self.defending),
-            (PoseKind::Strained, "strained", self.strained),
-            (PoseKind::Fever, "fever", self.fever),
-            (PoseKind::Winning, "winning", self.winning),
-            (PoseKind::Losing, "losing", self.losing),
+            (PoseKind::Spell, "spell", self.spell),
+            (PoseKind::Offset, "offset", self.offset),
+            (PoseKind::Damage, "damage", self.damage),
+            (PoseKind::Advantage, "advantage", self.advantage),
         ];
         fields
             .into_iter()
@@ -336,7 +314,6 @@ fn fallback(identity: &CharacterIdentity, slot: usize) -> CharacterPresentation 
     let neutral = PoseSpec {
         offset: 0,
         scale: 100,
-        frame: PoseFrame::Neutral,
     };
     CharacterPresentation {
         id: identity.id.clone(),

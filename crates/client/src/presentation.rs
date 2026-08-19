@@ -148,49 +148,96 @@ pub fn build_snapshot(
     })
 }
 
+/// The two event-driven windows a portrait pose depends on, tracked per
+/// participant: which of `Offset`/`Spell` the most recent Chain settlement
+/// selected, and whether a nuisance batch landed recently. Both expire after
+/// [`FEEDBACK_TICKS`], the same window `FeedbackLines` uses, and observing an
+/// uneventful tick leaves an open window alone rather than clearing it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct PortraitPoseEvents {
+    chain: [Option<(crate::character_presentation::PoseKind, u64)>; 2],
+    damage: [Option<u64>; 2],
+}
+
+impl PortraitPoseEvents {
+    /// Records what one tick's facts open for each participant's windows.
+    ///
+    /// `Offset` vs. `Spell` is decided at the moment the chain settles, from
+    /// that participant's own nuisance queues in the same snapshot -- once
+    /// recorded, the choice stays fixed for the rest of the window even if the
+    /// queues change before it expires.
+    pub fn observe(&mut self, report: &MatchStepReport, snapshot: &MatchPresentationSnapshot) {
+        use crate::character_presentation::PoseKind;
+
+        for event in &report.events {
+            match *event {
+                MatchEvent::ChainSettled { slot, .. } => {
+                    if let Some(cell) = self.chain.get_mut(slot) {
+                        let player = &snapshot.players[slot];
+                        let kind = if player.pending_garbage + player.fever_garbage > 0 {
+                            PoseKind::Offset
+                        } else {
+                            PoseKind::Spell
+                        };
+                        *cell = Some((kind, report.match_tick));
+                    }
+                }
+                MatchEvent::NuisanceDropped { slot, .. } => {
+                    if let Some(cell) = self.damage.get_mut(slot) {
+                        *cell = Some(report.match_tick);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn chain_pose(
+        &self,
+        slot: usize,
+        match_tick: u64,
+    ) -> Option<crate::character_presentation::PoseKind> {
+        let (kind, since) = (*self.chain.get(slot)?)?;
+        (match_tick.saturating_sub(since) < FEEDBACK_TICKS).then_some(kind)
+    }
+
+    fn damage_event(&self, slot: usize, match_tick: u64) -> bool {
+        self.damage
+            .get(slot)
+            .copied()
+            .flatten()
+            .is_some_and(|since| match_tick.saturating_sub(since) < FEEDBACK_TICKS)
+    }
+}
+
 /// The pose a participant's portrait holds this frame.
 ///
-/// One pose per participant per frame, chosen from facts the snapshot already
-/// carries plus the line the last few ticks left. The order below is the
-/// priority: a decided match outranks Fever, Fever outranks what just left the
-/// board, and pressure is what shows when nothing else is happening.
+/// One pose per participant per frame. Priority, high to low: `offset` >
+/// `spell` > `damage` > `advantage` > `idle` -- see [presentation §3.1]. A
+/// decided round or match does not override this: the circular frame keeps
+/// taking its pose from these same facts, and the separate win/lose art swaps
+/// in at the board position instead.
+///
+/// [presentation §3.1]: ../../../docs/presentation.md
 #[must_use]
 pub fn portrait_pose(
     snapshot: &MatchPresentationSnapshot,
-    lines: &FeedbackLines,
+    events: &PortraitPoseEvents,
     slot: usize,
 ) -> crate::character_presentation::PoseKind {
     use crate::character_presentation::PoseKind;
 
     let player = &snapshot.players[slot];
-    let decided = match snapshot.phase {
-        MatchPhase::Completed(outcome) => Some(outcome.winner == slot),
-        MatchPhase::RoundOutro { outcome, .. } => match outcome {
-            game_core::match_state::RoundOutcome::Decided(winner) => Some(winner == slot),
-            game_core::match_state::RoundOutcome::Draw => None,
-        },
-        _ => None,
-    };
-    if let Some(won) = decided {
-        return if won {
-            PoseKind::Winning
-        } else {
-            PoseKind::Losing
-        };
+    let opponent = &snapshot.players[1 - slot];
+
+    if let Some(kind) = events.chain_pose(slot, snapshot.match_tick) {
+        return kind;
     }
-    if player.fever_state {
-        return PoseKind::Fever;
+    if events.damage_event(slot, snapshot.match_tick) || player.overflow_risk {
+        return PoseKind::Damage;
     }
-    match lines.line(slot, snapshot.match_tick) {
-        Some(FeedbackLine::Attack(_) | FeedbackLine::AllClear) => return PoseKind::Attacking,
-        Some(FeedbackLine::Offset(_)) => return PoseKind::Offsetting,
-        None => {}
-    }
-    if player.overflow_risk {
-        return PoseKind::Strained;
-    }
-    if player.pending_garbage + player.fever_garbage > 0 {
-        return PoseKind::Defending;
+    if opponent.overflow_risk && !player.overflow_risk {
+        return PoseKind::Advantage;
     }
     PoseKind::Idle
 }
