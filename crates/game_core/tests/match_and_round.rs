@@ -857,3 +857,106 @@ fn a_batch_burying_the_spawn_column_defeats_on_the_tick_it_lands() {
         }
     ));
 }
+
+/// Counts occupied visible cells, so a resolution's ball count can be tracked
+/// as balls clear and fall without pinning exact coordinates.
+fn occupied_visible_cells(board: &Board) -> usize {
+    board
+        .visible_coords()
+        .filter(|&coord| board.get(coord) != Cell::Empty)
+        .count()
+}
+
+// component/chain-resolution::TC-017
+#[test]
+fn the_read_model_shows_the_resolving_board_while_a_chain_is_settling() {
+    let mut state = MatchState::new(spec());
+    open_play(&mut state);
+    let board = board_with_a_clearing_group(&state);
+    state
+        .round_mut()
+        .player_mut(0)
+        .expect("slot exists")
+        .set_board(board);
+
+    // Locking slot 0's active group joins the fixture's bottom row and opens
+    // its resolution; slot 1 is left idle so nothing else is in flight.
+    let lock = TickInputs::new([
+        PlayerActions::from(GameAction::HardDrop),
+        PlayerActions::EMPTY,
+    ])
+    .expect("two slots");
+    state.step(&lock).expect("a tick advances");
+
+    let view = state.player_view(0).expect("slot exists");
+    let resolution = view
+        .resolution
+        .expect("the fixture's row of four opens a chain on lock");
+    assert_eq!(
+        resolution.stage,
+        game_core::view::ResolutionStage::ClearPreview,
+        "the chain opens with a preview"
+    );
+    let clear_cells = resolution.clear_cells.clone();
+    assert!(
+        (0..4).all(|x| clear_cells.contains(&at(x, 13))),
+        "the fixture's bottom row is what is clearing"
+    );
+    let before_count = occupied_visible_cells(&view.board);
+
+    // The preview holds: the read model keeps drawing the cleared balls for
+    // as long as the stage stays ClearPreview.
+    let mut ticks = 0;
+    loop {
+        let view = state.player_view(0).expect("slot exists");
+        let stage = view.resolution.expect("the chain is still resolving").stage;
+        if stage != game_core::view::ResolutionStage::ClearPreview {
+            break;
+        }
+        for &coord in &clear_cells {
+            assert_eq!(
+                view.board.get(coord),
+                Cell::Color(0),
+                "a ball scheduled to clear stays drawn while the preview counts down"
+            );
+        }
+        state.step(&idle()).expect("a tick advances");
+        ticks += 1;
+        assert!(ticks < 100, "the preview should have expired by now");
+    }
+
+    // The tick the link commits: the cleared cells read empty and the total
+    // ball count drops by exactly what cleared.
+    let view = state.player_view(0).expect("slot exists");
+    for &coord in &clear_cells {
+        assert_eq!(
+            view.board.get(coord),
+            Cell::Empty,
+            "a cleared ball is not drawn on the tick its link commits"
+        );
+    }
+    let after_commit_count = occupied_visible_cells(&view.board);
+    assert_eq!(
+        before_count - after_commit_count,
+        clear_cells.len(),
+        "exactly the cleared balls disappear on the commit tick"
+    );
+
+    // From here to the end of the resolution, balls falling into the vacated
+    // cells replace what left; the total must never climb back above what it
+    // dropped to at commit.
+    let mut ticks = 0;
+    loop {
+        let view = state.player_view(0).expect("slot exists");
+        assert!(
+            occupied_visible_cells(&view.board) <= after_commit_count,
+            "the read model never regains balls that already cleared"
+        );
+        if view.resolution.is_none() {
+            break;
+        }
+        state.step(&idle()).expect("a tick advances");
+        ticks += 1;
+        assert!(ticks < 200, "the resolution should have settled by now");
+    }
+}

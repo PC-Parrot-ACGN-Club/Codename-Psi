@@ -174,12 +174,22 @@ pub struct PlayerView {
 impl PlayerView {
     fn of(player: &PlayerBattleState, drop_set_id: CharacterId) -> Self {
         let other = (player.active_channel() + 1) % CHANNELS;
+        // While a chain resolves, the player's own board still holds the
+        // pre-chain arrangement: the resolution took a copy at the lock and
+        // hands it back at settlement. The copy is what is actually on screen
+        // -- reading the player's board instead leaves every cleared ball
+        // drawn until the whole chain ends, with the falling ones snapping
+        // back the moment a gravity phase is over.
+        let board = player.resolution().map_or_else(
+            || player.board().clone(),
+            |resolution| resolution.board().clone(),
+        );
         Self {
-            board: player.board().clone(),
             frozen_board: player
                 .channel_board(other)
                 .cloned()
-                .unwrap_or_else(|| player.board().clone()),
+                .unwrap_or_else(|| board.clone()),
+            board,
             active_channel: player.active_channel(),
             active_group: player.active_group().copied(),
             next: player.stream().queued().collect(),

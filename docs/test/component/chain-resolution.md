@@ -33,6 +33,7 @@
 - 无连锁与全消等边界结果正确（TC-011～TC-012）。
 - Fever 在结算过程中归零时完成当前连锁，并在 `Settlement` 退出（TC-013）。
 - 推进 tick 的方式与是否存在表现消费者不改变规则阶段的 tick 序列（Concern: Determinism；TC-014）。
+- 结算期间读模型给出的是结算自己持有的盘面，已提交的消除当场从中消失（TC-017）。
 
 ## 设计方法与覆盖模型
 
@@ -65,6 +66,7 @@
 | TC-014 | 推进方式与表现消费者不改变阶段 tick 序列 | P0 | Component | Determinism | Rules | 三份相同初始盘面与结算状态 | 分别以一次推进 90 tick、分三段各 30 tick、以及每 tick 读取表现协议字段的方式推进 | 二连锁盘面（同 TC-007）；`clear_preview_ticks=24`；重力时长查表 | 三者逐 tick 的 `phase`、`elapsed_ticks`、`duration_ticks` 序列完全相同，最终盘面与 `ChainReport` 相同；读取表现字段不推进阶段，也没有由表现返回的完成信号可改变截止 tick | [Confirmed] [连锁结算：表现协议](../../development/design/chain-resolution.md#表现协议)；[玩法设计 §3.5](../../gameplay.md) |
 | TC-015 | 两个零时长边界都不为连锁步增加 tick | P1 | Component | — | Rules | 已冻结的结算时长配置与一条二连锁盘面 | 读取剖面时长；逐 tick 推进并记录每个 tick 的阶段标签 | `clear_preview_ticks=24`；重力表 1 格 20、2 格 27、3 格 33；TC-007 的盘面（本轮最大下落 2 格） | `24 + 20 = 44` 与 `24 + 33 = 57` 与 [DEC-004](../../development/decision/settlement-timing-values.md) 记录的连锁步区间一致；本盘面第 1 步为 `24 + 27 = 51` tick，第 24 tick 停在 `ClearCommit`、第 51 tick 停在 `ScanNext`，第 52 tick 已在为第 2 步的 `ClearPreview` 计入第 1 tick | [Confirmed] [连锁结算：阶段时长](../../development/design/chain-resolution.md#阶段时长)、[数据模型](../../development/design/chain-resolution.md#数据模型) |
 | TC-016 | Idle 只由锁定离开，且结算中再次锁定不改变状态 | P1 | Component | — | Rules | 一个静息结算持有稳定盘面 | 先推进若干 tick，再施加锁定；结算进行中再施加一次锁定；与「锁定后直接构造」的结果比较 | 盘面为 `y=13` 的 `x=0..3` 四连；空推进 30 tick | 30 tick 内 `phase` 恒为 `Idle`、盘面不变、无 `ChainReport`；锁定后进入 `ClearPreview` 且 `elapsed_ticks=0`；结算进行中的第二次锁定不改变 `phase`；两条路径推进到 `Settlement` 得到相同报告 | [Confirmed] [连锁结算：数据模型](../../development/design/chain-resolution.md#数据模型)、[协作](../../development/design/chain-resolution.md#协作)：`GroupLocked` 触发一次结算 |
+| TC-017 | 结算期间读模型给出结算自己的盘面，已提交的消除当场消失 | P1 | Component Integration | — | Rules；Client | 一名玩家的盘面上有一个待触发的消除组，且已进入结算 | 逐 tick 推进整条连锁，每个 tick 读取读模型的盘面 | 底行四连；随包剖面 | `ClearPreview` 期间待消球仍在读模型的盘面上；该链提交的那个 tick，这些坐标当场为空且盘面上的球数正好少了这一链清掉的数量；其后直到结算结束球数不再回升 | [Confirmed] [连锁结算：表现协议](../../development/design/chain-resolution.md#表现协议) |
 
 ## 风险查漏
 
