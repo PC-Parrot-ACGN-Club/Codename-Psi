@@ -1,7 +1,7 @@
 # 表现运行时
 
 **相关模块：** `client::presentation`、`game_core::view`
-**关联文档：** [表现与 UI 设计](../../presentation.md)、[小局、BO3 与安全点](match-and-round.md)、[连锁结算](chain-resolution.md)、[Fever 循环](fever-mode.md)、[角色表现数据](character-presentation.md)、[本机用户设置](user-settings.md)、[固定频率规则调度](fixed-tick-simulation.md)
+**关联文档：** [表现与 UI 设计](../../presentation.md)、[小局、BO3 与安全点](match-and-round.md)、[连锁结算](chain-resolution.md)、[Fever 循环](fever-mode.md)、[角色表现数据](character-presentation.md)、[圆框运动模型](portrait-motion.md)、[本机用户设置](user-settings.md)、[固定频率规则调度](fixed-tick-simulation.md)
 
 ## 目标
 
@@ -46,7 +46,7 @@
 
 小局与比赛结束后由[对局结束立绘](#对局结束立绘)接管圆框，不再走本优先级链。
 
-姿态与运动在两档[动画强度](#动画强度)下都保留，低强度只缩减幅度。演出不是攻防信息的唯一来源——连锁数画在棋盘内，攻防的量由两条垃圾队列的数字给出，两者互不替代。运动词汇、分档阈值与时序不变量见[表现与 UI 设计 §3.1](../../presentation.md)。
+姿态与运动在两档[动画强度](#动画强度)下都保留，低强度只缩减幅度。演出不是攻防信息的唯一来源——连锁数画在棋盘内，攻防的量由两条垃圾队列的数字给出，两者互不替代。姿态到运动词汇的映射、参数与补间求值见[圆框运动模型](portrait-motion.md)。
 
 ### 连锁与 Fever cut-in
 

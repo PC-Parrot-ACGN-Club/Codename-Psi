@@ -1,7 +1,7 @@
 # 角色表现数据
 
 **相关模块：** `client::data`、`client::presentation`
-**关联文档：** [规则配置与开局规格冻结](rule-configuration.md)、[版本化运行数据加载](runtime-data-loading.md)、[表现运行时](presentation-runtime.md)、[表现与 UI 设计 §3.1、§4.5](../../presentation.md)、[PRD §4.2、§7](../../PRD.md)
+**关联文档：** [规则配置与开局规格冻结](rule-configuration.md)、[版本化运行数据加载](runtime-data-loading.md)、[表现运行时](presentation-runtime.md)、[圆框运动模型](portrait-motion.md)、[表现与 UI 设计 §3.1、§4.5](../../presentation.md)、[PRD §4.2、§7](../../PRD.md)
 
 ## 目标
 
