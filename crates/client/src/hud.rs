@@ -50,6 +50,9 @@ const BOARD_TOP: f32 = 96.0;
 const GROUND: Color = Color::srgb(0.04, 0.05, 0.07);
 const PANEL: Color = Color::srgb(0.09, 0.11, 0.14);
 const GRID: Color = Color::srgb(0.13, 0.15, 0.19);
+/// Empty-cell fill while a player is in Fever, replacing `GRID` for the
+/// duration rather than flashing once on entry.
+const FEVER_GRID: Color = Color::srgb(0.24, 0.16, 0.07);
 const TEXT: Color = Color::srgb(0.90, 0.94, 0.98);
 const DANGER: Color = Color::srgb(0.85, 0.28, 0.24);
 
@@ -111,8 +114,12 @@ fn cell_glyph(occupant: Cell, color_assist: bool) -> &'static str {
 }
 
 /// The fill for one occupant.
-fn cell_color(occupant: Cell) -> Color {
+///
+/// An empty cell answers "is this player in Fever right now": the entry band
+/// in `effects.rs` already answers "did they just enter it".
+fn cell_color(occupant: Cell, in_fever: bool) -> Color {
     match occupant {
+        Cell::Empty if in_fever => FEVER_GRID,
         Cell::Empty => GRID,
         Cell::Color(id) => BALL_COLORS[usize::from(id) % BALL_COLORS.len()],
         Cell::Nuisance => NUISANCE_COLOR,
@@ -431,7 +438,7 @@ fn refresh_hud(inputs: HudInputs, mut feedback: ResMut<MatchFeedback>, mut cells
                 |color| Cell::Color(*color),
             )
         };
-        let mut color = cell_color(occupant);
+        let mut color = cell_color(occupant, player.fever_state);
         // The preset a Fever puzzle starts with is drawn back, so the chain the
         // player is handed does not read as balls they stacked themselves.
         if occupant.is_occupied() && overlay.preset.contains(&key) {
@@ -479,7 +486,7 @@ fn refresh_hud(inputs: HudInputs, mut feedback: ResMut<MatchFeedback>, mut cells
 
         // No ball at this offset: the cell disappears rather than showing an
         // empty slot, which is what makes the shape readable.
-        background.0 = occupant.map_or(Color::NONE, cell_color);
+        background.0 = occupant.map_or(Color::NONE, |occupant| cell_color(occupant, false));
         let glyph = occupant.map_or("", |occupant| cell_glyph(occupant, settings.color_assist));
         for child in children.iter() {
             if let Ok(mut text) = cells.glyphs.get_mut(child)
@@ -1591,8 +1598,8 @@ mod tests {
     use game_core::drop_stream::PendingHand;
 
     use super::{
-        CLEAR_HOLD_TICKS, Cell, ClearPose, FALL_HOLD_TICKS, cell_glyph, fall_position,
-        preview_occupant,
+        CLEAR_HOLD_TICKS, Cell, ClearPose, FALL_HOLD_TICKS, GRID, cell_color, cell_glyph,
+        fall_position, preview_occupant,
     };
 
     fn hand(shape: DropShape, colors: [u8; 2]) -> PendingHand {
@@ -1634,6 +1641,32 @@ mod tests {
         );
         assert!(!cell_glyph(Cell::Nuisance, false).is_empty());
         assert_eq!(cell_glyph(Cell::Empty, true), "");
+    }
+
+    // integration-system/presentation-runtime::TC-021
+    #[test]
+    fn empty_cells_tint_for_fever_while_occupied_cells_do_not() {
+        // Outside Fever an empty cell is the plain grid colour.
+        assert_eq!(cell_color(Cell::Empty, false), GRID);
+
+        // In Fever it switches to a colour of its own, so the board keeps
+        // answering "what state is this" for as long as Fever lasts rather
+        // than only flashing once on entry.
+        let fever_grid = cell_color(Cell::Empty, true);
+        assert_ne!(fever_grid, GRID);
+
+        // Occupied cells carry the ball or nuisance colour either way; Fever
+        // does not repaint balls already on the board.
+        for id in 0..5 {
+            assert_eq!(
+                cell_color(Cell::Color(id), false),
+                cell_color(Cell::Color(id), true)
+            );
+        }
+        assert_eq!(
+            cell_color(Cell::Nuisance, false),
+            cell_color(Cell::Nuisance, true)
+        );
     }
 
     // integration-system/presentation-runtime::TC-011
