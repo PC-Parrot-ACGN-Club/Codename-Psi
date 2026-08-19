@@ -3,9 +3,9 @@
 mod presentation_common;
 
 use client::presentation::{
-    FEEDBACK_TICKS, FeedbackLine, FeedbackLines, MARKS_PER_CELL, MatchPresentationFrame,
-    NUISANCE_ICON_SLOTS, NUISANCE_UNITS, PresentationEffects, PresentationEventConsumer,
-    build_snapshot, nuisance_icons, publish_events,
+    ChainCutinTier, FEEDBACK_TICKS, FeedbackLine, FeedbackLines, MARKS_PER_CELL,
+    MatchPresentationFrame, NUISANCE_ICON_SLOTS, NUISANCE_UNITS, PresentationEffects,
+    PresentationEventConsumer, build_snapshot, chain_cutin_tier, nuisance_icons, publish_events,
 };
 use client::settings::AnimationIntensity;
 use game_core::{
@@ -565,5 +565,28 @@ fn a_portraits_pose_follows_the_facts_in_a_fixed_priority() {
     assert_eq!(
         portrait_pose(&cornered, &counterattacked, 0),
         PoseKind::Offset
+    );
+}
+
+// component/presentation-snapshot::TC-012
+#[test]
+fn a_chains_final_link_count_sorts_into_one_of_four_cutin_tiers() {
+    assert_eq!(chain_cutin_tier(0), None, "no chain settled at all");
+    assert_eq!(
+        chain_cutin_tier(1),
+        None,
+        "the shortest possible chain earns no cut-in"
+    );
+    assert_eq!(chain_cutin_tier(2), Some(ChainCutinTier::Chain2To3));
+    assert_eq!(chain_cutin_tier(3), Some(ChainCutinTier::Chain2To3));
+    assert_eq!(chain_cutin_tier(4), Some(ChainCutinTier::Chain4To5));
+    assert_eq!(chain_cutin_tier(5), Some(ChainCutinTier::Chain4To5));
+    assert_eq!(chain_cutin_tier(6), Some(ChainCutinTier::Chain6To7));
+    assert_eq!(chain_cutin_tier(7), Some(ChainCutinTier::Chain6To7));
+    assert_eq!(chain_cutin_tier(8), Some(ChainCutinTier::Chain8Plus));
+    assert_eq!(
+        chain_cutin_tier(u8::MAX),
+        Some(ChainCutinTier::Chain8Plus),
+        "the top tier has no upper bound"
     );
 }

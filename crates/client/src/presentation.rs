@@ -242,6 +242,37 @@ pub fn portrait_pose(
     PoseKind::Idle
 }
 
+/// Which `cutin-chain-*` slot a chain's final link count draws from.
+///
+/// One tier per bracket [character presentation] defines; matches
+/// [presentation §3.1]. The classification alone does not decide *when* a
+/// cut-in plays -- that is the last link's `ClearCommit`, which needs the
+/// settlement's own lookahead for "is this the final link" and is out of
+/// scope here.
+///
+/// [character presentation]: ../../../docs/development/design/character-presentation.md
+/// [presentation §3.1]: ../../../docs/presentation.md
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainCutinTier {
+    Chain2To3,
+    Chain4To5,
+    Chain6To7,
+    Chain8Plus,
+}
+
+/// The tier a chain's final link count falls into, or `None` for a single
+/// link -- the shortest possible chain earns no cut-in.
+#[must_use]
+pub const fn chain_cutin_tier(chain_count: u8) -> Option<ChainCutinTier> {
+    match chain_count {
+        0 | 1 => None,
+        2 | 3 => Some(ChainCutinTier::Chain2To3),
+        4 | 5 => Some(ChainCutinTier::Chain4To5),
+        6 | 7 => Some(ChainCutinTier::Chain6To7),
+        _ => Some(ChainCutinTier::Chain8Plus),
+    }
+}
+
 /// Icon units a nuisance queue is read in, heaviest first.
 ///
 /// A greedy walk therefore spends the heaviest symbols first, and a queue too
