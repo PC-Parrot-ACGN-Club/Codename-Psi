@@ -404,6 +404,61 @@ fn exiting_fever_merges_the_queues_and_restores_the_normal_channel() {
     );
 }
 
+// component/fever-mode::TC-016
+#[test]
+fn every_settlement_in_fever_switches_the_puzzle_regardless_of_chain_length() {
+    let spec = spec();
+    let book = &spec.fever.puzzles;
+    let mut player = PlayerBattleState::new(&spec, 0, 0, 0);
+    assert!(player.enter_fever(&spec, 0));
+    assert_eq!(
+        player.session().expect("a session is open").target_level(),
+        spec.fever.initial_level
+    );
+
+    // Alternates chainless locks (achieved = 0) with locks that exactly meet
+    // the target, so the level never plateaus between steps. Every step must
+    // still switch the puzzle: the design does not gate the switch on chain
+    // length (docs/development/design/fever-mode.md §题面循环).
+    let steps: [(u8, bool); 4] = [(0, false), (3, false), (4, false), (0, false)];
+    let expected_levels = [3_u8, 4, 5, 3];
+
+    for ((achieved, all_clear), expected_level) in steps.into_iter().zip(expected_levels) {
+        let before_id = player
+            .session()
+            .expect("still in Fever")
+            .current_puzzle_id()
+            .to_string();
+
+        player.advance_fever_puzzle(&spec, achieved, all_clear);
+
+        let session = player.session().expect("still in Fever");
+        assert_eq!(
+            session.target_level(),
+            expected_level,
+            "achieved {achieved}, all_clear {all_clear}: the level did not advance, \
+             which is exactly what a silently no-op puzzle switch looks like"
+        );
+
+        let puzzle =
+            puzzle_by_id(book, session.current_puzzle_id()).expect("the drawn id is in the book");
+        assert_eq!(puzzle.level, expected_level);
+
+        let mut expected_board = Board::with_geometry(spec.board_geometry);
+        load_puzzle(&mut expected_board, puzzle);
+        assert_eq!(
+            player.channel_board(FEVER_CHANNEL),
+            Some(&expected_board),
+            "achieved {achieved}: the Fever board must show the new puzzle, not the old one"
+        );
+        assert_ne!(
+            session.current_puzzle_id(),
+            before_id,
+            "achieved {achieved}: a level change with one puzzle per level must draw a new id"
+        );
+    }
+}
+
 // component/fever-mode::TC-015
 #[test]
 fn the_drop_right_after_flipping_back_still_obeys_the_batch_limit() {

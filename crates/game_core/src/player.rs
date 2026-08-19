@@ -292,9 +292,17 @@ impl PlayerBattleState {
             spec.fever.min_level,
             spec.fever.max_level,
         );
-        if session
+        let advanced = session
             .advance(&spec.fever.puzzles, next, &mut self.fever_rng)
-            .is_some()
+            .is_some();
+        // `RuleLibrary::partial` guarantees every level in the profile's
+        // domain has book coverage, so `advance` failing here means the
+        // Fever board is about to silently keep showing a stale puzzle.
+        debug_assert!(
+            advanced,
+            "Fever puzzle book has no puzzle for level {next}; the board will not switch"
+        );
+        if advanced
             && let Some(puzzle) = puzzle_by_id(&spec.fever.puzzles, session.current_puzzle_id())
         {
             let puzzle = puzzle.clone();
