@@ -240,7 +240,7 @@ fn both_portraits_are_drawn_from_the_catalogs_own_colours_and_badges() {
         .map(|(text, _)| text.0.clone())
         .collect();
     badges.sort();
-    for id in ["psi-a", "psi-b"] {
+    for id in ["alpha", "beta"] {
         let entry = catalog
             .get(&game_core::config::CharacterId(id.into()))
             .expect("the character is in the catalog");
@@ -253,7 +253,7 @@ fn both_portraits_are_drawn_from_the_catalogs_own_colours_and_badges() {
 
     // The portrait circles carry the characters' own border colours, which is
     // what tells a substitute apart from the real thing.
-    let expected: Vec<Color> = ["psi-a", "psi-b"]
+    let expected: Vec<Color> = ["alpha", "beta"]
         .into_iter()
         .map(|id| {
             let color = catalog
@@ -301,12 +301,12 @@ fn the_portrait_name_is_the_localized_roster_name_not_the_drop_set_id() {
     app.update();
 
     let localization = app.world().resource::<client::i18n::Localization>();
-    let expected: Vec<String> = ["character.psi_a.name", "character.psi_b.name"]
+    let expected: Vec<String> = ["character.alpha.name", "character.beta.name"]
         .into_iter()
         .map(|key| localization.text(key))
         .collect();
     // A key that resolved to itself would make the assertions below vacuous.
-    for (key, name) in ["character.psi_a.name", "character.psi_b.name"]
+    for (key, name) in ["character.alpha.name", "character.beta.name"]
         .into_iter()
         .zip(&expected)
     {
@@ -327,7 +327,7 @@ fn the_portrait_name_is_the_localized_roster_name_not_the_drop_set_id() {
         );
     }
     // `drop_set_id` is what used to be drawn here; it must not be any more.
-    for id in ["psi-a", "psi-b"] {
+    for id in ["alpha", "beta"] {
         assert!(
             !shown.iter().any(|text| text == id),
             "{id:?} is still drawn as a name: {shown:?}"

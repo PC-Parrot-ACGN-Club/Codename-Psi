@@ -1,8 +1,8 @@
-// Character B: Fever specialist. 16 hands, 39 balls.
+// Beta: Fever specialist. 16 hands, 39 balls.
 (
     schema_version: 1,
     profile_id: ("fever-r1"),
-    character_id: ("psi-b"),
+    character_id: ("beta"),
     drop_set: ([
         (shape: I),
         (shape: I),

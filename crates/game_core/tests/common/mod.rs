@@ -28,14 +28,14 @@ pub const ROSTER_SRC: &str = include_str!("../../../../assets/data/rules/roster.
 pub const PUZZLE_BOOK_SRC: &str =
     include_str!("../../../../assets/data/rules/puzzles/fever-r1.ron");
 /// Repository gameplay data for character A.
-pub const PLAY_A_SRC: &str = include_str!("../../../../assets/data/rules/play/fever-r1/psi-a.ron");
+pub const PLAY_A_SRC: &str = include_str!("../../../../assets/data/rules/play/fever-r1/alpha.ron");
 /// Repository gameplay data for character B.
-pub const PLAY_B_SRC: &str = include_str!("../../../../assets/data/rules/play/fever-r1/psi-b.ron");
+pub const PLAY_B_SRC: &str = include_str!("../../../../assets/data/rules/play/fever-r1/beta.ron");
 
 /// Character A's roster id.
-pub const CHARACTER_A_ID: &str = "psi-a";
+pub const CHARACTER_A_ID: &str = "alpha";
 /// Character B's roster id.
-pub const CHARACTER_B_ID: &str = "psi-b";
+pub const CHARACTER_B_ID: &str = "beta";
 /// The repository profile's id.
 pub const PROFILE_ID: &str = "fever-r1";
 

@@ -73,8 +73,8 @@ fn selecting_app(seed: u64) -> App {
         rule_profile_id: game_core::config::RuleProfileId("fever-r1".into()),
         root_seed: seed,
         characters: [
-            game_core::config::CharacterId("psi-a".into()),
-            game_core::config::CharacterId("psi-b".into()),
+            game_core::config::CharacterId("alpha".into()),
+            game_core::config::CharacterId("beta".into()),
         ],
         confirmed: true,
     });
@@ -438,8 +438,8 @@ fn single_player_and_local_versus_can_both_complete_a_bo3_to_result() {
         let mut selection = client::page::CharacterSelectPage::new(
             mode,
             vec![
-                game_core::config::CharacterId("psi-a".into()),
-                game_core::config::CharacterId("psi-b".into()),
+                game_core::config::CharacterId("alpha".into()),
+                game_core::config::CharacterId("beta".into()),
             ],
         );
         selection.handle_player(0, client::input::UIAction::Confirm);
@@ -506,8 +506,8 @@ fn each_mode_hands_the_ai_exactly_the_slots_no_local_player_owns() {
 #[test]
 fn one_selector_modes_let_a_single_player_pick_both_characters() {
     let roster = vec![
-        game_core::config::CharacterId("psi-a".into()),
-        game_core::config::CharacterId("psi-b".into()),
+        game_core::config::CharacterId("alpha".into()),
+        game_core::config::CharacterId("beta".into()),
     ];
 
     for mode in [MatchMode::SinglePlayer, MatchMode::AiVersus] {
@@ -528,7 +528,7 @@ fn one_selector_modes_let_a_single_player_pick_both_characters() {
                 .iter()
                 .map(|id| id.as_ref().map(|id| id.0.as_str()))
                 .collect::<Vec<_>>(),
-            vec![Some("psi-a"), Some("psi-b")],
+            vec![Some("alpha"), Some("beta")],
             "{mode:?} did not let one player pick two different characters"
         );
     }

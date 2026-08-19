@@ -15,8 +15,8 @@ use game_core::{
 const PROFILE: &str = include_str!("../../../assets/data/rules/profiles/fever.ron");
 const ROSTER: &str = include_str!("../../../assets/data/rules/roster.ron");
 const BOOK: &str = include_str!("../../../assets/data/rules/puzzles/fever-r1.ron");
-const PLAY_A: &str = include_str!("../../../assets/data/rules/play/fever-r1/psi-a.ron");
-const PLAY_B: &str = include_str!("../../../assets/data/rules/play/fever-r1/psi-b.ron");
+const PLAY_A: &str = include_str!("../../../assets/data/rules/play/fever-r1/alpha.ron");
+const PLAY_B: &str = include_str!("../../../assets/data/rules/play/fever-r1/beta.ron");
 
 fn library() -> ValidatedRuleLibrary {
     use game_core::config::{
@@ -50,7 +50,7 @@ fn spec_with(seed: u64, characters: [&str; 2]) -> LockedMatchSpec {
 }
 
 fn spec() -> LockedMatchSpec {
-    spec_with(0x1, ["psi-a", "psi-b"])
+    spec_with(0x1, ["alpha", "beta"])
 }
 
 fn at(x: u8, y: u8) -> Coord {
@@ -471,7 +471,7 @@ fn a_board_where_everything_loses_still_produces_a_plan() {
 #[test]
 fn ai_matches_finish_and_reproduce_under_fixed_seeds() {
     const CAP: usize = 120_000;
-    let pairings = [["psi-a", "psi-a"], ["psi-a", "psi-b"], ["psi-b", "psi-b"]];
+    let pairings = [["alpha", "alpha"], ["alpha", "beta"], ["beta", "beta"]];
 
     let mut first_pass = Vec::new();
     for seed in 1..=20_u64 {
@@ -527,7 +527,7 @@ fn a_failed_rules_resolution_never_requests_the_match_transition() {
             .insert_resource(MatchSelection {
                 rule_profile_id: RuleProfileId("fever-r1".into()),
                 root_seed: 0x1,
-                characters: [CharacterId("psi-a".into()), CharacterId("psi-b".into())],
+                characters: [CharacterId("alpha".into()), CharacterId("beta".into())],
                 confirmed: true,
             })
             .add_systems(bevy::app::Update, client::match_flow::request_match_start);

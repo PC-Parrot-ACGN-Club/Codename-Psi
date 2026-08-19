@@ -162,8 +162,8 @@ fn a_blocking_failure_stops_the_match_while_a_character_failure_only_narrows_sel
     const PROFILE: &str = include_str!("../../../assets/data/rules/profiles/fever.ron");
     const ROSTER: &str = include_str!("../../../assets/data/rules/roster.ron");
     const BOOK: &str = include_str!("../../../assets/data/rules/puzzles/fever-r1.ron");
-    const PLAY_A: &str = include_str!("../../../assets/data/rules/play/fever-r1/psi-a.ron");
-    const PLAY_B: &str = include_str!("../../../assets/data/rules/play/fever-r1/psi-b.ron");
+    const PLAY_A: &str = include_str!("../../../assets/data/rules/play/fever-r1/alpha.ron");
+    const PLAY_B: &str = include_str!("../../../assets/data/rules/play/fever-r1/beta.ron");
 
     let profile = RuleProfileId("fever-r1".into());
     let mut paths: Vec<String> = client::data::core_rules_paths()
@@ -172,11 +172,11 @@ fn a_blocking_failure_stops_the_match_while_a_character_failure_only_narrows_sel
         .collect();
     paths.push(client::data::play_path(
         &profile,
-        &game_core::config::CharacterId("psi-a".into()),
+        &game_core::config::CharacterId("alpha".into()),
     ));
     paths.push(client::data::play_path(
         &profile,
-        &game_core::config::CharacterId("psi-b".into()),
+        &game_core::config::CharacterId("beta".into()),
     ));
     let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
 
@@ -196,13 +196,13 @@ fn a_blocking_failure_stops_the_match_while_a_character_failure_only_narrows_sel
     )
     .expect("one bad character must not block the profile");
     assert_eq!(excluded.len(), 1, "the failure is recorded, not swallowed");
-    assert!(excluded[0].path.ends_with("psi-b.ron"));
+    assert!(excluded[0].path.ends_with("beta.ron"));
     assert_eq!(excluded[0].category, DataCategory::Rules);
     assert!(
         library
             .character_play(
                 &RuleProfileId("fever-r1".into()),
-                &game_core::config::CharacterId("psi-a".into()),
+                &game_core::config::CharacterId("alpha".into()),
             )
             .is_some(),
         "the healthy character is still playable"
@@ -254,7 +254,7 @@ fn the_root_plugin_publishes_the_character_presentation_catalog() {
         .0
         .loaded()
         .expect("the repository's own presentation file must load cleanly");
-    for id in ["psi-a", "psi-b"] {
+    for id in ["alpha", "beta"] {
         let entry = catalog
             .get(&game_core::config::CharacterId(id.into()))
             .unwrap_or_else(|| panic!("{id} is in the catalog"));

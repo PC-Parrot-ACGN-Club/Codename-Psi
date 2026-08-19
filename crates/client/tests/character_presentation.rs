@@ -21,11 +21,11 @@ fn roster() -> Roster {
 fn repository_catalog_is_complete_and_indexed_by_character_id() {
     let catalog = parse_character_presentations(PRESENTATION, &roster()).expect("catalog parses");
     let a = catalog
-        .get(&CharacterId("psi-a".into()))
-        .expect("psi-a exists");
+        .get(&CharacterId("alpha".into()))
+        .expect("alpha exists");
     let b = catalog
-        .get(&CharacterId("psi-b".into()))
-        .expect("psi-b exists");
+        .get(&CharacterId("beta".into()))
+        .expect("beta exists");
 
     assert_eq!(a.poses.len(), POSES.len());
     assert_eq!(a.audio.len(), AUDIO_CUES.len());
@@ -41,10 +41,10 @@ fn replace_once(source: &str, from: &str, to: &str) -> String {
 // component/character-presentation::TC-002
 #[test]
 fn unknown_character_is_invalid_data_with_the_id_preserved() {
-    let source = replace_once(PRESENTATION, "id: (\"psi-a\")", "id: (\"psi-c\")");
+    let source = replace_once(PRESENTATION, "id: (\"alpha\")", "id: (\"gamma\")");
     let error = parse_character_presentations(&source, &roster()).expect_err("unknown id fails");
     assert!(
-        matches!(error, DataErrorCause::InvalidData(ref reason) if reason.contains("psi-c") && reason.contains("roster"))
+        matches!(error, DataErrorCause::InvalidData(ref reason) if reason.contains("gamma") && reason.contains("roster"))
     );
 }
 
@@ -58,7 +58,7 @@ fn missing_pose_is_invalid_data_with_the_character_preserved() {
     );
     let error = parse_character_presentations(&source, &roster()).expect_err("missing pose fails");
     assert!(
-        matches!(error, DataErrorCause::InvalidData(ref reason) if reason.contains("psi-a") && reason.contains("fever"))
+        matches!(error, DataErrorCause::InvalidData(ref reason) if reason.contains("alpha") && reason.contains("fever"))
     );
 }
 
@@ -67,12 +67,12 @@ fn missing_pose_is_invalid_data_with_the_character_preserved() {
 fn missing_audio_cue_is_invalid_data_with_the_character_preserved() {
     let source = replace_once(
         PRESENTATION,
-        "fever_enter: \"voice.psi_a.fever_enter\",",
+        "fever_enter: \"voice.alpha.fever_enter\",",
         "",
     );
     let error = parse_character_presentations(&source, &roster()).expect_err("missing cue fails");
     assert!(
-        matches!(error, DataErrorCause::InvalidData(ref reason) if reason.contains("psi-a") && reason.contains("fever_enter"))
+        matches!(error, DataErrorCause::InvalidData(ref reason) if reason.contains("alpha") && reason.contains("fever_enter"))
     );
 }
 
@@ -124,7 +124,7 @@ fn a_missing_character_falls_back_without_overwriting_loaded_entries() {
     let roster = roster();
     let full = parse_character_presentations(PRESENTATION, &roster).expect("catalog parses");
     let a_before = full
-        .get(&CharacterId("psi-a".into()))
+        .get(&CharacterId("alpha".into()))
         .expect("a exists")
         .clone();
     let partial = CharacterPresentationCatalog::from_entries([a_before.clone()]);

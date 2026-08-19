@@ -490,7 +490,7 @@ fn the_corner_legend_names_each_player_s_current_confirm_and_back_keys() {
 }
 
 fn characters() -> Vec<CharacterId> {
-    ["psi-a", "psi-b", "psi-c"]
+    ["alpha", "beta", "gamma"]
         .into_iter()
         .map(|id| CharacterId(id.into()))
         .collect()
@@ -541,8 +541,8 @@ fn character_confirmation_requires_both_slots_and_allows_duplicates() {
     assert_eq!(
         page.selected(),
         [
-            Some(&CharacterId("psi-a".into())),
-            Some(&CharacterId("psi-a".into()))
+            Some(&CharacterId("alpha".into())),
+            Some(&CharacterId("alpha".into()))
         ]
     );
     assert_eq!(
@@ -560,8 +560,8 @@ fn character_confirmation_requires_both_slots_and_allows_duplicates() {
     // confirm already lands on a different character.
     single.handle_player(0, UIAction::Confirm);
     assert!(single.confirm_enabled());
-    assert_eq!(single.selected()[0].map(|id| id.0.as_str()), Some("psi-a"));
-    assert_eq!(single.selected()[1].map(|id| id.0.as_str()), Some("psi-b"));
+    assert_eq!(single.selected()[0].map(|id| id.0.as_str()), Some("alpha"));
+    assert_eq!(single.selected()[1].map(|id| id.0.as_str()), Some("beta"));
 }
 
 // component/page-navigation::TC-012

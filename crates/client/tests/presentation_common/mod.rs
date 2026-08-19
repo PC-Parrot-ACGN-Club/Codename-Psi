@@ -13,8 +13,8 @@ use game_core::{
 const PROFILE: &str = include_str!("../../../../assets/data/rules/profiles/fever.ron");
 const ROSTER: &str = include_str!("../../../../assets/data/rules/roster.ron");
 const BOOK: &str = include_str!("../../../../assets/data/rules/puzzles/fever-r1.ron");
-const PLAY_A: &str = include_str!("../../../../assets/data/rules/play/fever-r1/psi-a.ron");
-const PLAY_B: &str = include_str!("../../../../assets/data/rules/play/fever-r1/psi-b.ron");
+const PLAY_A: &str = include_str!("../../../../assets/data/rules/play/fever-r1/alpha.ron");
+const PLAY_B: &str = include_str!("../../../../assets/data/rules/play/fever-r1/beta.ron");
 
 pub fn library() -> ValidatedRuleLibrary {
     ValidatedRuleLibrary::new(
@@ -35,7 +35,7 @@ pub fn spec(seed: u64) -> LockedMatchSpec {
         MatchRequest {
             rule_profile_id: RuleProfileId("fever-r1".into()),
             root_seed: seed,
-            characters: [CharacterId("psi-a".into()), CharacterId("psi-b".into())],
+            characters: [CharacterId("alpha".into()), CharacterId("beta".into())],
         },
         &library,
     )

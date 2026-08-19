@@ -135,7 +135,7 @@ fn broken_references_and_out_of_range_coordinates_fail_general_integrity() {
     assert!(path.contains("cells"), "path was {path}");
 
     // Two roster entries sharing one id.
-    let duplicate = patch(ROSTER_SRC, r#"(id: ("psi-b")"#, r#"(id: ("psi-a")"#);
+    let duplicate = patch(ROSTER_SRC, r#"(id: ("beta")"#, r#"(id: ("alpha")"#);
     let (layer, path) =
         violation(&parse_roster(&duplicate).expect_err("duplicate ids are rejected"));
     assert_eq!(layer, ValidationLayer::Integrity);

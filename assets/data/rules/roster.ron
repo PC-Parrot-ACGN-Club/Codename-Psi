@@ -2,7 +2,7 @@
 (
     schema_version: 1,
     characters: [
-        (id: ("psi-a"), display_name_key: "character.psi_a.name"),
-        (id: ("psi-b"), display_name_key: "character.psi_b.name"),
+        (id: ("alpha"), display_name_key: "character.alpha.name"),
+        (id: ("beta"), display_name_key: "character.beta.name"),
     ],
 )
