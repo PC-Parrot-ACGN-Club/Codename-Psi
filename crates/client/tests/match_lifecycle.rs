@@ -519,7 +519,8 @@ fn one_selector_modes_let_a_single_player_pick_both_characters() {
         assert!(!page.confirm_enabled(), "{mode:?} took player 2's confirm");
 
         page.handle_player(0, client::input::UIAction::Confirm);
-        page.handle_player(0, client::input::UIAction::Down);
+        // Slot 1 starts one roster entry ahead of slot 0, so the very next
+        // confirm already lands on a different character.
         page.handle_player(0, client::input::UIAction::Confirm);
         assert!(page.confirm_enabled(), "{mode:?} left a slot unpicked");
         assert_eq!(

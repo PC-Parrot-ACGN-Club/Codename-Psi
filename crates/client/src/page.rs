@@ -616,10 +616,19 @@ impl CharacterSelectPage {
     #[must_use]
     pub fn new(mode: MatchMode, characters: Vec<CharacterId>) -> Self {
         assert!(!characters.is_empty(), "character selection needs a roster");
+        // One selector modes hand both slots to the same player, so the
+        // shortest path is Confirm, Confirm. Slot 1 starts one roster entry
+        // ahead of slot 0 so that path does not land on the same character
+        // twice.
+        let focused = if mode.one_selector() {
+            [0, 1 % characters.len()]
+        } else {
+            [0, 0]
+        };
         Self {
             mode,
             characters,
-            focused: [0; 2],
+            focused,
             selected: [None, None],
         }
     }

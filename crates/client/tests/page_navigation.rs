@@ -524,7 +524,7 @@ fn shared_pages_accept_either_player_while_single_player_ignores_p2() {
     single.handle_player(1, UIAction::Down);
     assert_eq!(
         [single.focused_index(0), single.focused_index(1)],
-        [Some(0), Some(0)]
+        [Some(0), Some(1)]
     );
 }
 
@@ -556,7 +556,8 @@ fn character_confirmation_requires_both_slots_and_allows_duplicates() {
     let mut single = CharacterSelectPage::new(MatchMode::SinglePlayer, characters());
     single.handle_player(0, UIAction::Confirm);
     assert!(!single.confirm_enabled());
-    single.handle_player(0, UIAction::Down);
+    // Slot 1 starts one roster entry ahead of slot 0, so the very next
+    // confirm already lands on a different character.
     single.handle_player(0, UIAction::Confirm);
     assert!(single.confirm_enabled());
     assert_eq!(single.selected()[0].map(|id| id.0.as_str()), Some("psi-a"));
