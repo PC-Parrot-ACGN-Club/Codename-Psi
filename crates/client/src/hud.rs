@@ -135,6 +135,7 @@ impl Plugin for HudPlugin {
         }
         app.init_resource::<MatchFeedback>()
             .init_resource::<PortraitPoseWindows>()
+            .init_resource::<PuzzleReveal>()
             .add_systems(Update, (spawn_hud, release_hud, refresh_hud).chain())
             .add_systems(Update, refresh_portraits.after(refresh_hud));
     }
@@ -221,6 +222,56 @@ struct MatchFeedback(FeedbackLines);
 /// [`portrait_pose`]: crate::presentation::portrait_pose
 #[derive(Debug, Default, Resource)]
 struct PortraitPoseWindows(PortraitPoseEvents);
+
+/// Per-slot Fever puzzle reveal, client-clocked.
+///
+/// `MatchEvent::FeverPuzzleAdvanced` only says a switch happened, on the same
+/// tick the rules already committed the new puzzle to the board -- there is no
+/// rules-side duration to read the way `resolve_overlay` reads a resolution
+/// phase. The "next puzzle falls in from the bottom" beat [presentation §3]
+/// asks for is entirely a client-side replay over that already-final board.
+#[derive(Debug, Default, Resource)]
+struct PuzzleReveal([Option<PuzzleRevealState>; 2]);
+
+/// One slot's reveal-in-progress: when it started, and the row span it covers.
+#[derive(Debug, Clone, Copy)]
+struct PuzzleRevealState {
+    born_tick: u64,
+    /// Row nearest the bottom of the puzzle's cells (absolute board row), the
+    /// row the reveal wave starts from.
+    bottom_row: u8,
+}
+
+impl PuzzleReveal {
+    /// Starts a reveal wherever this tick's facts say a Fever board switched.
+    ///
+    /// Reading the new puzzle's own cells back out of `snapshot` rather than
+    /// carrying them on the event keeps `MatchEvent` a plain fact: which board
+    /// they now occupy is already public once the tick lands.
+    fn observe(
+        &mut self,
+        report: &game_core::match_state::MatchStepReport,
+        snapshot: &MatchPresentationSnapshot,
+    ) {
+        for event in &report.events {
+            let game_core::match_state::MatchEvent::FeverPuzzleAdvanced(slot) = *event else {
+                continue;
+            };
+            let Some(cell) = self.0.get_mut(slot) else {
+                continue;
+            };
+            let bottom_row = snapshot.players[slot]
+                .preset_cells
+                .iter()
+                .map(|coord| coord.y())
+                .max();
+            *cell = bottom_row.map(|bottom_row| PuzzleRevealState {
+                born_tick: report.match_tick,
+                bottom_row,
+            });
+        }
+    }
+}
 
 /// Root of the HUD, tagged with the instance it belongs to.
 #[derive(Debug, Component)]
@@ -405,6 +456,7 @@ fn refresh_hud(
     inputs: HudInputs,
     mut feedback: ResMut<MatchFeedback>,
     mut portrait_events: ResMut<PortraitPoseWindows>,
+    mut reveal: ResMut<PuzzleReveal>,
     mut cells: HudCells,
 ) {
     // The pause and settings pages sit over a live board, so the HUD keeps
@@ -433,10 +485,17 @@ fn refresh_hud(
     if let Some(report) = inputs.report.0.as_ref() {
         feedback.0.observe(report);
         portrait_events.0.observe(report, &snapshot);
+        reveal.observe(report, &snapshot);
     }
 
-    let overlays: [SlotOverlay; 2] =
-        std::array::from_fn(|slot| slot_overlay(&snapshot.players[slot], snapshot.effects));
+    let overlays: [SlotOverlay; 2] = std::array::from_fn(|slot| {
+        slot_overlay(
+            &snapshot.players[slot],
+            snapshot.effects,
+            snapshot.match_tick,
+            reveal.0[slot],
+        )
+    });
 
     for (cell, mut background, mut border, mut transform, children) in &mut cells.board {
         let player = &snapshot.players[cell.slot];
@@ -447,7 +506,7 @@ fn refresh_hud(
         let moving = overlay.moving.get(&key);
         let occupant = if let Some(moving) = moving {
             moving.occupant
-        } else if overlay.hidden.contains(&key) {
+        } else if overlay.hidden.contains(&key) || overlay.reveal_hidden.contains(&key) {
             Cell::Empty
         } else {
             overlay.active.get(&key).map_or_else(
@@ -470,6 +529,9 @@ fn refresh_hud(
             // The fraction of a cell the ball has travelled is spent here, so
             // it slides between rows instead of jumping a whole cell at a time.
             transform.translation.y = px(moving.offset * CELL_PITCH);
+        } else if let Some(offset) = overlay.reveal_offset.get(&key) {
+            // A puzzle-reveal cell drops its last short distance into place.
+            transform.translation.y = px(offset * CELL_PITCH);
         } else if overlay.clearing.contains(&key) {
             let pose = overlay.clear_pose;
             color = color
@@ -726,6 +788,12 @@ struct SlotOverlay {
     preset: HashSet<(u8, u8)>,
     /// The pose those cells are drawn with this frame.
     clear_pose: ClearPose,
+    /// Preset cells still short of their puzzle-reveal row, drawn empty.
+    reveal_hidden: HashSet<(u8, u8)>,
+    /// Preset cells dropping the last short distance into place this frame,
+    /// keyed by their rest cell; `0.0` once landed is left out rather than
+    /// stored, so an empty map is the common case.
+    reveal_offset: HashMap<(u8, u8), f32>,
 }
 
 /// A ball partway between two cells.
@@ -911,14 +979,76 @@ fn fall_position(
     (cell, exact - row)
 }
 
+/// Ticks between two adjacent rows starting their drop, counted from the
+/// bottom row up. This is what makes the reveal read as a wave climbing the
+/// puzzle rather than every row landing at once.
+const PUZZLE_ROW_STAGGER_TICKS: u64 = 4;
+/// Ticks one row's balls take to fall the last short distance into place.
+const PUZZLE_DROP_TICKS: u64 = 10;
+
+/// How a puzzle-preset cell in `row` is drawn at `tick`, given the reveal
+/// `state` its board switch started.
+///
+/// `None` before the row's turn comes up in the bottom-up wave -- the caller
+/// draws the cell empty, which is what makes the puzzle read as filling in
+/// rather than appearing whole. `Some` afterward carries the render offset a
+/// ball still dropping into place is drawn at; `0.0` once it has landed.
+/// Reduced intensity keeps the row-by-row stagger (it is the fact being
+/// shown, not just motion) but skips the drop itself, snapping a row in the
+/// moment it is due.
+fn puzzle_reveal_offset(
+    state: PuzzleRevealState,
+    row: u8,
+    tick: u64,
+    interpolate: bool,
+) -> Option<f32> {
+    let rows_from_bottom = state.bottom_row.saturating_sub(row);
+    let start = state
+        .born_tick
+        .saturating_add(u64::from(rows_from_bottom) * PUZZLE_ROW_STAGGER_TICKS);
+    if tick < start {
+        return None;
+    }
+    if !interpolate {
+        return Some(0.0);
+    }
+    let elapsed = tick - start;
+    if elapsed >= PUZZLE_DROP_TICKS {
+        return Some(0.0);
+    }
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a single row's drop lives for a few ticks"
+    )]
+    let progress = elapsed as f32 / PUZZLE_DROP_TICKS as f32;
+    // Starts one full cell above its rest position and eases down into it.
+    Some((progress - 1.0) * CELL_PITCH)
+}
+
 fn slot_overlay(
     player: &crate::presentation::PlayerPresentationSnapshot,
     effects: PresentationEffects,
+    tick: u64,
+    reveal: Option<PuzzleRevealState>,
 ) -> SlotOverlay {
     let mut overlay = SlotOverlay::default();
     resolve_overlay(&mut overlay, player, effects);
     for coord in &player.preset_cells {
         overlay.preset.insert((coord.x(), coord.y()));
+    }
+    if let Some(state) = reveal {
+        for coord in &player.preset_cells {
+            let key = (coord.x(), coord.y());
+            match puzzle_reveal_offset(state, coord.y(), tick, effects.interpolate) {
+                None => {
+                    overlay.reveal_hidden.insert(key);
+                }
+                Some(offset) if offset != 0.0 => {
+                    overlay.reveal_offset.insert(key, offset);
+                }
+                Some(_) => {}
+            }
+        }
     }
     let Some(group) = player.active_drop.as_ref() else {
         return overlay;
@@ -1615,8 +1745,9 @@ mod tests {
     use game_core::drop_stream::PendingHand;
 
     use super::{
-        CLEAR_HOLD_TICKS, Cell, ClearPose, FALL_HOLD_TICKS, GRID, cell_color, cell_glyph,
-        fall_position, preview_occupant,
+        CELL_PITCH, CLEAR_HOLD_TICKS, Cell, ClearPose, FALL_HOLD_TICKS, GRID, PUZZLE_DROP_TICKS,
+        PUZZLE_ROW_STAGGER_TICKS, PuzzleRevealState, cell_color, cell_glyph, fall_position,
+        preview_occupant, puzzle_reveal_offset,
     };
 
     fn hand(shape: DropShape, colors: [u8; 2]) -> PendingHand {
@@ -1842,5 +1973,74 @@ mod tests {
         for tick in 0..=SPAN {
             assert_eq!(ClearPose::of(tick, SPAN, false), steady);
         }
+    }
+
+    // integration-system/presentation-runtime::TC-022
+    #[test]
+    fn puzzle_rows_wake_bottom_up_and_drop_into_place_while_reduced_snaps_them() {
+        let state = PuzzleRevealState {
+            born_tick: 100,
+            bottom_row: 13,
+        };
+
+        // The bottom row starts the instant the switch lands; a row further up
+        // stays hidden until its own turn in the wave comes up.
+        assert_eq!(
+            puzzle_reveal_offset(state, 13, state.born_tick, true),
+            Some(-CELL_PITCH),
+            "the bottom row must already be dropping on the tick it is told to switch"
+        );
+        assert_eq!(
+            puzzle_reveal_offset(state, 12, state.born_tick, true),
+            None,
+            "a row above the bottom must not appear before its own turn"
+        );
+        let row_12_start = state.born_tick + PUZZLE_ROW_STAGGER_TICKS;
+        assert_eq!(
+            puzzle_reveal_offset(state, 12, row_12_start - 1, true),
+            None,
+            "one tick short of its turn, the row is still hidden"
+        );
+        assert_eq!(
+            puzzle_reveal_offset(state, 12, row_12_start, true),
+            Some(-CELL_PITCH),
+            "on its own tick the row starts exactly like the bottom row did"
+        );
+
+        // Once dropping, a row's offset moves from one cell above to zero and
+        // never overshoots or reverses.
+        let mut previous = f32::NEG_INFINITY;
+        for tick in 0..=PUZZLE_DROP_TICKS {
+            let offset =
+                puzzle_reveal_offset(state, 13, state.born_tick + tick, true).expect("dropping");
+            assert!(offset >= previous, "offset went backward at tick {tick}");
+            assert!(
+                (-CELL_PITCH..=0.0).contains(&offset),
+                "offset {offset} left its range"
+            );
+            previous = offset;
+        }
+        assert_eq!(
+            puzzle_reveal_offset(state, 13, state.born_tick + PUZZLE_DROP_TICKS, true),
+            Some(0.0),
+            "the row must be exactly at rest once its drop time has elapsed"
+        );
+        assert_eq!(
+            puzzle_reveal_offset(state, 13, state.born_tick + PUZZLE_DROP_TICKS + 50, true),
+            Some(0.0),
+            "a landed row stays at rest, it does not keep moving"
+        );
+
+        // Reduced keeps the bottom-up wave -- a row is still hidden until its
+        // turn -- but skips the drop itself, landing the instant it wakes.
+        assert_eq!(
+            puzzle_reveal_offset(state, 12, row_12_start - 1, false),
+            None
+        );
+        assert_eq!(
+            puzzle_reveal_offset(state, 12, row_12_start, false),
+            Some(0.0),
+            "reduced intensity must snap straight to rest, never showing a mid-drop offset"
+        );
     }
 }

@@ -280,9 +280,20 @@ impl PlayerBattleState {
     }
 
     /// Applies the level ladder and loads the next puzzle.
-    pub fn advance_fever_puzzle(&mut self, spec: &LockedMatchSpec, achieved: u8, all_clear: bool) {
+    ///
+    /// Returns whether the Fever board actually switched to a new puzzle, so
+    /// the caller can raise [`MatchEvent::FeverPuzzleAdvanced`] exactly when
+    /// the board changed under the player.
+    ///
+    /// [`MatchEvent::FeverPuzzleAdvanced`]: crate::match_state::MatchEvent::FeverPuzzleAdvanced
+    pub fn advance_fever_puzzle(
+        &mut self,
+        spec: &LockedMatchSpec,
+        achieved: u8,
+        all_clear: bool,
+    ) -> bool {
         let Some(session) = &mut self.session else {
-            return;
+            return false;
         };
         let next = next_target_level(
             spec.fever.level_ladder,
@@ -308,6 +319,7 @@ impl PlayerBattleState {
             let puzzle = puzzle.clone();
             load_puzzle(&mut self.boards[FEVER_CHANNEL], &puzzle);
         }
+        advanced
     }
 
     /// Leaves Fever, merging the frozen queue back into the normal channel.

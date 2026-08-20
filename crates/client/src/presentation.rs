@@ -512,6 +512,7 @@ pub enum AudioCue {
     NuisanceLanded,
     FeverEntered,
     FeverExited,
+    FeverPuzzleAdvanced,
     Defeat,
     RoundEnded,
     MatchEnded,
@@ -532,6 +533,7 @@ impl AudioCue {
             MatchEvent::NuisanceDropped { .. } => Self::NuisanceLanded,
             MatchEvent::FeverEntered(_) => Self::FeverEntered,
             MatchEvent::FeverExited(_) => Self::FeverExited,
+            MatchEvent::FeverPuzzleAdvanced(_) => Self::FeverPuzzleAdvanced,
             MatchEvent::PlayerDefeated(_) => Self::Defeat,
             MatchEvent::RoundEnded(_) => Self::RoundEnded,
             MatchEvent::MatchEnded(_) => Self::MatchEnded,
@@ -564,6 +566,7 @@ impl VibrationPattern {
             | AudioCue::Attack
             | AudioCue::Offset
             | AudioCue::FeverExited
+            | AudioCue::FeverPuzzleAdvanced
             | AudioCue::Defeat => None,
         }
     }

@@ -83,6 +83,8 @@ pub enum MatchEvent {
     FeverEntered(usize),
     /// A participant returned to the normal channel.
     FeverExited(usize),
+    /// A participant's Fever board switched to its next puzzle.
+    FeverPuzzleAdvanced(usize),
     /// A nuisance batch landed.
     NuisanceDropped {
         /// Participant slot.
@@ -107,10 +109,11 @@ impl MatchEvent {
             Self::AttackArbitrated { .. } => 2,
             Self::FeverEntered(_) => 3,
             Self::FeverExited(_) => 4,
-            Self::NuisanceDropped { .. } => 5,
-            Self::PlayerDefeated(_) => 6,
-            Self::RoundEnded(_) => 7,
-            Self::MatchEnded(_) => 8,
+            Self::FeverPuzzleAdvanced(_) => 5,
+            Self::NuisanceDropped { .. } => 6,
+            Self::PlayerDefeated(_) => 7,
+            Self::RoundEnded(_) => 8,
+            Self::MatchEnded(_) => 9,
         }
     }
 
@@ -128,7 +131,8 @@ impl MatchEvent {
             Self::GroupLocked(slot)
             | Self::PlayerDefeated(slot)
             | Self::FeverEntered(slot)
-            | Self::FeverExited(slot) => Some(*slot),
+            | Self::FeverExited(slot)
+            | Self::FeverPuzzleAdvanced(slot) => Some(*slot),
             Self::ChainSettled { slot, .. }
             | Self::AttackArbitrated { slot, .. }
             | Self::NuisanceDropped { slot, .. } => Some(*slot),
@@ -476,7 +480,9 @@ impl MatchState {
                 exited[slot] = true;
                 events.push(MatchEvent::FeverExited(slot));
             } else if in_fever {
-                player.advance_fever_puzzle(&self.spec, achieved, all_clear);
+                if player.advance_fever_puzzle(&self.spec, achieved, all_clear) {
+                    events.push(MatchEvent::FeverPuzzleAdvanced(slot));
+                }
             } else if player.fever().is_full() {
                 let bonus = if all_clear {
                     self.spec.fever.level_ladder.on_all_clear

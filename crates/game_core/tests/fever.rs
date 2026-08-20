@@ -430,7 +430,11 @@ fn every_settlement_in_fever_switches_the_puzzle_regardless_of_chain_length() {
             .current_puzzle_id()
             .to_string();
 
-        player.advance_fever_puzzle(&spec, achieved, all_clear);
+        assert!(
+            player.advance_fever_puzzle(&spec, achieved, all_clear),
+            "achieved {achieved}, all_clear {all_clear}: the caller uses this to raise \
+             MatchEvent::FeverPuzzleAdvanced, so a false here would silently drop the event too"
+        );
 
         let session = player.session().expect("still in Fever");
         assert_eq!(
