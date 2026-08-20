@@ -1,0 +1,981 @@
+//! Client-side physical input sampling and UI action types.
+
+use std::collections::{HashMap, HashSet};
+
+use bevy::prelude::*;
+use game_core::input::{GameAction, PlayerActions};
+use serde::{Deserialize, Serialize};
+
+use crate::app_state::{
+    AppState, AppTransitionCause, AppTransitionRequest, AppTransitionRequests, AppTransitionSet,
+};
+use crate::settings::{BindingCapture, DeviceCategory, PlayerInputBindings, UserSettings};
+
+#[derive(Debug, Default)]
+pub struct InputPlugin;
+
+impl Plugin for InputPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<LocalInputSampler>()
+            .init_resource::<UiInputState>()
+            .init_resource::<GamepadSlots>()
+            .add_message::<UIActionEvent>()
+            // Sampling must observe this frame's devices *before* this frame's
+            // fixed ticks. Bevy's main schedule runs `RunFixedMainLoop` ahead of
+            // `Update`, so capturing in `Update` would hand every rule tick the
+            // previous frame's device state.
+            .add_systems(
+                RunFixedMainLoop,
+                (install_settings_bindings, bind_gamepads, capture_devices)
+                    .chain()
+                    .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+            )
+            // The pause request is a state transition, so it stays with the
+            // other requesters in `Update`; the edge it reads was recorded by
+            // `capture_devices` earlier in the same frame.
+            .add_systems(
+                Update,
+                submit_pause_request.in_set(AppTransitionSet::Request),
+            )
+            // Menu contexts only: in `Match` the same physical directions are
+            // rules input, and must not also move UI focus. A rebinding in
+            // progress suspends this too, so the key being captured does not
+            // also move the focus it is being bound from.
+            .add_systems(
+                Update,
+                emit_ui_actions.run_if(
+                    not(in_state(AppState::Match)).and_then(not(resource_exists::<BindingCapture>)),
+                ),
+            );
+    }
+}
+
+/// Left-stick deflection past which a direction counts as held.
+pub const STICK_THRESHOLD: f32 = 0.5;
+
+/// Local player slots that can own a gamepad.
+pub const LOCAL_PLAYERS: usize = 2;
+
+/// Which local player each connected gamepad drives.
+///
+/// The binding is established once, when the pad appears, and holds for as
+/// long as it stays connected. Deriving it from query order instead would let
+/// an unrelated device change reassign a player mid-match.
+#[derive(Debug, Default, Resource)]
+pub struct GamepadSlots {
+    by_pad: HashMap<Entity, usize>,
+}
+
+impl GamepadSlots {
+    /// The local player this pad drives, if it is bound.
+    #[must_use]
+    pub fn slot(&self, pad: Entity) -> Option<usize> {
+        self.by_pad.get(&pad).copied()
+    }
+
+    /// Whether any pad is bound to a local player.
+    #[must_use]
+    pub fn any_connected(&self) -> bool {
+        !self.by_pad.is_empty()
+    }
+
+    /// The pad bound to a local player, if any.
+    #[must_use]
+    pub fn pad(&self, player: usize) -> Option<Entity> {
+        self.by_pad
+            .iter()
+            .find_map(|(pad, slot)| (*slot == player).then_some(*pad))
+    }
+
+    /// The one device a local player's inputs come from right now.
+    ///
+    /// A player holds one input source at a time: the pad bound to their slot
+    /// if there is one, and otherwise the keyboard. The keyboard is the default
+    /// because the game is desktop-only and there is always one, which also
+    /// makes it the fallback the moment a pad disconnects.
+    ///
+    /// This is what makes the two devices exclusive rather than additive: while
+    /// a pad drives a player, that player's keyboard keys produce nothing at
+    /// all, in gameplay and in menus alike.
+    #[must_use]
+    pub fn source(&self, player: usize) -> DeviceCategory {
+        if self.pad(player).is_some() {
+            DeviceCategory::Gamepad
+        } else {
+            DeviceCategory::Keyboard
+        }
+    }
+
+    /// Whether any local player is currently driven by the keyboard.
+    #[must_use]
+    pub fn any_on_keyboard(&self) -> bool {
+        (0..LOCAL_PLAYERS).any(|player| self.source(player) == DeviceCategory::Keyboard)
+    }
+
+    fn is_taken(&self, player: usize) -> bool {
+        self.by_pad.values().any(|slot| *slot == player)
+    }
+}
+
+/// Keep gamepad-to-player bindings current, clearing what a lost pad held.
+///
+/// A disconnected pad can never report a release, so anything it held would
+/// otherwise stay pressed forever and keep producing actions.
+pub fn bind_gamepads(
+    gamepads: Query<Entity, With<Gamepad>>,
+    mut slots: ResMut<GamepadSlots>,
+    mut sampler: ResMut<LocalInputSampler>,
+    mut ui: ResMut<UiInputState>,
+) {
+    let live: HashSet<Entity> = gamepads.iter().collect();
+
+    let dropped: Vec<(Entity, usize)> = slots
+        .by_pad
+        .iter()
+        .filter(|(pad, _)| !live.contains(pad))
+        .map(|(pad, slot)| (*pad, *slot))
+        .collect();
+    for (pad, player) in dropped {
+        slots.by_pad.remove(&pad);
+        sampler.clear_gamepad_state(player);
+        ui.clear_gamepad_state(player);
+    }
+
+    // Sorted so that two pads appearing in the same frame get slots in a
+    // reproducible order rather than in whatever order the query yields.
+    // Sorted by index rather than by `Entity`, whose ordering runs off an
+    // opaque bit pattern that does not follow spawn order.
+    let mut arriving: Vec<Entity> = live
+        .into_iter()
+        .filter(|pad| slots.slot(*pad).is_none())
+        .collect();
+    arriving.sort_by_key(|pad| pad.index_u32());
+    for pad in arriving {
+        let Some(player) = (0..LOCAL_PLAYERS).find(|slot| !slots.is_taken(*slot)) else {
+            break;
+        };
+        slots.by_pad.insert(pad, player);
+        // The pad takes the slot immediately, in a match as much as in a menu,
+        // so the keyboard stops driving this player from this frame on. What it
+        // was holding has to go with it: a key held while the pad arrived would
+        // otherwise never be released, because the keyboard is no longer read
+        // for this player and so can never report the release.
+        sampler.clear_keyboard_state(player);
+        ui.clear_keyboard_state(player);
+    }
+}
+
+/// The fixed inputs that propose a pause, for any local player.
+///
+/// `Pause` is not a `UIAction` and not a `GameAction`: `client::input` proposes
+/// the state transition directly. Outside `Match` these inputs mean nothing at
+/// all, so the press edge is taken and dropped rather than held: a key pressed
+/// in a menu must not pause the match the player enters next.
+#[must_use]
+pub fn fixed_pause_inputs() -> [PhysicalInput; 2] {
+    [
+        PhysicalInput::gamepad("Start"),
+        PhysicalInput::keyboard("Escape"),
+    ]
+}
+
+/// Resolve a persisted input name to a live Bevy key.
+///
+/// Bindings store names rather than Bevy types because the workspace builds
+/// Bevy without its `serialize` feature, so `KeyCode` has no `serde` impl to
+/// persist. Names follow Bevy's own variant spelling. An unknown name resolves
+/// to `None` and simply produces no action, which is the documented handling
+/// for an unbound physical input.
+#[must_use]
+pub fn keyboard_from_name(name: &str) -> Option<KeyCode> {
+    macro_rules! table {
+        ($($variant:ident),* $(,)?) => {
+            match name { $(stringify!($variant) => Some(KeyCode::$variant),)* _ => None }
+        };
+    }
+    table!(
+        KeyA,
+        KeyB,
+        KeyC,
+        KeyD,
+        KeyE,
+        KeyF,
+        KeyG,
+        KeyH,
+        KeyI,
+        KeyJ,
+        KeyK,
+        KeyL,
+        KeyM,
+        KeyN,
+        KeyO,
+        KeyP,
+        KeyQ,
+        KeyR,
+        KeyS,
+        KeyT,
+        KeyU,
+        KeyV,
+        KeyW,
+        KeyX,
+        KeyY,
+        KeyZ,
+        Digit0,
+        Digit1,
+        Digit2,
+        Digit3,
+        Digit4,
+        Digit5,
+        Digit6,
+        Digit7,
+        Digit8,
+        Digit9,
+        ArrowUp,
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        Numpad0,
+        Numpad1,
+        Numpad2,
+        Numpad3,
+        Numpad4,
+        Numpad5,
+        Numpad6,
+        Numpad7,
+        Numpad8,
+        Numpad9,
+        NumpadEnter,
+        Space,
+        Enter,
+        Escape,
+        Tab,
+        Backspace,
+        ShiftLeft,
+        ShiftRight,
+        ControlLeft,
+        ControlRight,
+        AltLeft,
+        AltRight,
+        Comma,
+        Period,
+        Slash,
+        Semicolon,
+        Quote,
+        BracketLeft,
+        BracketRight,
+        Minus,
+        Equal,
+        Backquote,
+    )
+}
+
+/// Resolve a persisted input name to a live Bevy gamepad button.
+#[must_use]
+pub fn gamepad_button_from_name(name: &str) -> Option<GamepadButton> {
+    macro_rules! table {
+        ($($variant:ident),* $(,)?) => {
+            match name { $(stringify!($variant) => Some(GamepadButton::$variant),)* _ => None }
+        };
+    }
+    table!(
+        South,
+        East,
+        North,
+        West,
+        LeftTrigger,
+        LeftTrigger2,
+        RightTrigger,
+        RightTrigger2,
+        Select,
+        Start,
+        Mode,
+        LeftThumb,
+        RightThumb,
+        DPadUp,
+        DPadDown,
+        DPadLeft,
+        DPadRight,
+    )
+}
+
+/// Fixed keyboard direction keys for a local player slot.
+///
+/// These are not user-configurable, and they feed both domains: in gameplay
+/// they become `GameAction::Left`/`Right`, in menus `UIAction` focus moves.
+#[must_use]
+pub fn fixed_keyboard_directions(player: usize) -> Option<[(KeyCode, FixedDirection); 4]> {
+    match player {
+        0 => Some([
+            (KeyCode::KeyA, FixedDirection::Left),
+            (KeyCode::KeyD, FixedDirection::Right),
+            (KeyCode::KeyW, FixedDirection::Up),
+            (KeyCode::KeyS, FixedDirection::Down),
+        ]),
+        1 => Some([
+            (KeyCode::ArrowLeft, FixedDirection::Left),
+            (KeyCode::ArrowRight, FixedDirection::Right),
+            (KeyCode::ArrowUp, FixedDirection::Up),
+            (KeyCode::ArrowDown, FixedDirection::Down),
+        ]),
+        _ => None,
+    }
+}
+
+/// Fixed gamepad D-pad direction buttons.
+const FIXED_DPAD_DIRECTIONS: [(GamepadButton, FixedDirection); 4] = [
+    (GamepadButton::DPadLeft, FixedDirection::Left),
+    (GamepadButton::DPadRight, FixedDirection::Right),
+    (GamepadButton::DPadUp, FixedDirection::Up),
+    (GamepadButton::DPadDown, FixedDirection::Down),
+];
+
+/// The fixed direction this input carries, on any local player's device.
+///
+/// Not per player: one keyboard serves both locals, so a key that is P1's fixed
+/// direction is spoken for no matter which player is being edited.
+#[must_use]
+fn fixed_direction_of(input: &PhysicalInput) -> Option<FixedDirection> {
+    let named = |name: &str| input.name() == name;
+    (0..LOCAL_PLAYERS)
+        .filter_map(fixed_keyboard_directions)
+        .flatten()
+        .find_map(|(code, direction)| {
+            (matches!(input, PhysicalInput::Keyboard(_)) && named(&format!("{code:?}")))
+                .then_some(direction)
+        })
+        .or_else(|| {
+            FIXED_DPAD_DIRECTIONS
+                .into_iter()
+                .find_map(|(button, direction)| {
+                    (matches!(input, PhysicalInput::Gamepad(_)) && named(&format!("{button:?}")))
+                        .then_some(direction)
+                })
+        })
+}
+
+/// Whether a fixed binding already gives this input a meaning `action` collides
+/// with.
+///
+/// Not every fixed bit is off limits, which is why this asks about a specific
+/// action rather than answering for the input alone. What cannot be shared is a
+/// bit whose fixed meaning is live in the same input context as the action being
+/// bound:
+///
+/// - the horizontal directions are `Left`/`Right` for the whole match, so no
+///   configurable action may take them;
+/// - pause is live in every context;
+/// - the vertical directions only move menu focus, which is exactly the room the
+///   default soft and hard drop bindings sit in -- but the two rotations also
+///   carry the menu confirm and back, so for those two the vertical directions
+///   are taken as well.
+#[must_use]
+pub fn fixed_binding_claims(input: &PhysicalInput, action: GameAction) -> bool {
+    if fixed_pause_inputs().contains(input) {
+        return true;
+    }
+    match fixed_direction_of(input) {
+        Some(FixedDirection::Left | FixedDirection::Right) => true,
+        Some(FixedDirection::Up | FixedDirection::Down) => BOUND_UI_ACTIONS
+            .into_iter()
+            .any(|ui| ui_action_source(ui) == Some(action)),
+        None => false,
+    }
+}
+
+/// The rules action whose binding a menu action borrows.
+///
+/// `Confirm` and `Back` have no binding of their own: they are the menu
+/// meanings of the two rotation keys, exactly as `Left`/`Right` are the menu
+/// meanings of the fixed horizontal directions. One key therefore carries one
+/// meaning per context, and the settings page lists it once.
+///
+/// Rotating counter-clockwise confirms and rotating clockwise goes back, so a
+/// player who has learned to rotate has already learned to navigate.
+#[must_use]
+pub const fn ui_action_source(action: UIAction) -> Option<GameAction> {
+    match action {
+        UIAction::Confirm => Some(GameAction::RotateCounterClockwise),
+        UIAction::Back => Some(GameAction::RotateClockwise),
+        UIAction::Left | UIAction::Right | UIAction::Up | UIAction::Down => None,
+    }
+}
+
+/// The menu actions that borrow a configurable binding, in legend order.
+pub const BOUND_UI_ACTIONS: [UIAction; 2] = [UIAction::Confirm, UIAction::Back];
+
+/// A UI action produced by a local player in a menu context.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UIActionEvent {
+    pub player: usize,
+    pub action: UIAction,
+}
+
+/// Held UI sources, so focus moves once per press instead of once per frame.
+#[derive(Debug, Default, Resource)]
+pub struct UiInputState {
+    held: HashSet<(usize, PhysicalInput, UIAction)>,
+}
+
+impl UiInputState {
+    /// Report a source's state, returning `true` on the rising edge only.
+    fn edge(&mut self, player: usize, source: PhysicalInput, action: UIAction, held: bool) -> bool {
+        let key = (player, source, action);
+        if held {
+            self.held.insert(key)
+        } else {
+            self.held.remove(&key);
+            false
+        }
+    }
+
+    /// Forget what a player's gamepad held, so a later pad starts from rest.
+    ///
+    /// A stale entry here would swallow the first press after a reconnect: the
+    /// rising edge is only reported when the source was not already held.
+    fn clear_gamepad_state(&mut self, player: usize) {
+        self.clear_device_state(player, DeviceCategory::Gamepad);
+    }
+
+    /// Forget what a player's keyboard held, for when a pad takes their slot.
+    fn clear_keyboard_state(&mut self, player: usize) {
+        self.clear_device_state(player, DeviceCategory::Keyboard);
+    }
+
+    fn clear_device_state(&mut self, player: usize, device: DeviceCategory) {
+        self.held
+            .retain(|(slot, source, _)| *slot != player || source.category() != device);
+    }
+}
+
+/// Keep the sampler's binding table equal to the current settings.
+///
+/// Without this the sampler starts with no bindings and no key would ever
+/// produce an action. It runs on every settings change, not just the first: a
+/// rebinding has to take effect on the next sampled frame, without leaving the
+/// settings page or restarting the game.
+pub fn install_settings_bindings(
+    settings: Res<UserSettings>,
+    mut sampler: ResMut<LocalInputSampler>,
+) {
+    if settings.is_changed() || sampler.bindings.is_empty() {
+        sampler.set_bindings(settings.players.to_vec());
+    }
+}
+
+/// Resolve each local player's gamepad through its stable slot binding.
+fn pads_by_player<'a>(
+    gamepads: &'a Query<(Entity, &Gamepad)>,
+    slots: &GamepadSlots,
+) -> [Option<&'a Gamepad>; LOCAL_PLAYERS] {
+    let mut pads = [None; LOCAL_PLAYERS];
+    for (entity, pad) in gamepads.iter() {
+        if let Some(cell) = slots.slot(entity).and_then(|slot| pads.get_mut(slot)) {
+            *cell = Some(pad);
+        }
+    }
+    pads
+}
+
+/// Read real keyboard and gamepad state into the sampler once per frame.
+///
+/// The sampler owns the fixed-tick semantics; this system only reports what is
+/// physically held right now and which press edges happened this frame.
+/// Gamepads reach their player through [`GamepadSlots`], not through query
+/// order, so a device change elsewhere cannot move a player's input.
+///
+/// Only a player's own input source is read: bindings on the other device are
+/// left alone entirely, so a player holding a pad produces nothing from the
+/// keyboard even where the two would have meant the same action.
+pub fn capture_devices(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    slots: Res<GamepadSlots>,
+    mut sampler: ResMut<LocalInputSampler>,
+) {
+    let pads = pads_by_player(&gamepads, &slots);
+
+    // Collected first: resolving a binding borrows the sampler that the
+    // press/release calls below need mutably.
+    let mut configurable: Vec<(usize, PhysicalInput, bool, bool)> = Vec::new();
+    for (player, bindings) in sampler.bindings.iter().enumerate() {
+        let pad = pads.get(player).copied().flatten();
+        let source = slots.source(player);
+        for input in bindings
+            .bindings
+            .values()
+            .flatten()
+            .filter(|input| input.category() == source)
+        {
+            let (held, edge) = match input {
+                PhysicalInput::Keyboard(name) => keyboard_from_name(name)
+                    .map_or((false, false), |code| {
+                        (keyboard.pressed(code), keyboard.just_pressed(code))
+                    }),
+                PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
+                    .zip(pad)
+                    .map_or((false, false), |(button, pad)| {
+                        (pad.pressed(button), pad.just_pressed(button))
+                    }),
+            };
+            configurable.push((player, input.clone(), held, edge));
+        }
+    }
+    for (player, input, held, edge) in configurable {
+        // A press that also ended this frame still owes the rules layer one
+        // action, so the edge is reported even though nothing is held now.
+        // `press` only records the edge on the transition, so the extra call
+        // when the input is still held is a no-op.
+        if edge {
+            sampler.press(player, input.clone());
+        }
+        if held {
+            sampler.press(player, input);
+        } else {
+            sampler.release(player, &input);
+        }
+    }
+
+    let players = sampler.bindings.len().max(LOCAL_PLAYERS);
+    for player in 0..players {
+        let pad = pads.get(player).copied().flatten();
+
+        if slots.source(player) == DeviceCategory::Keyboard {
+            for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
+                let source = PhysicalInput::keyboard(format!("{code:?}"));
+                if keyboard.pressed(code) {
+                    sampler.press_fixed_direction(player, source, direction);
+                } else {
+                    sampler.release_fixed_direction(player, &source, direction);
+                }
+            }
+        }
+
+        let Some(pad) = pad else { continue };
+
+        for (button, direction) in FIXED_DPAD_DIRECTIONS {
+            let source = PhysicalInput::gamepad(format!("{button:?}"));
+            if pad.pressed(button) {
+                sampler.press_fixed_direction(player, source, direction);
+            } else {
+                sampler.release_fixed_direction(player, &source, direction);
+            }
+        }
+
+        // One stick reports two axes, so each axis is its own source: holding
+        // the stick left must not also register as a vertical direction.
+        let stick = pad.left_stick();
+        for (value, negative, positive, axis) in [
+            (stick.x, FixedDirection::Left, FixedDirection::Right, "X"),
+            (stick.y, FixedDirection::Down, FixedDirection::Up, "Y"),
+        ] {
+            let source = PhysicalInput::gamepad(format!("LeftStick{axis}"));
+            for (direction, active) in [
+                (negative, value < -STICK_THRESHOLD),
+                (positive, value > STICK_THRESHOLD),
+            ] {
+                if active {
+                    sampler.press_fixed_direction(player, source.clone(), direction);
+                } else {
+                    sampler.release_fixed_direction(player, &source, direction);
+                }
+            }
+        }
+    }
+
+    // The sampler derives the edge, so holding the key proposes one pause.
+    // Pause follows the same exclusivity as everything else: with both players
+    // on pads, nobody is on the keyboard and its pause key means nothing.
+    for input in fixed_pause_inputs() {
+        let held = match &input {
+            PhysicalInput::Keyboard(name) => {
+                slots.any_on_keyboard()
+                    && keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
+            }
+            PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
+                .is_some_and(|button| pads.iter().flatten().any(|pad| pad.pressed(button))),
+        };
+        sampler.update_pause_input(&input, held);
+    }
+}
+
+/// Turn fixed physical inputs into `UIAction`s while outside `Match`.
+///
+/// The same physical direction that drives `GameAction::Left`/`Right` in
+/// gameplay drives focus movement here; the input context decides which domain
+/// consumes it, and the two never merge. Emission is edge-triggered so holding
+/// a direction moves focus once rather than every frame.
+pub fn emit_ui_actions(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    slots: Res<GamepadSlots>,
+    settings: Res<UserSettings>,
+    mut state: ResMut<UiInputState>,
+    mut writer: MessageWriter<UIActionEvent>,
+) {
+    let pads = pads_by_player(&gamepads, &slots);
+
+    for player in 0..LOCAL_PLAYERS {
+        let pad = pads.get(player).copied().flatten();
+        let source_device = slots.source(player);
+        let mut emit = |source: PhysicalInput, action: UIAction, held: bool| {
+            if state.edge(player, source, action, held) {
+                writer.write(UIActionEvent { player, action });
+            }
+        };
+
+        if source_device == DeviceCategory::Keyboard {
+            for (code, direction) in fixed_keyboard_directions(player).into_iter().flatten() {
+                if let Some(ContextAction::Ui(action)) =
+                    interpret_direction(direction, InputContext::Menu)
+                {
+                    let source = PhysicalInput::keyboard(format!("{code:?}"));
+                    emit(source, action, keyboard.pressed(code));
+                }
+            }
+        }
+
+        // Confirm and back are read off the player's own rotation bindings, so
+        // a rebinding moves the menu key with the rules key -- on the device
+        // that player is currently driven by, and only that one.
+        if let Some(bindings) = settings.players.get(player) {
+            for action in BOUND_UI_ACTIONS {
+                let Some(source_action) = ui_action_source(action) else {
+                    continue;
+                };
+                for input in bindings
+                    .bindings
+                    .get(&source_action)
+                    .into_iter()
+                    .flatten()
+                    .filter(|input| input.category() == source_device)
+                {
+                    let held = match input {
+                        PhysicalInput::Keyboard(name) => {
+                            keyboard_from_name(name).is_some_and(|code| keyboard.pressed(code))
+                        }
+                        PhysicalInput::Gamepad(name) => gamepad_button_from_name(name)
+                            .zip(pad)
+                            .is_some_and(|(button, pad)| pad.pressed(button)),
+                    };
+                    emit(input.clone(), action, held);
+                }
+            }
+        }
+
+        let Some(pad) = pad else { continue };
+
+        for (button, direction) in FIXED_DPAD_DIRECTIONS {
+            if let Some(ContextAction::Ui(action)) =
+                interpret_direction(direction, InputContext::Menu)
+            {
+                let source = PhysicalInput::gamepad(format!("{button:?}"));
+                emit(source, action, pad.pressed(button));
+            }
+        }
+
+        let stick = pad.left_stick();
+        for (value, negative, positive, axis) in [
+            (stick.x, FixedDirection::Left, FixedDirection::Right, "X"),
+            (stick.y, FixedDirection::Down, FixedDirection::Up, "Y"),
+        ] {
+            let source = PhysicalInput::gamepad(format!("LeftStick{axis}"));
+            for (direction, active) in [
+                (negative, value < -STICK_THRESHOLD),
+                (positive, value > STICK_THRESHOLD),
+            ] {
+                if let Some(ContextAction::Ui(action)) =
+                    interpret_direction(direction, InputContext::Menu)
+                {
+                    emit(source.clone(), action, active);
+                }
+            }
+        }
+    }
+}
+
+/// Forward a pending pause press edge straight to the state machine.
+pub fn submit_pause_request(
+    state: Res<State<AppState>>,
+    mut sampler: ResMut<LocalInputSampler>,
+    mut requests: ResMut<AppTransitionRequests>,
+) {
+    if let Some(request) = sampler.take_pause_request(*state.get()) {
+        requests.submit(request.target, request.cause);
+    }
+}
+
+/// UI-domain actions, kept separate from rules input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UIAction {
+    Left,
+    Right,
+    Up,
+    Down,
+    Confirm,
+    Back,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputContext {
+    Gameplay,
+    Menu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FixedDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum PhysicalInput {
+    Keyboard(String),
+    Gamepad(String),
+}
+
+impl PhysicalInput {
+    #[must_use]
+    pub fn keyboard(code: impl Into<String>) -> Self {
+        Self::Keyboard(code.into())
+    }
+
+    #[must_use]
+    pub fn gamepad(button: impl Into<String>) -> Self {
+        Self::Gamepad(button.into())
+    }
+
+    #[must_use]
+    pub const fn category(&self) -> DeviceCategory {
+        match self {
+            Self::Keyboard(_) => DeviceCategory::Keyboard,
+            Self::Gamepad(_) => DeviceCategory::Gamepad,
+        }
+    }
+
+    /// The persisted input name, without its device category.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Keyboard(name) | Self::Gamepad(name) => name,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContextAction {
+    Game(GameAction),
+    Ui(UIAction),
+}
+
+#[must_use]
+pub const fn interpret_direction(
+    direction: FixedDirection,
+    context: InputContext,
+) -> Option<ContextAction> {
+    match (context, direction) {
+        (InputContext::Gameplay, FixedDirection::Left) => {
+            Some(ContextAction::Game(GameAction::Left))
+        }
+        (InputContext::Gameplay, FixedDirection::Right) => {
+            Some(ContextAction::Game(GameAction::Right))
+        }
+        (InputContext::Gameplay, FixedDirection::Up | FixedDirection::Down) => None,
+        (InputContext::Menu, FixedDirection::Left) => Some(ContextAction::Ui(UIAction::Left)),
+        (InputContext::Menu, FixedDirection::Right) => Some(ContextAction::Ui(UIAction::Right)),
+        (InputContext::Menu, FixedDirection::Up) => Some(ContextAction::Ui(UIAction::Up)),
+        (InputContext::Menu, FixedDirection::Down) => Some(ContextAction::Ui(UIAction::Down)),
+    }
+}
+
+/// Mutable sampling state exposed for pure component tests.
+#[derive(Debug, Default, Resource)]
+pub struct LocalInputSampler {
+    pub bindings: Vec<PlayerInputBindings>,
+    pressed: HashSet<(usize, PhysicalInput)>,
+    /// Fixed-binding directions are keyed by their physical source so that two
+    /// sources meaning the same direction merge into one logical action.
+    fixed_directions: HashSet<(usize, PhysicalInput, FixedDirection)>,
+    pending_edges: Vec<PlayerActions>,
+    pause_pending: bool,
+    /// Fixed pause inputs currently held, so a hold proposes exactly one pause.
+    pause_held: HashSet<PhysicalInput>,
+}
+
+impl LocalInputSampler {
+    #[must_use]
+    pub fn new(bindings: Vec<PlayerInputBindings>) -> Self {
+        let pending_edges = vec![PlayerActions::EMPTY; bindings.len()];
+        Self {
+            bindings,
+            pending_edges,
+            ..Default::default()
+        }
+    }
+
+    /// Replace the binding table, resizing the per-player edge buffers with it.
+    pub fn set_bindings(&mut self, bindings: Vec<PlayerInputBindings>) {
+        self.pending_edges
+            .resize(bindings.len(), PlayerActions::EMPTY);
+        self.bindings = bindings;
+    }
+
+    pub fn press(&mut self, player: usize, input: PhysicalInput) {
+        let first_press = self.pressed.insert((player, input.clone()));
+        if first_press {
+            for action in self.bound_actions(player, &input) {
+                if is_edge_action(action) {
+                    self.ensure_player(player);
+                    self.pending_edges[player].insert(action);
+                }
+            }
+        }
+    }
+
+    pub fn release(&mut self, player: usize, input: &PhysicalInput) {
+        self.pressed.remove(&(player, input.clone()));
+    }
+
+    pub fn press_fixed_direction(
+        &mut self,
+        player: usize,
+        source: PhysicalInput,
+        direction: FixedDirection,
+    ) {
+        self.fixed_directions.insert((player, source, direction));
+    }
+
+    pub fn release_fixed_direction(
+        &mut self,
+        player: usize,
+        source: &PhysicalInput,
+        direction: FixedDirection,
+    ) {
+        self.fixed_directions
+            .remove(&(player, source.clone(), direction));
+    }
+
+    /// Drop everything a player's gamepad was holding.
+    ///
+    /// Pending press edges survive: those are completed presses the player
+    /// actually made, still owed to the rules layer. Only held state, which
+    /// only means something while the device is there to report it, is lost.
+    pub fn clear_gamepad_state(&mut self, player: usize) {
+        self.clear_device_state(player, DeviceCategory::Gamepad);
+    }
+
+    /// Drop everything a player's keyboard was holding.
+    ///
+    /// Called when a pad takes the slot rather than when hardware goes away,
+    /// but for the same reason: the keyboard stops being read for this player,
+    /// so nothing will ever report those keys released.
+    pub fn clear_keyboard_state(&mut self, player: usize) {
+        self.clear_device_state(player, DeviceCategory::Keyboard);
+    }
+
+    fn clear_device_state(&mut self, player: usize, device: DeviceCategory) {
+        self.pressed
+            .retain(|(slot, input)| *slot != player || input.category() != device);
+        self.fixed_directions
+            .retain(|(slot, source, _)| *slot != player || source.category() != device);
+    }
+
+    /// Record a press edge of a fixed pause input; other inputs are ignored.
+    pub fn press_pause(&mut self, source: &PhysicalInput) {
+        if fixed_pause_inputs().contains(source) {
+            self.pause_pending = true;
+        }
+    }
+
+    /// Track a fixed pause input's held state, proposing a pause on the edge.
+    ///
+    /// The edge is derived here rather than read from Bevy's `just_pressed`,
+    /// because that flag is cleared in `PreUpdate` and would depend on the
+    /// device event landing in the same frame the capture system runs. Holding
+    /// the key still proposes exactly one pause.
+    pub fn update_pause_input(&mut self, source: &PhysicalInput, held: bool) {
+        if !fixed_pause_inputs().contains(source) {
+            return;
+        }
+        if held {
+            if self.pause_held.insert(source.clone()) {
+                self.pause_pending = true;
+            }
+        } else {
+            self.pause_held.remove(source);
+        }
+    }
+
+    /// Turn a pending pause edge into a request, or discard it.
+    ///
+    /// The edge is taken unconditionally: outside `Match` a pause input means
+    /// nothing, and keeping the edge would pause the next match the player
+    /// enters instead.
+    #[must_use]
+    pub fn take_pause_request(&mut self, state: AppState) -> Option<AppTransitionRequest> {
+        let pending = std::mem::take(&mut self.pause_pending);
+        (pending && state == AppState::Match).then_some(AppTransitionRequest {
+            target: AppState::Paused,
+            cause: AppTransitionCause::PauseRequested,
+        })
+    }
+
+    /// Sample raw actions. Callers pass the result through `PlayerActions::normalized`.
+    pub fn sample_fixed(&mut self) -> Vec<PlayerActions> {
+        let count = self.bindings.len().max(self.pending_edges.len());
+        let mut sampled = vec![PlayerActions::EMPTY; count];
+
+        // Several physical sources may report the same direction; inserting into
+        // the shared bit set merges them into a single logical action.
+        for (player, _source, direction) in &self.fixed_directions {
+            let Some(player_actions) = sampled.get_mut(*player) else {
+                continue;
+            };
+            if let Some(ContextAction::Game(action)) =
+                interpret_direction(*direction, InputContext::Gameplay)
+            {
+                player_actions.insert(action);
+            }
+        }
+
+        for (player, player_actions) in sampled.iter_mut().enumerate() {
+            if let Some(edges) = self.pending_edges.get_mut(player) {
+                *player_actions = *player_actions | *edges;
+                *edges = PlayerActions::EMPTY;
+            }
+        }
+
+        for (player, input) in &self.pressed {
+            if *player >= sampled.len() {
+                continue;
+            }
+            for action in self.bound_actions(*player, input) {
+                if !is_edge_action(action) {
+                    sampled[*player].insert(action);
+                }
+            }
+        }
+        sampled
+    }
+
+    fn bound_actions(&self, player: usize, input: &PhysicalInput) -> Vec<GameAction> {
+        self.bindings
+            .get(player)
+            .map(|bindings| bindings.actions_for(input).collect())
+            .unwrap_or_default()
+    }
+
+    fn ensure_player(&mut self, player: usize) {
+        if self.pending_edges.len() <= player {
+            self.pending_edges.resize(player + 1, PlayerActions::EMPTY);
+        }
+    }
+}
+
+const fn is_edge_action(action: GameAction) -> bool {
+    matches!(
+        action,
+        GameAction::HardDrop | GameAction::RotateClockwise | GameAction::RotateCounterClockwise
+    )
+}

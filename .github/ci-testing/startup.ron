@@ -1,0 +1,18 @@
+// Bounded startup run for integration-system/build-and-startup::TC-004.
+//
+// Read by Bevy's `bevy_ci_testing` plugin via the CI_TESTING_CONFIG
+// environment variable, and only reachable through the client's `ci_testing`
+// feature, which is never enabled for shipped builds.
+//
+// The frame budget is what bounds the run: the startup barrier resolves in well
+// under a second, and its own timeout releases it after 5s of real time even if
+// every read fails, so 600 frames leaves ample room without letting a hung
+// process sit in CI.
+(
+    setup: (
+        fixed_frame_time: Some(0.016666667),
+    ),
+    events: [
+        (600, AppExit),
+    ],
+)

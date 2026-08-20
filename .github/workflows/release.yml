@@ -1,0 +1,93 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+# Covers the two cases the pull-request gate cannot run:
+# integration-system/build-and-startup::TC-001 needs the release profile, and
+# integration-system/build-and-startup::TC-004 needs a real display.
+jobs:
+  # integration-system/build-and-startup::TC-001: the production client must
+  # compile and link with DefaultPlugins + the project root plugin.
+  build-linux:
+    name: build --release (linux-gnu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies (Bevy)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libxkbcommon-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: x86_64-unknown-linux-gnu
+
+      - name: cargo build --release (linux-gnu)
+        run: cargo build --locked --release --workspace --target x86_64-unknown-linux-gnu
+
+  # integration-system/build-and-startup::TC-004: the only check that exercises
+  # DefaultPlugins' runtime init, the window backend and the platform dynamic
+  # libraries. It needs a virtual display and a software Vulkan backend, which
+  # is why it lives here and not in the pull-request gate (docs/TDD.md 7.2).
+  startup-smoke:
+    name: bounded startup run (linux-gnu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies (Bevy)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libxkbcommon-dev
+
+      - name: Install a virtual display and a software Vulkan backend
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libxkbcommon-x11-0 libxcb-xfixes0-dev
+          sudo add-apt-repository ppa:kisak/turtle -y
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dri mesa-vulkan-drivers
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: x86_64-unknown-linux-gnu
+
+      # A clean exit alone would also pass for a build stuck in `Boot`, and a
+      # run whose assets all fell back exits just as cleanly, so the log has to
+      # show both that `MainMenu` was reached and that nothing was missing.
+      #
+      # BEVY_ASSET_ROOT is what makes the second one achievable: Bevy resolves
+      # the asset root from BEVY_ASSET_ROOT, then CARGO_MANIFEST_DIR, then the
+      # executable directory -- never the working directory -- so a bare
+      # `cargo run` looks under crates/client/ and misses every project asset.
+      - name: Run the client to MainMenu and exit
+        env:
+          CI_TESTING_CONFIG: .github/ci-testing/startup.ron
+          BEVY_ASSET_ROOT: ${{ github.workspace }}
+        run: |
+          set -o pipefail
+          xvfb-run cargo run --locked --features ci_testing \
+            --target x86_64-unknown-linux-gnu 2>&1 | tee startup.log
+          grep -q "startup-smoke: reached MainMenu" startup.log
+          if grep -q "Path not found" startup.log; then
+            echo "::error::the client ran on fallback data instead of assets/"
+            exit 1
+          fi

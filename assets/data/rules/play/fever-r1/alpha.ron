@@ -1,0 +1,37 @@
+// Alpha: balanced, normal-board leaning. 16 hands, 39 balls.
+(
+    schema_version: 1,
+    profile_id: ("fever-r1"),
+    character_id: ("alpha"),
+    drop_set: ([
+        (shape: I),
+        (shape: I),
+        (shape: L, vertical_pair_first: Some(true)),
+        (shape: I),
+        (shape: I),
+        (shape: ODual),
+        (shape: I),
+        (shape: J, vertical_pair_first: Some(false)),
+        (shape: I),
+        (shape: I),
+        (shape: OMono),
+        (shape: I),
+        (shape: L, vertical_pair_first: Some(true)),
+        (shape: I),
+        (shape: I),
+        (shape: I),
+    ]),
+    chain_power: (
+        normal: [4, 12, 24, 33, 50, 101, 170, 258, 348, 440, 554, 669, 783, 898, 999, 999, 999, 999, 999, 999, 999, 999, 999, 999],
+        fever: [4, 10, 18, 22, 30, 49, 82, 123, 165, 248, 291, 300, 358, 420, 462, 504, 546, 588, 630, 672, 714, 756, 798, 840],
+        // Provenance for the integer tables above. The tables are the runtime
+        // authority; CI regenerates from these and rejects a hand edit.
+        source: (
+            normal_anchor: 440,
+            normal_tilt_milli: 900,
+            normal_growth_milli: 260,
+            fever_anchor: 42,
+            fever_tilt_milli: 950,
+        ),
+    ),
+)

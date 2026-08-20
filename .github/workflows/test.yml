@@ -1,0 +1,57 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+# Runs the Component and Component Integration cases plus
+# integration-system/application-lifecycle::TC-008 and
+# integration-system/build-and-startup::TC-003 on Linux. The two cases that
+# need a release profile or a real display --
+# integration-system/build-and-startup::TC-001 and
+# integration-system/build-and-startup::TC-004 -- run in release.yml.
+# Triggering is limited to pull requests targeting `main` on purpose -- see
+# docs/TDD.md 7.2; development branches rely on the local checks in
+# docs/TDD.md 7.1.
+jobs:
+  test-linux:
+    name: fmt + test (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies (Bevy)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libxkbcommon-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-gnu
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --locked --workspace --all-targets
+
+      # game_core must stay buildable and testable without any platform runtime.
+      - name: cargo test -p game_core (crate isolation)
+        run: cargo test --locked -p game_core
+
+      - name: cargo test
+        run: cargo test --locked --workspace
+
+      - name: cargo build (linux-gnu)
+        run: cargo build --locked --workspace --target x86_64-unknown-linux-gnu

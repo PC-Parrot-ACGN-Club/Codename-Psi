@@ -7,7 +7,7 @@ rust-version.workspace = true
 description = "GGRS session, UDP transport, handshake, and disconnect handling"
 
 [dependencies]
-core = { workspace = true }
+game_core = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 ggrs = { workspace = true }

@@ -14,9 +14,12 @@ path = "src/main.rs"
 default = ["net"]
 # Enable LAN P2P support (R2). Keep optional so headless/CI builds can omit it.
 net = ["dep:net"]
+# Bounded startup verification: lets the real binary exit on a chosen frame via
+# CI_TESTING_CONFIG. Never enabled for shipped builds.
+ci_testing = ["bevy/bevy_ci_testing"]
 
 [dependencies]
-core = { workspace = true }
+game_core = { workspace = true }
 net = { workspace = true, optional = true }
 
 bevy = { workspace = true }
@@ -24,6 +27,14 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 ron = { workspace = true }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
+directories = { workspace = true }
+# Feature-only dependency; see the workspace manifest for why it is here.
+icu_provider = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# Used by the settings persistence test to assert the platform config root.
 directories = { workspace = true }
 
 [lints.rust]

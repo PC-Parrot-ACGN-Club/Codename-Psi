@@ -11,3 +11,4 @@
 | [presentation.md](presentation.md) | 表现与 UI |
 | [TDD.md](TDD.md) | 技术栈、crate 边界、确定性、CI |
 | [networking-library-research.md](networking-library-research.md) | R2 联机选型调研与推荐依据 |
+| [CONVENTIONS.md](CONVENTIONS.md) | `development/`、`test/` 下文档的写作规则 |

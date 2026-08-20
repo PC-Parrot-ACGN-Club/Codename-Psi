@@ -1,0 +1,50 @@
+// Client-side character presentation. Never enters the frozen match spec or
+// the determinism checksum. Gameplay data for the same ids lives under
+// data/rules/. See docs/development/design/character-presentation.md.
+(
+    schema_version: 1,
+    characters: [
+        (
+            id: ("alpha"),
+            primary_color: (r: 255, g: 64, b: 64),
+            secondary_color: (r: 96, g: 24, b: 24),
+            badge: (shape: Hexagon, stroke_width: 4, glyph: "A"),
+            poses: (
+                idle: (offset: 0, scale: 100),
+                spell: (offset: 24, scale: 106),
+                offset: (offset: 8, scale: 100),
+                damage: (offset: -20, scale: 95),
+                advantage: (offset: 16, scale: 104),
+            ),
+            audio: (
+                round_start: "voice.alpha.round_start",
+                clear: "voice.alpha.clear",
+                chain: "voice.alpha.chain",
+                fever_enter: "voice.alpha.fever_enter",
+                win: "voice.alpha.win",
+                lose: "voice.alpha.lose",
+            ),
+        ),
+        (
+            id: ("beta"),
+            primary_color: (r: 192, g: 64, b: 255),
+            secondary_color: (r: 72, g: 24, b: 96),
+            badge: (shape: Triangle, stroke_width: 4, glyph: "B"),
+            poses: (
+                idle: (offset: 0, scale: 100),
+                spell: (offset: 24, scale: 106),
+                offset: (offset: 8, scale: 100),
+                damage: (offset: -20, scale: 95),
+                advantage: (offset: 16, scale: 104),
+            ),
+            audio: (
+                round_start: "voice.beta.round_start",
+                clear: "voice.beta.clear",
+                chain: "voice.beta.chain",
+                fever_enter: "voice.beta.fever_enter",
+                win: "voice.beta.win",
+                lose: "voice.beta.lose",
+            ),
+        ),
+    ],
+)
